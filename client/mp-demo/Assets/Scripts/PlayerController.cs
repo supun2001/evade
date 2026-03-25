@@ -34,6 +34,10 @@ public class PlayerController : MonoBehaviour
     public float lookSenseV = 0.1f;
     public float lookLimitV = 89f;
 
+    [Header("Zoom Settings")]
+    [SerializeField] private float _zoomFieldOfView = 35f;
+    [SerializeField] private float _zoomSmoothSpeed = 10f;
+
     [Header("View Toggle")]
     [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.ThirdPerson;
     [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
@@ -56,6 +60,7 @@ public class PlayerController : MonoBehaviour
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
+    private float _defaultFieldOfView;
     private Vector3 _thirdPersonCameraLocalPosition;
     private Quaternion _thirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
@@ -76,6 +81,7 @@ public class PlayerController : MonoBehaviour
         _gameplayCameraTransform = _gameplayCamera != null ? _gameplayCamera.transform : null;
         _cinemachineBrain = _gameplayCamera != null ? _gameplayCamera.GetComponent<CinemachineBrain>() : null;
         _defaultNearClipPlane = _gameplayCamera != null ? _gameplayCamera.nearClipPlane : 0.3f;
+        _defaultFieldOfView = _gameplayCamera != null ? _gameplayCamera.fieldOfView : 60f;
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
     }
@@ -94,6 +100,7 @@ public class PlayerController : MonoBehaviour
 
         HandleCursorLock();
         HandleViewToggle();
+        UpdateZoom();
         HandleVerticalMovement();
         HandleHorizontalMovement();
 
@@ -374,6 +381,24 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void UpdateZoom()
+    {
+        float targetFieldOfView = IsZooming() ? _zoomFieldOfView : _defaultFieldOfView;
+        float zoomLerp = 1f - Mathf.Exp(-_zoomSmoothSpeed * Time.deltaTime);
+
+        if (_gameplayCamera != null)
+        {
+            _gameplayCamera.fieldOfView = Mathf.Lerp(_gameplayCamera.fieldOfView, targetFieldOfView, zoomLerp);
+        }
+
+        if (_cinemachineCamera != null)
+        {
+            LensSettings lens = _cinemachineCamera.Lens;
+            lens.FieldOfView = Mathf.Lerp(lens.FieldOfView, targetFieldOfView, zoomLerp);
+            _cinemachineCamera.Lens = lens;
+        }
+    }
+
     private void SetLocalRenderMode(bool firstPerson)
     {
         if (_localRenderers == null)
@@ -466,5 +491,10 @@ public class PlayerController : MonoBehaviour
     private bool IsSprinting()
     {
         return Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+    }
+
+    private bool IsZooming()
+    {
+        return Mouse.current != null && Mouse.current.rightButton.isPressed;
     }
 }
