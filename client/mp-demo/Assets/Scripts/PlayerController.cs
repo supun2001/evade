@@ -5,6 +5,7 @@ using UnityEngine.Rendering;
 using Unity.Cinemachine;
 using PlayerCharacterController;
 using System;
+using System.Collections;
 
 [DefaultExecutionOrder(-1)]
 public class PlayerController : MonoBehaviour
@@ -37,6 +38,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.ThirdPerson;
     [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
     [SerializeField] private float _firstPersonNearClipPlane = 0.01f;
+    [SerializeField] private float _cameraTransitionDuration = 0.3f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
@@ -58,6 +60,7 @@ public class PlayerController : MonoBehaviour
     private Quaternion _thirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
     private ShadowCastingMode[] _defaultShadowCastingModes;
+    private Coroutine _cameraTransitionCoroutine;
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     #endregion
@@ -197,34 +200,40 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (_cameraTransitionCoroutine != null)
+        {
+            StopCoroutine(_cameraTransitionCoroutine);
+            _cameraTransitionCoroutine = null;
+        }
+
         _currentViewMode = newViewMode;
 
+        if (force || _gameplayCameraTransform == null)
+        {
+            ApplyCameraViewInstant(newViewMode);
+            return;
+        }
+
+        _cameraTransitionCoroutine = StartCoroutine(TransitionCameraView(newViewMode));
+    }
+
+    private void ApplyCameraViewInstant(CameraViewMode newViewMode)
+    {
         bool firstPerson = newViewMode == CameraViewMode.FirstPerson;
 
-        if (_gameplayCameraTransform != null)
+        if (firstPerson)
         {
-            _gameplayCameraTransform.localPosition = firstPerson
-                ? _firstPersonCameraLocalPosition
-                : _thirdPersonCameraLocalPosition;
-            _gameplayCameraTransform.localRotation = firstPerson
-                ? Quaternion.identity
-                : _thirdPersonCameraLocalRotation;
-        }
+            SetThirdPersonCameraActive(false);
 
-        if (_cinemachineCamera != null)
-        {
-            _cinemachineCamera.enabled = !firstPerson;
-            _cinemachineCamera.PreviousStateIsValid = false;
+            if (_gameplayCameraTransform != null)
+            {
+                _gameplayCameraTransform.localPosition = _firstPersonCameraLocalPosition;
+                _gameplayCameraTransform.localRotation = Quaternion.identity;
+            }
         }
-
-        if (_thirdPersonFollow != null)
+        else
         {
-            _thirdPersonFollow.enabled = !firstPerson;
-        }
-
-        if (_cinemachineBrain != null)
-        {
-            _cinemachineBrain.enabled = !firstPerson;
+            SetThirdPersonCameraActive(true);
         }
 
         if (_gameplayCamera != null)
@@ -233,6 +242,136 @@ public class PlayerController : MonoBehaviour
         }
 
         SetLocalRenderMode(firstPerson);
+    }
+
+    private IEnumerator TransitionCameraView(CameraViewMode newViewMode)
+    {
+        bool firstPerson = newViewMode == CameraViewMode.FirstPerson;
+
+        Transform parentTransform = _gameplayCameraTransform.parent;
+        Vector3 currentWorldPosition = _gameplayCameraTransform.position;
+        Quaternion currentWorldRotation = _gameplayCameraTransform.rotation;
+
+        SetThirdPersonCameraActive(false);
+
+        if (parentTransform != null)
+        {
+            _gameplayCameraTransform.localPosition = parentTransform.InverseTransformPoint(currentWorldPosition);
+            _gameplayCameraTransform.localRotation = Quaternion.Inverse(parentTransform.rotation) * currentWorldRotation;
+        }
+        else
+        {
+            _gameplayCameraTransform.position = currentWorldPosition;
+            _gameplayCameraTransform.rotation = currentWorldRotation;
+        }
+
+        Vector3 startLocalPosition = _gameplayCameraTransform.localPosition;
+        Quaternion startLocalRotation = _gameplayCameraTransform.localRotation;
+
+        Vector3 targetLocalPosition;
+        Quaternion targetLocalRotation;
+
+        if (firstPerson)
+        {
+            targetLocalPosition = _firstPersonCameraLocalPosition;
+            targetLocalRotation = Quaternion.identity;
+
+            if (_gameplayCamera != null)
+            {
+                _gameplayCamera.nearClipPlane = _firstPersonNearClipPlane;
+            }
+
+            SetLocalRenderMode(true);
+        }
+        else
+        {
+            if (_gameplayCamera != null)
+            {
+                _gameplayCamera.nearClipPlane = _defaultNearClipPlane;
+            }
+
+            SetLocalRenderMode(false);
+            GetThirdPersonTargetLocalPose(out targetLocalPosition, out targetLocalRotation);
+        }
+
+        float duration = Mathf.Max(0.01f, _cameraTransitionDuration);
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float easedT = t * t * (3f - 2f * t);
+
+            _gameplayCameraTransform.localPosition = Vector3.Lerp(startLocalPosition, targetLocalPosition, easedT);
+            _gameplayCameraTransform.localRotation = Quaternion.Slerp(startLocalRotation, targetLocalRotation, easedT);
+
+            yield return null;
+        }
+
+        _gameplayCameraTransform.localPosition = targetLocalPosition;
+        _gameplayCameraTransform.localRotation = targetLocalRotation;
+
+        if (!firstPerson)
+        {
+            SetThirdPersonCameraActive(true);
+        }
+
+        _cameraTransitionCoroutine = null;
+    }
+
+    private void GetThirdPersonTargetLocalPose(out Vector3 targetLocalPosition, out Quaternion targetLocalRotation)
+    {
+        targetLocalPosition = _thirdPersonCameraLocalPosition;
+        targetLocalRotation = _thirdPersonCameraLocalRotation;
+
+        if (_cinemachineCamera == null || _gameplayCameraTransform == null)
+        {
+            return;
+        }
+
+        if (_thirdPersonFollow != null)
+        {
+            _thirdPersonFollow.enabled = true;
+        }
+
+        _cinemachineCamera.enabled = true;
+        _cinemachineCamera.PreviousStateIsValid = false;
+        _cinemachineCamera.InternalUpdateCameraState(Vector3.up, -1f);
+
+        Vector3 targetWorldPosition = _cinemachineCamera.State.GetFinalPosition();
+        Quaternion targetWorldRotation = _cinemachineCamera.State.GetFinalOrientation();
+        Transform parentTransform = _gameplayCameraTransform.parent;
+
+        if (parentTransform != null)
+        {
+            targetLocalPosition = parentTransform.InverseTransformPoint(targetWorldPosition);
+            targetLocalRotation = Quaternion.Inverse(parentTransform.rotation) * targetWorldRotation;
+        }
+        else
+        {
+            targetLocalPosition = targetWorldPosition;
+            targetLocalRotation = targetWorldRotation;
+        }
+    }
+
+    private void SetThirdPersonCameraActive(bool isActive)
+    {
+        if (_thirdPersonFollow != null)
+        {
+            _thirdPersonFollow.enabled = isActive;
+        }
+
+        if (_cinemachineCamera != null)
+        {
+            _cinemachineCamera.enabled = isActive;
+            _cinemachineCamera.PreviousStateIsValid = false;
+        }
+
+        if (_cinemachineBrain != null)
+        {
+            _cinemachineBrain.enabled = isActive;
+        }
     }
 
     private void SetLocalRenderMode(bool firstPerson)
