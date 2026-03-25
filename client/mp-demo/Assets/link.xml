@@ -1,0 +1,7 @@
+<linker>
+    <assembly fullname="Colyseus.SDK" preserve="all"/>
+    <assembly fullname="UnityEngine" preserve="all"/>
+    <assembly fullname="System" preserve="all"/>
+    <assembly fullname="mscorlib" preserve="all"/>
+    <assembly fullname="Assembly-CSharp" preserve="all"/>
+</linker>
