@@ -27,7 +27,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.08973255, y: 0, z: 0, w: 0.9959659}
+  m_LocalRotation: {x: 0.08973255, y: -0, z: -0, w: 0.9959659}
   m_LocalPosition: {x: 0, y: 0.70000005, z: -6}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -185,13 +185,25 @@ MonoBehaviour:
   _characterController: {fileID: 4370817863378094090}
   _playerCamera: {fileID: 7423877271156878333}
   runAcceleration: 50
-  runSpeed: 5
+  runSpeed: 10
+  sprintSpeed: 15
   drag: 30
   gravity: 25
   jumpForce: 1
   lookSenseH: 0.1
   lookSenseV: 0.1
   lookLimitV: 70
+  _firstPersonLookUpLimit: 80
+  _firstPersonLookDownLimit: 25
+  _zoomFieldOfView: 35
+  _zoomSmoothSpeed: 10
+  _startingViewMode: 1
+  _firstPersonCameraLocalPosition: {x: 0, y: -0.6, z: 0.2}
+  _firstPersonNearClipPlane: 0.01
+  _cameraTransitionDuration: 0.3
+  _firstPersonHiddenBoneNames:
+  - head
+  - Head
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -204,6 +216,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8dac69367aa084a918ef91a376b31ae8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerLocomotionInput
+  InputEnabled: 1
 --- !u!143 &4370817863378094090
 CharacterController:
   m_ObjectHideFlags: 0
@@ -422,7 +435,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.08973255, y: 0, z: 0, w: 0.9959659}
+  m_LocalRotation: {x: 0.08973255, y: -0, z: -0, w: 0.9959659}
   m_LocalPosition: {x: 0, y: 0.70000005, z: -6}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0

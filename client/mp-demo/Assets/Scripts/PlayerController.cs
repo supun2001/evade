@@ -33,6 +33,8 @@ public class PlayerController : MonoBehaviour
     public float lookSenseH = 0.1f;
     public float lookSenseV = 0.1f;
     public float lookLimitV = 89f;
+    [SerializeField] private float _firstPersonLookUpLimit = 80f;
+    [SerializeField] private float _firstPersonLookDownLimit = 25f;
 
     [Header("Zoom Settings")]
     [SerializeField] private float _zoomFieldOfView = 35f;
@@ -43,6 +45,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
     [SerializeField] private float _firstPersonNearClipPlane = 0.01f;
     [SerializeField] private float _cameraTransitionDuration = 0.3f;
+    [SerializeField] private string[] _firstPersonHiddenBoneNames = { "head", "torso" };
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
@@ -65,7 +68,12 @@ public class PlayerController : MonoBehaviour
     private Quaternion _thirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
     private ShadowCastingMode[] _defaultShadowCastingModes;
+    private Renderer[] _firstPersonHiddenRenderers;
+    private bool[] _defaultRendererEnabledStates;
+    private bool[] _defaultHiddenRendererEnabledStates;
     private Coroutine _cameraTransitionCoroutine;
+    private const float HIDE_HEAD_PROGRESS = 0.85f;
+    private const float SHOW_HEAD_PROGRESS = 0.2f;
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     #endregion
@@ -152,9 +160,11 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate() {
         Vector2 lookInput = _playerLocomotionInput.LookInput;
+        float minPitch = _currentViewMode == CameraViewMode.FirstPerson ? -_firstPersonLookUpLimit : -lookLimitV;
+        float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
         
         _cameraRotation.x += lookSenseH * lookInput.x;
-        _cameraRotation.y = Mathf.Clamp(_cameraRotation.y + lookSenseV * lookInput.y, -lookLimitV, lookLimitV);
+        _cameraRotation.y = Mathf.Clamp(_cameraRotation.y + lookSenseV * lookInput.y, minPitch, maxPitch);
         
         _playerRotationY += lookSenseH * lookInput.x;
         _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
@@ -179,11 +189,64 @@ public class PlayerController : MonoBehaviour
     {
         _localRenderers = GetComponentsInChildren<Renderer>(true);
         _defaultShadowCastingModes = new ShadowCastingMode[_localRenderers.Length];
+        _defaultRendererEnabledStates = new bool[_localRenderers.Length];
 
         for (int i = 0; i < _localRenderers.Length; i++)
         {
             _defaultShadowCastingModes[i] = _localRenderers[i].shadowCastingMode;
+            _defaultRendererEnabledStates[i] = _localRenderers[i].enabled;
         }
+
+        CacheFirstPersonHiddenRenderers();
+    }
+
+    private void CacheFirstPersonHiddenRenderers()
+    {
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+        System.Collections.Generic.HashSet<Renderer> hiddenRenderers = new();
+
+        foreach (Transform child in transforms)
+        {
+            if (!ShouldHideInFirstPerson(child.name))
+            {
+                continue;
+            }
+
+            foreach (Renderer renderer in child.GetComponents<Renderer>())
+            {
+                if (renderer != null)
+                {
+                    hiddenRenderers.Add(renderer);
+                }
+            }
+        }
+
+        _firstPersonHiddenRenderers = new Renderer[hiddenRenderers.Count];
+        hiddenRenderers.CopyTo(_firstPersonHiddenRenderers);
+        _defaultHiddenRendererEnabledStates = new bool[_firstPersonHiddenRenderers.Length];
+
+        for (int i = 0; i < _firstPersonHiddenRenderers.Length; i++)
+        {
+            _defaultHiddenRendererEnabledStates[i] = _firstPersonHiddenRenderers[i] != null && _firstPersonHiddenRenderers[i].enabled;
+        }
+    }
+
+    private bool ShouldHideInFirstPerson(string transformName)
+    {
+        if (_firstPersonHiddenBoneNames == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < _firstPersonHiddenBoneNames.Length; i++)
+        {
+            if (string.Equals(transformName, _firstPersonHiddenBoneNames[i], StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Camera FindGameplayCamera()
@@ -288,7 +351,7 @@ public class PlayerController : MonoBehaviour
                 _gameplayCamera.nearClipPlane = _firstPersonNearClipPlane;
             }
 
-            SetLocalRenderMode(true);
+            SetLocalRenderMode(false);
         }
         else
         {
@@ -297,12 +360,13 @@ public class PlayerController : MonoBehaviour
                 _gameplayCamera.nearClipPlane = _defaultNearClipPlane;
             }
 
-            SetLocalRenderMode(false);
+            SetLocalRenderMode(true);
             GetThirdPersonTargetLocalPose(out targetLocalPosition, out targetLocalRotation);
         }
 
         float duration = Mathf.Max(0.01f, _cameraTransitionDuration);
         float elapsed = 0f;
+        bool headVisibilitySwitched = false;
 
         while (elapsed < duration)
         {
@@ -313,11 +377,26 @@ public class PlayerController : MonoBehaviour
             _gameplayCameraTransform.localPosition = Vector3.Lerp(startLocalPosition, targetLocalPosition, easedT);
             _gameplayCameraTransform.localRotation = Quaternion.Slerp(startLocalRotation, targetLocalRotation, easedT);
 
+            if (!headVisibilitySwitched)
+            {
+                if (firstPerson && t >= HIDE_HEAD_PROGRESS)
+                {
+                    SetFirstPersonHeadHidden(true);
+                    headVisibilitySwitched = true;
+                }
+                else if (!firstPerson && t >= SHOW_HEAD_PROGRESS)
+                {
+                    SetFirstPersonHeadHidden(false);
+                    headVisibilitySwitched = true;
+                }
+            }
+
             yield return null;
         }
 
         _gameplayCameraTransform.localPosition = targetLocalPosition;
         _gameplayCameraTransform.localRotation = targetLocalRotation;
+        SetFirstPersonHeadHidden(firstPerson);
 
         if (!firstPerson)
         {
@@ -414,9 +493,29 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            renderer.shadowCastingMode = firstPerson
-                ? ShadowCastingMode.ShadowsOnly
-                : _defaultShadowCastingModes[i];
+            renderer.shadowCastingMode = _defaultShadowCastingModes[i];
+            renderer.enabled = _defaultRendererEnabledStates[i];
+        }
+
+        SetFirstPersonHeadHidden(firstPerson);
+    }
+
+    private void SetFirstPersonHeadHidden(bool hidden)
+    {
+        if (_firstPersonHiddenRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _firstPersonHiddenRenderers.Length; i++)
+        {
+            Renderer renderer = _firstPersonHiddenRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.enabled = hidden ? false : _defaultHiddenRendererEnabledStates[i];
         }
     }
     #endregion
