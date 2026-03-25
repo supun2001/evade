@@ -184,11 +184,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerController
   _characterController: {fileID: 4370817863378094090}
   _playerCamera: {fileID: 7423877271156878333}
-  runAcceleration: 50
-  runSpeed: 10
-  sprintSpeed: 15
-  drag: 30
-  gravity: 25
+  runAcceleration: 70
+  runSpeed: 18
+  sprintSpeed: 34
+  drag: 55
+  gravity: 20
   jumpForce: 1
   lookSenseH: 0.1
   lookSenseV: 0.1
@@ -197,6 +197,16 @@ MonoBehaviour:
   _firstPersonLookDownLimit: 25
   _zoomFieldOfView: 35
   _zoomSmoothSpeed: 10
+  _leftArmBoneName: arm-left
+  _rightArmBoneName: arm-right
+  _leftArmSprintRotation: {x: 36, y: -34, z: 32}
+  _rightArmSprintRotation: {x: 36, y: 34, z: -32}
+  _sprintArmBlendSpeed: 10
+  _sprintFovBonus: 8
+  _sprintFovBlendSpeed: 8
+  _sprintBobAmplitude: 0.06
+  _sprintBobFrequency: 9
+  _sprintBobBlendSpeed: 10
   _startingViewMode: 1
   _firstPersonCameraLocalPosition: {x: 0, y: -0.6, z: 0.2}
   _firstPersonNearClipPlane: 0.01
@@ -435,7 +445,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.08973255, y: -0, z: -0, w: 0.9959659}
+  m_LocalRotation: {x: 0.08973255, y: 0, z: 0, w: 0.9959659}
   m_LocalPosition: {x: 0, y: 0.70000005, z: -6}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0

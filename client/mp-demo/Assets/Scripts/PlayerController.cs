@@ -40,6 +40,20 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _zoomFieldOfView = 35f;
     [SerializeField] private float _zoomSmoothSpeed = 10f;
 
+    [Header("Sprint Arms")]
+    [SerializeField] private string _leftArmBoneName = "arm-left";
+    [SerializeField] private string _rightArmBoneName = "arm-right";
+    [SerializeField] private Vector3 _leftArmSprintRotation = new Vector3(18f, -12f, 16f);
+    [SerializeField] private Vector3 _rightArmSprintRotation = new Vector3(18f, 12f, -16f);
+    [SerializeField] private float _sprintArmBlendSpeed = 10f;
+
+    [Header("Sprint Camera Feel")]
+    [SerializeField] private float _sprintFovBonus = 8f;
+    [SerializeField] private float _sprintFovBlendSpeed = 8f;
+    [SerializeField] private float _sprintBobAmplitude = 0.06f;
+    [SerializeField] private float _sprintBobFrequency = 9f;
+    [SerializeField] private float _sprintBobBlendSpeed = 10f;
+
     [Header("View Toggle")]
     [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.ThirdPerson;
     [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
@@ -64,6 +78,10 @@ public class PlayerController : MonoBehaviour
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
     private float _defaultFieldOfView;
+    private float _sprintArmWeight;
+    private float _sprintFovWeight;
+    private float _sprintBobWeight;
+    private float _sprintBobTime;
     private Vector3 _thirdPersonCameraLocalPosition;
     private Quaternion _thirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
@@ -71,6 +89,10 @@ public class PlayerController : MonoBehaviour
     private Renderer[] _firstPersonHiddenRenderers;
     private bool[] _defaultRendererEnabledStates;
     private bool[] _defaultHiddenRendererEnabledStates;
+    private Transform _leftArmTransform;
+    private Transform _rightArmTransform;
+    private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
+    private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Coroutine _cameraTransitionCoroutine;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
@@ -92,6 +114,7 @@ public class PlayerController : MonoBehaviour
         _defaultFieldOfView = _gameplayCamera != null ? _gameplayCamera.fieldOfView : 60f;
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
+        CacheArmTransforms();
     }
     
     private void Start() {
@@ -170,6 +193,8 @@ public class PlayerController : MonoBehaviour
         _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
 
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
+        UpdateSprintCameraBob();
+        UpdateSprintArmPose();
     }
     #endregion
 
@@ -247,6 +272,30 @@ public class PlayerController : MonoBehaviour
         }
 
         return false;
+    }
+
+    private void CacheArmTransforms()
+    {
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+
+        foreach (Transform child in transforms)
+        {
+            if (_leftArmTransform == null && string.Equals(child.name, _leftArmBoneName, StringComparison.OrdinalIgnoreCase))
+            {
+                _leftArmTransform = child;
+            }
+
+            if (_rightArmTransform == null && string.Equals(child.name, _rightArmBoneName, StringComparison.OrdinalIgnoreCase))
+            {
+                _rightArmTransform = child;
+            }
+
+            if (_leftArmTransform != null && _rightArmTransform != null)
+            {
+                break;
+            }
+        }
+
     }
 
     private Camera FindGameplayCamera()
@@ -462,7 +511,17 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateZoom()
     {
-        float targetFieldOfView = IsZooming() ? _zoomFieldOfView : _defaultFieldOfView;
+        bool zooming = IsZooming();
+        bool sprinting = IsSprinting();
+
+        float sprintTargetWeight = !zooming && sprinting ? 1f : 0f;
+        float sprintBlend = 1f - Mathf.Exp(-_sprintFovBlendSpeed * Time.deltaTime);
+        _sprintFovWeight = Mathf.Lerp(_sprintFovWeight, sprintTargetWeight, sprintBlend);
+
+        float targetFieldOfView = zooming
+            ? _zoomFieldOfView
+            : _defaultFieldOfView + _sprintFovBonus * _sprintFovWeight;
+
         float zoomLerp = 1f - Mathf.Exp(-_zoomSmoothSpeed * Time.deltaTime);
 
         if (_gameplayCamera != null)
@@ -475,6 +534,68 @@ public class PlayerController : MonoBehaviour
             LensSettings lens = _cinemachineCamera.Lens;
             lens.FieldOfView = Mathf.Lerp(lens.FieldOfView, targetFieldOfView, zoomLerp);
             _cinemachineCamera.Lens = lens;
+        }
+    }
+
+    private void UpdateSprintCameraBob()
+    {
+        if (_gameplayCameraTransform == null || _cameraTransitionCoroutine != null)
+        {
+            return;
+        }
+
+        bool sprintingInFirstPerson =
+            _currentViewMode == CameraViewMode.FirstPerson
+            && IsSprinting()
+            && _horizontalVelocity.sqrMagnitude > 0.01f;
+
+        float bobTargetWeight = sprintingInFirstPerson ? 1f : 0f;
+        float blend = 1f - Mathf.Exp(-_sprintBobBlendSpeed * Time.deltaTime);
+        _sprintBobWeight = Mathf.Lerp(_sprintBobWeight, bobTargetWeight, blend);
+
+        if (_sprintBobWeight > 0.001f)
+        {
+            _sprintBobTime += Time.deltaTime * _sprintBobFrequency;
+        }
+        else
+        {
+            _sprintBobTime = 0f;
+        }
+
+        if (_currentViewMode != CameraViewMode.FirstPerson)
+        {
+            return;
+        }
+
+        float bobOffsetY = Mathf.Sin(_sprintBobTime) * _sprintBobAmplitude * _sprintBobWeight;
+        Vector3 bobbedPosition = _firstPersonCameraLocalPosition + new Vector3(0f, bobOffsetY, 0f);
+        _gameplayCameraTransform.localPosition = bobbedPosition;
+    }
+
+    private void UpdateSprintArmPose()
+    {
+        float targetWeight =
+            _currentViewMode == CameraViewMode.FirstPerson && IsSprinting()
+                ? 1f
+                : 0f;
+
+        float blend = 1f - Mathf.Exp(-_sprintArmBlendSpeed * Time.deltaTime);
+        _sprintArmWeight = Mathf.Lerp(_sprintArmWeight, targetWeight, blend);
+
+        if (_leftArmTransform != null)
+        {
+            Quaternion leftBaseRotation = _leftArmTransform.localRotation * Quaternion.Inverse(_lastLeftArmSprintOffset);
+            Quaternion leftOffset = Quaternion.Euler(_leftArmSprintRotation * _sprintArmWeight);
+            _leftArmTransform.localRotation = leftBaseRotation * leftOffset;
+            _lastLeftArmSprintOffset = leftOffset;
+        }
+
+        if (_rightArmTransform != null)
+        {
+            Quaternion rightBaseRotation = _rightArmTransform.localRotation * Quaternion.Inverse(_lastRightArmSprintOffset);
+            Quaternion rightOffset = Quaternion.Euler(_rightArmSprintRotation * _sprintArmWeight);
+            _rightArmTransform.localRotation = rightBaseRotation * rightOffset;
+            _lastRightArmSprintOffset = rightOffset;
         }
     }
 
@@ -524,11 +645,7 @@ public class PlayerController : MonoBehaviour
     private void HandleHorizontalMovement() {
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
         float targetSpeed = IsSprinting() ? sprintSpeed : runSpeed;
-        
-        if (movementInput.sqrMagnitude < 0.001f && _horizontalVelocity.sqrMagnitude < 0.001f) {
-            _horizontalVelocity = Vector3.zero;
-            return;
-        }
+        float deltaTime = Time.deltaTime;
         
         Vector3 cameraForward = _transform.forward;
         Vector3 cameraRight = _transform.right;
@@ -537,25 +654,40 @@ public class PlayerController : MonoBehaviour
         Vector3 cameraRightXZ = new Vector3(cameraRight.x, 0f, cameraRight.z).normalized;
         
         Vector3 movementDirection = cameraForwardXZ * movementInput.y + cameraRightXZ * movementInput.x;
+        float inputMagnitude = Mathf.Clamp01(movementInput.magnitude);
 
-        // Apply acceleration
-        float deltaTime = Time.deltaTime;
-        Vector3 movementDelta = movementDirection * runAcceleration * deltaTime;
-        _horizontalVelocity += movementDelta;
+        if (movementDirection.sqrMagnitude < 0.001f)
+        {
+            _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, drag * deltaTime);
+            _horizontalVelocity.y = 0f;
 
-        // Apply drag
-        float dragThreshold = drag * deltaTime;
-        float velocitySqrMag = _horizontalVelocity.sqrMagnitude;
-        
-        if (velocitySqrMag > dragThreshold * dragThreshold) {
-            Vector3 currentDrag = _horizontalVelocity.normalized * dragThreshold;
-            _horizontalVelocity -= currentDrag;
-        } else {
+            if (_horizontalVelocity.sqrMagnitude < 0.0001f)
+            {
+                _horizontalVelocity = Vector3.zero;
+            }
+
+            return;
+        }
+
+        Vector3 desiredVelocity = movementDirection.normalized * (targetSpeed * inputMagnitude);
+        float turnDot = _horizontalVelocity.sqrMagnitude > 0.001f
+            ? Vector3.Dot(_horizontalVelocity.normalized, desiredVelocity.normalized)
+            : 1f;
+        float turnBoost = turnDot < 0.5f ? 1.75f : 1f;
+        float accelerationStep = runAcceleration * turnBoost * deltaTime;
+
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, accelerationStep);
+
+        if (_horizontalVelocity.sqrMagnitude > targetSpeed * targetSpeed)
+        {
+            _horizontalVelocity = _horizontalVelocity.normalized * targetSpeed;
+        }
+
+        if (inputMagnitude <= 0.001f)
+        {
             _horizontalVelocity = Vector3.zero;
         }
-        
-        _horizontalVelocity = Vector3.ClampMagnitude(_horizontalVelocity, targetSpeed);
-        
+
         _horizontalVelocity.y = 0f;
     }
     #endregion
