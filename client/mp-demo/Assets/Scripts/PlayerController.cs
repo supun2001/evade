@@ -1,12 +1,20 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering;
+using Unity.Cinemachine;
 using PlayerCharacterController;
 using System;
 
 [DefaultExecutionOrder(-1)]
 public class PlayerController : MonoBehaviour
 {
+    private enum CameraViewMode
+    {
+        FirstPerson,
+        ThirdPerson
+    }
+
     #region Class Variables
     [Header("Components")]
     [SerializeField] private CharacterController _characterController;
@@ -24,16 +32,32 @@ public class PlayerController : MonoBehaviour
     public float lookSenseV = 0.1f;
     public float lookLimitV = 89f;
 
+    [Header("View Toggle")]
+    [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.ThirdPerson;
+    [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
+    [SerializeField] private float _firstPersonNearClipPlane = 0.01f;
+
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
     private Transform _cameraTransform;
+    private Transform _gameplayCameraTransform;
+    private Camera _gameplayCamera;
+    private CinemachineBrain _cinemachineBrain;
+    private CinemachineCamera _cinemachineCamera;
+    private CinemachineThirdPersonFollow _thirdPersonFollow;
     
     private Vector2 _cameraRotation = Vector2.zero;
     private float _playerRotationY = 0f;
     private float _verticalVelocity = 0f;
     private Vector3 _horizontalVelocity = Vector3.zero;
-    
-    private float _dragSqr;
+
+    private CameraViewMode _currentViewMode;
+    private float _defaultNearClipPlane;
+    private Vector3 _thirdPersonCameraLocalPosition;
+    private Quaternion _thirdPersonCameraLocalRotation;
+    private Renderer[] _localRenderers;
+    private ShadowCastingMode[] _defaultShadowCastingModes;
+
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     #endregion
 
@@ -42,13 +66,21 @@ public class PlayerController : MonoBehaviour
         _playerLocomotionInput = GetComponent<PlayerLocomotionInput>();
         _transform = transform;
         _cameraTransform = _playerCamera.transform;
+        _thirdPersonFollow = GetComponentInChildren<CinemachineThirdPersonFollow>(true);
+        _cinemachineCamera = GetComponentInChildren<CinemachineCamera>(true);
+        _gameplayCamera = FindGameplayCamera();
+        _gameplayCameraTransform = _gameplayCamera != null ? _gameplayCamera.transform : null;
+        _cinemachineBrain = _gameplayCamera != null ? _gameplayCamera.GetComponent<CinemachineBrain>() : null;
+        _defaultNearClipPlane = _gameplayCamera != null ? _gameplayCamera.nearClipPlane : 0.3f;
+        CacheThirdPersonCameraSettings();
+        CacheLocalRenderers();
     }
     
     private void Start() {
         // Cursor.lockState = CursorLockMode.Locked;
         // Cursor.visible = false;
-        
-        _dragSqr = drag * drag;
+
+        SetCameraView(_startingViewMode, true);
     }
     #endregion
 
@@ -57,6 +89,7 @@ public class PlayerController : MonoBehaviour
         if (!_playerLocomotionInput.InputEnabled) return;
 
         HandleCursorLock();
+        HandleViewToggle();
         HandleVerticalMovement();
         HandleHorizontalMovement();
 
@@ -91,17 +124,135 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void HandleViewToggle()
+    {
+        if (!_playerLocomotionInput.InputEnabled) return;
+
+        if (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
+        {
+            CameraViewMode nextView =
+                _currentViewMode == CameraViewMode.FirstPerson
+                    ? CameraViewMode.ThirdPerson
+                    : CameraViewMode.FirstPerson;
+
+            SetCameraView(nextView);
+        }
+    }
+
     private void LateUpdate() {
         Vector2 lookInput = _playerLocomotionInput.LookInput;
         
-        // Update camera rotation
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y + lookSenseV * lookInput.y, -lookLimitV, lookLimitV);
         
         _playerRotationY += lookSenseH * lookInput.x;
         _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
 
-        _cameraTransform.rotation = Quaternion.Euler(_cameraRotation.y, _cameraRotation.x, 0f);
+        _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
+    }
+    #endregion
+
+    #region Camera View
+    private void CacheThirdPersonCameraSettings()
+    {
+        if (_gameplayCameraTransform == null)
+        {
+            return;
+        }
+
+        _thirdPersonCameraLocalPosition = _gameplayCameraTransform.localPosition;
+        _thirdPersonCameraLocalRotation = _gameplayCameraTransform.localRotation;
+    }
+
+    private void CacheLocalRenderers()
+    {
+        _localRenderers = GetComponentsInChildren<Renderer>(true);
+        _defaultShadowCastingModes = new ShadowCastingMode[_localRenderers.Length];
+
+        for (int i = 0; i < _localRenderers.Length; i++)
+        {
+            _defaultShadowCastingModes[i] = _localRenderers[i].shadowCastingMode;
+        }
+    }
+
+    private Camera FindGameplayCamera()
+    {
+        Camera[] cameras = GetComponentsInChildren<Camera>(true);
+        foreach (Camera childCamera in cameras)
+        {
+            if (childCamera != _playerCamera)
+            {
+                return childCamera;
+            }
+        }
+
+        return _playerCamera;
+    }
+
+    private void SetCameraView(CameraViewMode newViewMode, bool force = false)
+    {
+        if (!force && _currentViewMode == newViewMode)
+        {
+            return;
+        }
+
+        _currentViewMode = newViewMode;
+
+        bool firstPerson = newViewMode == CameraViewMode.FirstPerson;
+
+        if (_gameplayCameraTransform != null)
+        {
+            _gameplayCameraTransform.localPosition = firstPerson
+                ? _firstPersonCameraLocalPosition
+                : _thirdPersonCameraLocalPosition;
+            _gameplayCameraTransform.localRotation = firstPerson
+                ? Quaternion.identity
+                : _thirdPersonCameraLocalRotation;
+        }
+
+        if (_cinemachineCamera != null)
+        {
+            _cinemachineCamera.enabled = !firstPerson;
+            _cinemachineCamera.PreviousStateIsValid = false;
+        }
+
+        if (_thirdPersonFollow != null)
+        {
+            _thirdPersonFollow.enabled = !firstPerson;
+        }
+
+        if (_cinemachineBrain != null)
+        {
+            _cinemachineBrain.enabled = !firstPerson;
+        }
+
+        if (_gameplayCamera != null)
+        {
+            _gameplayCamera.nearClipPlane = firstPerson ? _firstPersonNearClipPlane : _defaultNearClipPlane;
+        }
+
+        SetLocalRenderMode(firstPerson);
+    }
+
+    private void SetLocalRenderMode(bool firstPerson)
+    {
+        if (_localRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _localRenderers.Length; i++)
+        {
+            Renderer renderer = _localRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.shadowCastingMode = firstPerson
+                ? ShadowCastingMode.ShadowsOnly
+                : _defaultShadowCastingModes[i];
+        }
     }
     #endregion
 
@@ -114,8 +265,8 @@ public class PlayerController : MonoBehaviour
             return;
         }
         
-        Vector3 cameraForward = _cameraTransform.forward;
-        Vector3 cameraRight = _cameraTransform.right;
+        Vector3 cameraForward = _transform.forward;
+        Vector3 cameraRight = _transform.right;
         
         Vector3 cameraForwardXZ = new Vector3(cameraForward.x, 0f, cameraForward.z).normalized;
         Vector3 cameraRightXZ = new Vector3(cameraRight.x, 0f, cameraRight.z).normalized;
