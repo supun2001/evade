@@ -23,6 +23,7 @@ public class PlayerController : MonoBehaviour
     [Header("Base Movement")]
     public float runAcceleration = 0.25f;
     public float runSpeed = 4f;
+    public float sprintSpeed = 7f;
     public float drag = 0.1f;
     public float gravity = 25f;
     public float jumpForce = 1f;
@@ -259,6 +260,7 @@ public class PlayerController : MonoBehaviour
     #region Movement
     private void HandleHorizontalMovement() {
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
+        float targetSpeed = IsSprinting() ? sprintSpeed : runSpeed;
         
         if (movementInput.sqrMagnitude < 0.001f && _horizontalVelocity.sqrMagnitude < 0.001f) {
             _horizontalVelocity = Vector3.zero;
@@ -289,7 +291,7 @@ public class PlayerController : MonoBehaviour
             _horizontalVelocity = Vector3.zero;
         }
         
-        _horizontalVelocity = Vector3.ClampMagnitude(_horizontalVelocity, runSpeed);
+        _horizontalVelocity = Vector3.ClampMagnitude(_horizontalVelocity, targetSpeed);
         
         _horizontalVelocity.y = 0f;
     }
@@ -320,5 +322,10 @@ public class PlayerController : MonoBehaviour
     public Vector3 GetVelocity()
     {
         return _horizontalVelocity + Vector3.up * _verticalVelocity;
+    }
+
+    private bool IsSprinting()
+    {
+        return Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
     }
 }
