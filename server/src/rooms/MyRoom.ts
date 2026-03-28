@@ -2,11 +2,22 @@ import { Room, Client } from "@colyseus/core";
 import { MyRoomState } from "./schema/MyRoomState";
 import { Player } from "./schema/Player";
 
+const NEXTBOTS_ENABLED = false;
+const NEXTBOT_SPAWN_X = 6.45;
+const NEXTBOT_SPAWN_Y = 0;
+const NEXTBOT_SPAWN_Z = -2.38;
+const NEXTBOT_MOVE_SPEED = 9;
+const NEXTBOT_STOPPING_DISTANCE = 1.2;
+const NEXTBOT_INJURY_DISTANCE = 1.5;
+const NEXTBOT_INJURY_COOLDOWN_MS = 1200;
+
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 4;
   state = new MyRoomState();
+  private nextInjuryAt = 0;
 
   onCreate(options: any) {
+    this.initializeNextbot();
 
     //Room ID
     this.roomId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -16,6 +27,11 @@ export class MyRoom extends Room<MyRoomState> {
     this.onMessage("playerUpdate", (client, message) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
+
+      // Camera is informational, so keep it in sync every tick.
+      player.cameraRotationX = message.cameraRotationX;
+      player.cameraRotationY = message.cameraRotationY;
+      player.timestamp = Date.now();
 
       // Position & Rotation
       player.x = message.x;
@@ -33,12 +49,6 @@ export class MyRoom extends Room<MyRoomState> {
       player.animInputY = message.animInputY;
       player.isGrounded = message.isGrounded;
       player.isJumping = message.isJumping;
-
-      // Camera
-      player.cameraRotationX = message.cameraRotationX;
-      player.cameraRotationY = message.cameraRotationY;
-
-      player.timestamp = Date.now();
     });
 
     this.onMessage("playerReady", (client, isReady) => {
@@ -114,7 +124,91 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   update(deltaTime: number) {
-    //server-side game logics
+    const nextbot = this.state.nextbot;
+    if (!NEXTBOTS_ENABLED) {
+      nextbot.isActive = false;
+      nextbot.targetSessionId = "";
+      return;
+    }
+
+    nextbot.isActive = this.state.isGameStarted && this.state.players.size > 0;
+
+    if (!nextbot.isActive) {
+      nextbot.targetSessionId = "";
+      return;
+    }
+
+    const target = this.findNearestChaseablePlayer(nextbot.x, nextbot.z);
+    if (!target) {
+      nextbot.targetSessionId = "";
+      return;
+    }
+
+    nextbot.targetSessionId = target.sessionId;
+
+    const deltaSeconds = deltaTime / 1000;
+    this.moveNextbotTowardsPlayer(target, deltaSeconds);
+    this.tryInjurePlayer(target);
+  }
+
+  private initializeNextbot() {
+    this.state.nextbot.x = NEXTBOT_SPAWN_X;
+    this.state.nextbot.y = NEXTBOT_SPAWN_Y;
+    this.state.nextbot.z = NEXTBOT_SPAWN_Z;
+    this.state.nextbot.rotationY = 0;
+    this.state.nextbot.targetSessionId = "";
+    this.state.nextbot.isActive = false;
+  }
+
+  private moveNextbotTowardsPlayer(target: Player, deltaSeconds: number) {
+    const nextbot = this.state.nextbot;
+    const dx = target.x - nextbot.x;
+    const dz = target.z - nextbot.z;
+    const distance = Math.hypot(dx, dz);
+
+    if (distance <= 0.0001) {
+      return;
+    }
+
+    nextbot.rotationY = Math.atan2(dx, dz) * (180 / Math.PI);
+
+    if (distance <= NEXTBOT_STOPPING_DISTANCE) {
+      return;
+    }
+
+    const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, NEXTBOT_MOVE_SPEED * deltaSeconds);
+    nextbot.x += (dx / distance) * moveDistance;
+    nextbot.z += (dz / distance) * moveDistance;
+  }
+
+  private tryInjurePlayer(target: Player) {
+    const nextbot = this.state.nextbot;
+    const dx = target.x - nextbot.x;
+    const dz = target.z - nextbot.z;
+    const distance = Math.hypot(dx, dz);
+
+    if (distance > NEXTBOT_INJURY_DISTANCE || Date.now() < this.nextInjuryAt) {
+      return;
+    }
+
+    this.nextInjuryAt = Date.now() + NEXTBOT_INJURY_COOLDOWN_MS;
+  }
+
+  private findNearestChaseablePlayer(nextbotX: number, nextbotZ: number): Player | undefined {
+    let closestPlayer: Player | undefined;
+    let closestDistanceSqr = Number.POSITIVE_INFINITY;
+
+    this.state.players.forEach((player) => {
+      const dx = player.x - nextbotX;
+      const dz = player.z - nextbotZ;
+      const distanceSqr = dx * dx + dz * dz;
+      if (distanceSqr < closestDistanceSqr) {
+        closestDistanceSqr = distanceSqr;
+        closestPlayer = player;
+      }
+    });
+
+    return closestPlayer;
   }
 
 }

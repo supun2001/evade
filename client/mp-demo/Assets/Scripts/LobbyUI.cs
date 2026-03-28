@@ -1,7 +1,10 @@
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.InputSystem;
+using UnityEngine.UIElements;
 using TMPro;
+using UIButton = UnityEngine.UI.Button;
+using UIImage = UnityEngine.UI.Image;
+using UIToolkitButton = UnityEngine.UIElements.Button;
 
 public class LobbyUI : MonoBehaviour
 {
@@ -9,28 +12,22 @@ public class LobbyUI : MonoBehaviour
     [Header("Menu UI")]
     public GameObject menuPanel;
     public TMP_InputField joinCodeInput;
-    public Button createButton;
-    public Button joinButton;
-
-    [Header("HUD UI")]
-    public GameObject hudPanel;
-    public TextMeshProUGUI roomIdText;
-    public Button readyButton;
-    public TextMeshProUGUI readyButtonText;
-    public TextMeshProUGUI playerCountText;
-    public TextMeshProUGUI playerListText;
-    private bool isReady = false;
+    public UIButton createButton;
+    public UIButton joinButton;
 
     [Header("General")]
     public Camera lobbyCamera;
-    public GameObject pausePanel;
     public TextMeshProUGUI notificationText;
 
     [Header("Skin Selection")]
     public SkinRegistry skinRegistry;
-    public Image skinPreviewImage; 
+    public UIImage skinPreviewImage;
     public TextMeshProUGUI skinNameText; 
     private int currentSkinIndex = 0;
+    private bool hasAutoReadiedCurrentRoom = false;
+    private UIDocument _menuDocument;
+    private UIToolkitButton _startButton;
+    private bool _menuEventsBound;
     #endregion
 
     #region Class Methods
@@ -45,26 +42,15 @@ public class LobbyUI : MonoBehaviour
             Debug.LogError("LobbyUI: Menu Panel is not assigned in the Inspector!");
         }
 
-        if (hudPanel != null)
-        {
-            hudPanel.SetActive(false);
-        }
-        else
-        {
-            Debug.LogError("LobbyUI: HUD Panel is not assigned in the Inspector!");
-        }
-        
+        CacheMenuUi();
+        BindMenuEvents();
+
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
 
         if (PlayerPrefs.HasKey("SelectedSkin"))
         {
             currentSkinIndex = PlayerPrefs.GetInt("SelectedSkin");
         }
-        if (pausePanel != null)
-        {
-            pausePanel.SetActive(false);
-        }
-
         UpdateSkinUI();
 
         if (notificationText != null) notificationText.text = "";
@@ -76,76 +62,18 @@ public class LobbyUI : MonoBehaviour
         {
             if (menuPanel.activeSelf)
             {
-                SwitchToHUD();
-            }
-            
-            if (hudPanel.activeSelf)
-            {
-                if (roomIdText != null && roomIdText.text != $"Room Code: {NetworkManager.Instance.currentRoomId}")
-                {
-                    roomIdText.text = $"Room Code: {NetworkManager.Instance.currentRoomId}";
-                }
-            }
-            // Handle Pause Menu toggle on ESC
-            else if (!menuPanel.activeSelf) 
-            {
-                if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-                {
-                    TogglePauseMenu();
-                }
+                AutoStartJoinedRoom();
             }
         }
-    }
-
-    public void TogglePauseMenu()
-    {
-        if (pausePanel == null) return;
-
-        bool isPaused = !pausePanel.activeSelf;
-        pausePanel.SetActive(isPaused);
-
-        if (isPaused)
-        {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-            // SetLocalPlayerInput(false); // CEO requested movement to be enabled while ESCd
-        }
-        else
-        {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-            SetLocalPlayerInput(true);
-        }
-    }
-
-    public void OnContinueClicked()
-    {
-        if (pausePanel != null)
-        {
-            pausePanel.SetActive(false);
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-            // SetLocalPlayerInput(true); // Already enabled
-        }
-    }
-
-    public void OnQuitClicked()
-    {
-        if (pausePanel != null) pausePanel.SetActive(false);
-        LeaveRoom();
     }
     
     private void OnDestroy()
     {
+        UnbindMenuEvents();
+
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
              NetworkManager.Instance.Room.OnStateChange -= OnLobbyStateChange;
-        }
-        
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.OnPlayerAddedEvent -= OnPlayerListChanged;
-            NetworkManager.Instance.OnPlayerRemovedEvent -= OnPlayerListChanged;
         }
     }
     #endregion
@@ -163,105 +91,38 @@ public class LobbyUI : MonoBehaviour
     private void SwitchToMenu()
     {
         menuPanel.SetActive(true);
-        hudPanel.SetActive(false);
+        hasAutoReadiedCurrentRoom = false;
+        SetLocalPlayerInput(false);
+        SetStartButtonEnabled(true);
         
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
         
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
-        
-        // Unsubscribe from events to prevent duplicates
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.OnPlayerAddedEvent -= OnPlayerListChanged;
-            NetworkManager.Instance.OnPlayerRemovedEvent -= OnPlayerListChanged;
-        }
-
-        // Reset Ready State
-        isReady = false;
-        if (readyButtonText != null) readyButtonText.text = "READY";
-        if (readyButton != null) 
-        {
-             ColorUtility.TryParseHtmlString("#33B46E", out Color notReadyColor);
-             readyButton.image.color = notReadyColor;
-        }
+        UnityEngine.Cursor.lockState = CursorLockMode.None;
+        UnityEngine.Cursor.visible = true;
         
         if (joinButton != null) joinButton.interactable = true;
         if (createButton != null) createButton.interactable = true;
     }
 
-    
-    #region Switch UI to HUD
-    private void SwitchToHUD()
+    private void AutoStartJoinedRoom()
     {
         menuPanel.SetActive(false);
-        hudPanel.SetActive(true);
-        
-        if (roomIdText != null)
-        {
-            roomIdText.text = $"{NetworkManager.Instance.currentRoomId}";
-            Debug.Log($"Setting Room Code Text to: {roomIdText.text}");
-        }
-        else
-        {
-            Debug.LogError("LobbyUI: Room ID Text (TMP) is not assigned in the Inspector!");
-        }
-        
+
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(false);
-        
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
-        
-        // Subscribe to state changes for UI updates
-        if (NetworkManager.Instance != null)
+
+        if (!hasAutoReadiedCurrentRoom && NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
-            if (NetworkManager.Instance.Room != null)
-            {
-                NetworkManager.Instance.Room.OnStateChange += OnLobbyStateChange;
-            }
-            
-            NetworkManager.Instance.OnPlayerAddedEvent += OnPlayerListChanged;
-            NetworkManager.Instance.OnPlayerRemovedEvent += OnPlayerListChanged;
-
-            // Force initial update
-            UpdateLobbyUI();
-
-            // Disable player input while in lobby (waiting to ready up)
-            SetLocalPlayerInput(false);
+            NetworkManager.Instance.SendReadyState(true);
+            hasAutoReadiedCurrentRoom = true;
         }
+
+        OnGameStarted();
     }
-    #endregion
 
     #region Button Clicks
-    private void OnPlayerListChanged(string id, Player player)
-    {
-        UpdateLobbyUI();
-
-        // If the added player is the local player, enforce the input state
-        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
-        {
-            if (id == NetworkManager.Instance.Room.SessionId)
-            {
-                // If HUD is active, rely on Ready state. If HUD is off (game started), enable movement.
-                bool shouldMove = !hudPanel.activeSelf || isReady;
-                SetLocalPlayerInput(shouldMove);
-                
-                // Also update cursor state if this is the initial spawn
-                if (shouldMove)
-                {
-                    Cursor.lockState = CursorLockMode.Locked;
-                    Cursor.visible = false;
-                }
-            }
-        }
-    }
-
     private void OnLobbyStateChange(MyRoomState state, bool isFirstState)
     {
-        UpdateLobbyUI();
-
-        // If game is already started (late joiner scenario), hide HUD and enable input
-        if (state.isGameStarted && hudPanel.activeSelf)
+        if (state.isGameStarted && menuPanel.activeSelf)
         {
             Debug.Log("LobbyUI: Room is already in-game. Starting for late joiner...");
             OnGameStarted();
@@ -270,6 +131,8 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnCreateClicked()
     {
+        SetStartButtonEnabled(false);
+
         if (createButton != null) createButton.interactable = false;
         string error = await NetworkManager.Instance.CreateGame();
         
@@ -284,6 +147,37 @@ public class LobbyUI : MonoBehaviour
         }
         
         if (createButton != null) createButton.interactable = true;
+        if (!hasAutoReadiedCurrentRoom)
+        {
+            SetStartButtonEnabled(true);
+        }
+    }
+
+    public async void OnStartClicked()
+    {
+        SetStartButtonEnabled(false);
+
+        if (createButton != null) createButton.interactable = false;
+        if (joinButton != null) joinButton.interactable = false;
+
+        string error = await NetworkManager.Instance.JoinOrCreateGame();
+
+        if (string.IsNullOrEmpty(error))
+        {
+            SaveAndSyncSkin();
+        }
+        else
+        {
+            ShowNotification($"Start Failed: {error}");
+        }
+
+        if (createButton != null) createButton.interactable = true;
+        if (joinButton != null) joinButton.interactable = true;
+
+        if (!hasAutoReadiedCurrentRoom)
+        {
+            SetStartButtonEnabled(true);
+        }
     }
 
     public async void OnJoinClicked()
@@ -319,88 +213,82 @@ public class LobbyUI : MonoBehaviour
         if (joinButton != null) joinButton.interactable = true;
     }
 
-    public void OnReadyClicked()
-    {
-        isReady = !isReady;
-        
-        // Update Visuals
-        if (readyButtonText != null)
-        {
-            readyButtonText.text = isReady ? "READY!" : "READY";
-        }
-
-        if (readyButton != null)
-        {
-            ColorUtility.TryParseHtmlString("#33B46E", out Color notReadyColor); 
-            ColorUtility.TryParseHtmlString("#CCCC2D", out Color readyColor);
-
-            if (isReady)
-            {
-                readyButton.image.color = readyColor; 
-            }
-            else
-            {
-                 readyButton.image.color = notReadyColor;
-            }
-        }
-        
-        NetworkManager.Instance.SendReadyState(isReady);
-        
-        // Toggle input and cursor based on Ready state
-        SetLocalPlayerInput(isReady);
-        
-        if (isReady)
-        {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-        }
-        else
-        {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-        }
-    }
-
-    private void UpdateLobbyUI()
-    {
-        if (NetworkManager.Instance == null || NetworkManager.Instance.Room == null || NetworkManager.Instance.Room.State == null) return;
-
-        var players = NetworkManager.Instance.Room.State.players;
-        if (players == null) return;
-
-        // Update Player Count
-        if (playerCountText != null)
-        {
-            playerCountText.text = $"Players: {players.Count}/4";
-        }
-
-        // Update Player List
-        if (playerListText != null)
-        {
-            System.Text.StringBuilder sb = new System.Text.StringBuilder();
-            int i = 1;
-            foreach (var key in players.Keys)
-            {
-                Player player = (Player)players[key];
-                string status = player.isReady ? "[READY]" : "[WAITING]";
-                string prefix = (key == NetworkManager.Instance.Room.SessionId) ? " (You)" : "";
-                sb.AppendLine($"{i}. Player{prefix} {status}");
-                i++;
-            }
-            playerListText.text = sb.ToString();
-        }
-    }
-
     public void OnGameStarted()
     {
-        if (hudPanel != null) hudPanel.SetActive(false);
+        if (menuPanel != null) menuPanel.SetActive(false);
+        hasAutoReadiedCurrentRoom = true;
+
+        if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(false);
         
         // Lock cursor for gameplay
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-        
+        UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+        UnityEngine.Cursor.visible = false;
+
         // Ensure movement is enabled
         SetLocalPlayerInput(true);
+    }
+
+    private void CacheMenuUi()
+    {
+        if (menuPanel == null)
+        {
+            return;
+        }
+
+        _menuDocument = menuPanel.GetComponent<UIDocument>();
+        if (_menuDocument == null)
+        {
+            return;
+        }
+
+        _startButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("start-button");
+        if (_startButton == null)
+        {
+            Debug.LogWarning("LobbyUI: Start button was not found in MainMenu.uxml.");
+        }
+    }
+
+    private void BindMenuEvents()
+    {
+        if (_menuEventsBound || _startButton == null)
+        {
+            return;
+        }
+
+        _startButton.clicked += HandleStartButtonClicked;
+        _menuEventsBound = true;
+    }
+
+    private void UnbindMenuEvents()
+    {
+        if (!_menuEventsBound || _startButton == null)
+        {
+            return;
+        }
+
+        _startButton.clicked -= HandleStartButtonClicked;
+        _menuEventsBound = false;
+    }
+
+    private void HandleStartButtonClicked()
+    {
+        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
+        {
+            Debug.LogWarning("LobbyUI: Already in a room. Ignoring Start request.");
+            return;
+        }
+
+        OnStartClicked();
+    }
+
+    private void SetStartButtonEnabled(bool enabled)
+    {
+        if (_startButton == null)
+        {
+            return;
+        }
+
+        _startButton.SetEnabled(enabled);
     }
 
     private void SetLocalPlayerInput(bool enabled)

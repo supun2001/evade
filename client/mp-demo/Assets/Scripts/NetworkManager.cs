@@ -145,6 +145,22 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    public async Task<string> JoinOrCreateGame()
+    {
+        InitializeClient();
+        try
+        {
+            room = await client.JoinOrCreate<MyRoomState>(roomName);
+            OnRoomJoined();
+            return null;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"JoinOrCreate Failed: {e.Message}");
+            return e.Message;
+        }
+    }
+
     public async Task<string> JoinGame(string targetRoomId)
     {
         InitializeClient();

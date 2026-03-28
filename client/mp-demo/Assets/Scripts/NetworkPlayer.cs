@@ -1,6 +1,7 @@
 using UnityEngine;
 using Colyseus.Schema;
 using System.Collections.Generic;
+using UnityEngine.UIElements;
 
 public class NetworkPlayer : MonoBehaviour
 {
@@ -42,7 +43,13 @@ public class NetworkPlayer : MonoBehaviour
                 if (input.Controls != null) input.Controls.Disable(); 
             }
 
-            if (anim) anim.enabled = false;
+            if (anim) anim.SetUseNetworkAnimationState(true);
+
+            UIDocument hudDocument = GetComponentInChildren<UIDocument>(true);
+            if (hudDocument != null)
+            {
+                hudDocument.enabled = false;
+            }
         }
     }
 
@@ -125,10 +132,17 @@ public class NetworkPlayer : MonoBehaviour
             _remoteAnimX = Mathf.Lerp(_remoteAnimX, playerState.animInputX, Time.deltaTime * lerpSpeed);
             _remoteAnimY = Mathf.Lerp(_remoteAnimY, playerState.animInputY, Time.deltaTime * lerpSpeed);
 
-            animator.SetFloat(InputXHash, _remoteAnimX);
-            animator.SetFloat(InputYHash, _remoteAnimY);
-            animator.SetBool(GroundedHash, playerState.isGrounded);
-            animator.SetBool(JumpHash, playerState.isJumping);
+            if (anim != null)
+            {
+                anim.ApplyNetworkState(_remoteAnimX, _remoteAnimY, playerState.isGrounded, playerState.isJumping);
+            }
+            else
+            {
+                animator.SetFloat(InputXHash, _remoteAnimX);
+                animator.SetFloat(InputYHash, _remoteAnimY);
+                animator.SetBool(GroundedHash, playerState.isGrounded);
+                animator.SetBool(JumpHash, playerState.isJumping);
+            }
         }
     }
 

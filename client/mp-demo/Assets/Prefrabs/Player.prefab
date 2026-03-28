@@ -168,6 +168,7 @@ Transform:
   m_Children:
   - {fileID: 4778051813594072028}
   - {fileID: 5152763335016400072}
+  - {fileID: 535461069013133313}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &5044927713771717086
@@ -187,9 +188,14 @@ MonoBehaviour:
   runAcceleration: 70
   runSpeed: 18
   sprintSpeed: 34
-  drag: 55
+  autoSprintDelay: 3
+  drag: 45
   gravity: 20
   jumpForce: 1
+  fullSprintJumpSpeedBonus: 10
+  _turnResponsiveness: 14
+  _sharpTurnBoost: 2.5
+  _sidewaysFriction: 16
   lookSenseH: 0.1
   lookSenseV: 0.1
   lookLimitV: 70
@@ -207,7 +213,7 @@ MonoBehaviour:
   _sprintBobAmplitude: 0.06
   _sprintBobFrequency: 9
   _sprintBobBlendSpeed: 10
-  _startingViewMode: 1
+  _startingViewMode: 0
   _firstPersonCameraLocalPosition: {x: 0, y: -0.6, z: 0.2}
   _firstPersonNearClipPlane: 0.01
   _cameraTransitionDuration: 0.3
@@ -287,6 +293,61 @@ MonoBehaviour:
   - {fileID: 8928398189442688583}
   - {fileID: 8532646079309085701}
   - {fileID: 1590488623065429432}
+--- !u!1 &4978651277537230969
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 535461069013133313}
+  - component: {fileID: 2431068411125947024}
+  m_Layer: 5
+  m_Name: PlayerHUD
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &535461069013133313
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4978651277537230969}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: -0.21, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7579173937008158581}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2431068411125947024
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4978651277537230969}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name:
+  m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
+  m_PanelSettings: {fileID: 11400000, guid: 4b0479b0ebf1f470284b11c80afdee80, type: 2}
+  m_ParentUI: {fileID: 0}
+  sourceAsset: {fileID: 9197481963319205126, guid: 2f0268e8fae714320861dd82afa70a0d, type: 3}
+  m_SortingOrder: 0
+  m_Position: 0
+  m_WorldSpaceSizeMode: 1
+  m_WorldSpaceWidth: 1920
+  m_WorldSpaceHeight: 1080
+  m_PivotReferenceSize: 0
+  m_Pivot: 0
+  m_WorldSpaceCollider: {fileID: 0}
 --- !u!1 &7688992737724930668
 GameObject:
   m_ObjectHideFlags: 0
@@ -445,7 +506,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.08973255, y: 0, z: 0, w: 0.9959659}
+  m_LocalRotation: {x: 0.08973255, y: -0, z: -0, w: 0.9959659}
   m_LocalPosition: {x: 0, y: 0.70000005, z: -6}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0

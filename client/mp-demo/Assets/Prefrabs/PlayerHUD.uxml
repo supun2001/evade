@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:ui="UnityEngine.UIElements"
+    xmlns:uie="UnityEditor.UIElements"
+    xsi:noNamespaceSchemaLocation="../../UIElementsSchema/UIElements.xsd"
+>
+    <ui:VisualElement
+        name="hud-root"
+        style="flex-grow: 1; position: relative;"
+    >
+        <ui:Label
+            name="speed-label"
+            text="Speed 0.0"
+            style="
+                position: absolute;
+                left: 28px;
+                bottom: 24px;
+                color: rgb(255, 255, 255);
+                background-color: rgba(0, 0, 0, 0.45);
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                border-bottom-left-radius: 10px;
+                border-bottom-right-radius: 10px;
+                font-size: 22px;
+                -unity-font-style: bold;
+            "
+        />
+        <ui:Label
+            name="animation-debug-label"
+            text="Anim Debug"
+            style="
+                position: absolute;
+                left: 28px;
+                top: 24px;
+                min-width: 320px;
+                color: rgb(255, 245, 160);
+                background-color: rgba(0, 0, 0, 0.6);
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                border-bottom-left-radius: 10px;
+                border-bottom-right-radius: 10px;
+                font-size: 18px;
+                white-space: normal;
+            "
+        />
+        <ui:VisualElement
+            name="pause-menu"
+            style="
+                display: none;
+                position: absolute;
+                left: 0;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                align-items: center;
+                justify-content: center;
+                background-color: rgba(0, 0, 0, 0.35);
+            "
+        >
+            <ui:VisualElement
+                name="pause-card"
+                style="
+                    min-width: 280px;
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-top: 24px;
+                    padding-bottom: 24px;
+                    background-color: rgba(16, 18, 24, 0.92);
+                    border-top-left-radius: 16px;
+                    border-top-right-radius: 16px;
+                    border-bottom-left-radius: 16px;
+                    border-bottom-right-radius: 16px;
+                    align-items: stretch;
+                "
+            >
+                <ui:Label
+                    text="Paused"
+                    style="
+                        color: rgb(255, 255, 255);
+                        font-size: 30px;
+                        -unity-font-style: bold;
+                        unity-text-align: middle-center;
+                        margin-bottom: 18px;
+                    "
+                />
+                <ui:Button
+                    name="continue-button"
+                    text="Continue"
+                    style="
+                        height: 46px;
+                        margin-bottom: 12px;
+                        color: rgb(255, 255, 255);
+                        background-color: rgb(51, 180, 110);
+                        border-top-left-radius: 10px;
+                        border-top-right-radius: 10px;
+                        border-bottom-left-radius: 10px;
+                        border-bottom-right-radius: 10px;
+                        font-size: 18px;
+                        -unity-font-style: bold;
+                    "
+                />
+                <ui:Button
+                    name="main-menu-button"
+                    text="Main Menu"
+                    style="
+                        height: 46px;
+                        color: rgb(255, 255, 255);
+                        background-color: rgb(209, 75, 75);
+                        border-top-left-radius: 10px;
+                        border-top-right-radius: 10px;
+                        border-bottom-left-radius: 10px;
+                        border-bottom-right-radius: 10px;
+                        font-size: 18px;
+                        -unity-font-style: bold;
+                    "
+                />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

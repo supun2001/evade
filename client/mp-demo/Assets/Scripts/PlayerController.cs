@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
+using UnityEngine.UIElements;
 using Unity.Cinemachine;
 using PlayerCharacterController;
 using System;
@@ -25,9 +26,16 @@ public class PlayerController : MonoBehaviour
     public float runAcceleration = 0.25f;
     public float runSpeed = 4f;
     public float sprintSpeed = 7f;
+    public float autoSprintDelay = 5f;
     public float drag = 0.1f;
     public float gravity = 25f;
     public float jumpForce = 1f;
+    public float fullSprintJumpSpeedBonus = 10f;
+
+    [Header("Runner Movement Feel")]
+    [SerializeField] private float _turnResponsiveness = 14f;
+    [SerializeField] private float _sharpTurnBoost = 2.5f;
+    [SerializeField] private float _sidewaysFriction = 16f;
 
     [Header("Camera Settings")]
     public float lookSenseH = 0.1f;
@@ -66,6 +74,13 @@ public class PlayerController : MonoBehaviour
     private Transform _cameraTransform;
     private Transform _gameplayCameraTransform;
     private Camera _gameplayCamera;
+    private PlayerAnimation _playerAnimation;
+    private UIDocument _playerHudDocument;
+    private Label _speedLabel;
+    private Label _animationDebugLabel;
+    private VisualElement _pauseMenuElement;
+    private Button _continueButton;
+    private Button _mainMenuButton;
     private CinemachineBrain _cinemachineBrain;
     private CinemachineCamera _cinemachineCamera;
     private CinemachineThirdPersonFollow _thirdPersonFollow;
@@ -74,6 +89,7 @@ public class PlayerController : MonoBehaviour
     private float _playerRotationY = 0f;
     private float _verticalVelocity = 0f;
     private Vector3 _horizontalVelocity = Vector3.zero;
+    private float _runHeldTime = 0f;
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
@@ -94,6 +110,8 @@ public class PlayerController : MonoBehaviour
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Coroutine _cameraTransitionCoroutine;
+    private bool _isPauseMenuOpen;
+    private bool _hudEventsBound;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
 
@@ -103,23 +121,26 @@ public class PlayerController : MonoBehaviour
     #region Setup
     private void Awake() {
         _playerLocomotionInput = GetComponent<PlayerLocomotionInput>();
+        _playerAnimation = GetComponent<PlayerAnimation>();
         _transform = transform;
         _cameraTransform = _playerCamera.transform;
         _thirdPersonFollow = GetComponentInChildren<CinemachineThirdPersonFollow>(true);
         _cinemachineCamera = GetComponentInChildren<CinemachineCamera>(true);
         _gameplayCamera = FindGameplayCamera();
         _gameplayCameraTransform = _gameplayCamera != null ? _gameplayCamera.transform : null;
+        _playerHudDocument = GetComponentInChildren<UIDocument>(true);
         _cinemachineBrain = _gameplayCamera != null ? _gameplayCamera.GetComponent<CinemachineBrain>() : null;
         _defaultNearClipPlane = _gameplayCamera != null ? _gameplayCamera.nearClipPlane : 0.3f;
         _defaultFieldOfView = _gameplayCamera != null ? _gameplayCamera.fieldOfView : 60f;
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
         CacheArmTransforms();
+        CacheHudElements();
     }
     
     private void Start() {
-        // Cursor.lockState = CursorLockMode.Locked;
-        // Cursor.visible = false;
+        // UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+        // UnityEngine.Cursor.visible = false;
 
         SetCameraView(_startingViewMode, true);
     }
@@ -129,8 +150,13 @@ public class PlayerController : MonoBehaviour
     private void Update() {
         if (!_playerLocomotionInput.InputEnabled) return;
 
+        HandlePauseMenuToggle();
+        UpdateSpeedHud();
+        UpdateAnimationDebugHud();
+
         HandleCursorLock();
         HandleViewToggle();
+        UpdateAutoSprint();
         UpdateZoom();
         HandleVerticalMovement();
         HandleHorizontalMovement();
@@ -144,13 +170,9 @@ public class PlayerController : MonoBehaviour
     private void HandleCursorLock()
     {
         if (!_playerLocomotionInput.InputEnabled) return;
+        if (_isPauseMenuOpen) return;
 
-        if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-        {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-        }
-        else if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
         {
             // Only lock if we are NOT clicking on a UI element
             if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
@@ -158,11 +180,19 @@ public class PlayerController : MonoBehaviour
                 return;
             }
 
-            if (Cursor.lockState == CursorLockMode.None)
+            if (UnityEngine.Cursor.lockState == CursorLockMode.None)
             {
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
+                UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+                UnityEngine.Cursor.visible = false;
             }
+        }
+    }
+
+    private void HandlePauseMenuToggle()
+    {
+        if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
+        {
+            SetPauseMenuVisible(!_isPauseMenuOpen);
         }
     }
 
@@ -181,7 +211,26 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void UpdateAutoSprint()
+    {
+        bool hasMovementInput = _playerLocomotionInput.MovementInput.sqrMagnitude > 0.01f;
+
+        if (hasMovementInput)
+        {
+            _runHeldTime += Time.deltaTime;
+        }
+        else
+        {
+            _runHeldTime = 0f;
+        }
+    }
+
     private void LateUpdate() {
+        if (_isPauseMenuOpen)
+        {
+            return;
+        }
+
         Vector2 lookInput = _playerLocomotionInput.LookInput;
         float minPitch = _currentViewMode == CameraViewMode.FirstPerson ? -_firstPersonLookUpLimit : -lookLimitV;
         float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
@@ -296,6 +345,115 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+    }
+
+    private void CacheHudElements()
+    {
+        if (_playerHudDocument == null)
+        {
+            return;
+        }
+
+        VisualElement root = _playerHudDocument.rootVisualElement;
+        if (root == null)
+        {
+            return;
+        }
+
+        _speedLabel = root.Q<Label>("speed-label");
+        _animationDebugLabel = root.Q<Label>("animation-debug-label");
+        _pauseMenuElement = root.Q<VisualElement>("pause-menu");
+        _continueButton = root.Q<Button>("continue-button");
+        _mainMenuButton = root.Q<Button>("main-menu-button");
+
+        if (!_hudEventsBound)
+        {
+            if (_continueButton != null)
+            {
+                _continueButton.clicked += OnContinueButtonClicked;
+            }
+
+            if (_mainMenuButton != null)
+            {
+                _mainMenuButton.clicked += OnMainMenuButtonClicked;
+            }
+
+            _hudEventsBound = true;
+        }
+
+        SetPauseMenuDisplay(_isPauseMenuOpen);
+    }
+
+    private void UpdateSpeedHud()
+    {
+        if (_speedLabel == null)
+        {
+            CacheHudElements();
+            if (_speedLabel == null)
+            {
+                return;
+            }
+        }
+
+        _speedLabel.text = $"Speed {GetHorizontalSpeed():0.0}";
+    }
+
+    private void UpdateAnimationDebugHud()
+    {
+        if (_animationDebugLabel == null)
+        {
+            CacheHudElements();
+            if (_animationDebugLabel == null)
+            {
+                return;
+            }
+        }
+
+        if (_playerAnimation == null)
+        {
+            _animationDebugLabel.text = "Animator: missing";
+            return;
+        }
+
+        _animationDebugLabel.text = _playerAnimation.GetAnimatorDebugInfo();
+    }
+
+    private void SetPauseMenuVisible(bool visible)
+    {
+        if (_pauseMenuElement == null)
+        {
+            CacheHudElements();
+        }
+
+        _isPauseMenuOpen = visible;
+        SetPauseMenuDisplay(visible);
+
+        UnityEngine.Cursor.lockState = visible ? CursorLockMode.None : CursorLockMode.Locked;
+        UnityEngine.Cursor.visible = visible;
+    }
+
+    private void SetPauseMenuDisplay(bool visible)
+    {
+        if (_pauseMenuElement != null)
+        {
+            _pauseMenuElement.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+    }
+
+    private void OnContinueButtonClicked()
+    {
+        SetPauseMenuVisible(false);
+    }
+
+    private void OnMainMenuButtonClicked()
+    {
+        SetPauseMenuVisible(false);
+
+        LobbyUI lobbyUI = FindFirstObjectByType<LobbyUI>();
+        if (lobbyUI != null)
+        {
+            lobbyUI.LeaveRoom();
+        }
     }
 
     private Camera FindGameplayCamera()
@@ -512,9 +670,9 @@ public class PlayerController : MonoBehaviour
     private void UpdateZoom()
     {
         bool zooming = IsZooming();
-        bool sprinting = IsSprinting();
+        float sprintProgress = GetSprintProgress();
 
-        float sprintTargetWeight = !zooming && sprinting ? 1f : 0f;
+        float sprintTargetWeight = !zooming ? sprintProgress : 0f;
         float sprintBlend = 1f - Mathf.Exp(-_sprintFovBlendSpeed * Time.deltaTime);
         _sprintFovWeight = Mathf.Lerp(_sprintFovWeight, sprintTargetWeight, sprintBlend);
 
@@ -544,12 +702,13 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        float sprintProgress = GetSprintProgress();
         bool sprintingInFirstPerson =
             _currentViewMode == CameraViewMode.FirstPerson
-            && IsSprinting()
+            && sprintProgress > 0.001f
             && _horizontalVelocity.sqrMagnitude > 0.01f;
 
-        float bobTargetWeight = sprintingInFirstPerson ? 1f : 0f;
+        float bobTargetWeight = sprintingInFirstPerson ? sprintProgress : 0f;
         float blend = 1f - Mathf.Exp(-_sprintBobBlendSpeed * Time.deltaTime);
         _sprintBobWeight = Mathf.Lerp(_sprintBobWeight, bobTargetWeight, blend);
 
@@ -574,9 +733,10 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateSprintArmPose()
     {
+        float sprintProgress = GetSprintProgress();
         float targetWeight =
-            _currentViewMode == CameraViewMode.FirstPerson && IsSprinting()
-                ? 1f
+            _currentViewMode == CameraViewMode.FirstPerson
+                ? sprintProgress
                 : 0f;
 
         float blend = 1f - Mathf.Exp(-_sprintArmBlendSpeed * Time.deltaTime);
@@ -644,7 +804,15 @@ public class PlayerController : MonoBehaviour
     #region Movement
     private void HandleHorizontalMovement() {
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
-        float targetSpeed = IsSprinting() ? sprintSpeed : runSpeed;
+        bool isGrounded = IsGrounded();
+
+        float targetSpeed = GetCurrentMoveSpeed();
+        bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
+        if (treatAsAirborne)
+        {
+            movementInput.x = 0f;
+        }
+        float maxHorizontalSpeed = treatAsAirborne ? Mathf.Max(targetSpeed, _horizontalVelocity.magnitude) : targetSpeed;
         float deltaTime = Time.deltaTime;
         
         Vector3 cameraForward = _transform.forward;
@@ -669,7 +837,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector3 desiredVelocity = movementDirection.normalized * (targetSpeed * inputMagnitude);
+        Vector3 desiredVelocity = movementDirection.normalized * (maxHorizontalSpeed * inputMagnitude);
         float turnDot = _horizontalVelocity.sqrMagnitude > 0.001f
             ? Vector3.Dot(_horizontalVelocity.normalized, desiredVelocity.normalized)
             : 1f;
@@ -678,9 +846,24 @@ public class PlayerController : MonoBehaviour
 
         _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, accelerationStep);
 
-        if (_horizontalVelocity.sqrMagnitude > targetSpeed * targetSpeed)
+        if (_horizontalVelocity.sqrMagnitude > 0.001f)
         {
-            _horizontalVelocity = _horizontalVelocity.normalized * targetSpeed;
+            float sharpTurnAmount = (1f - turnDot) * 0.5f;
+            float steerStrength = _turnResponsiveness * (1f + sharpTurnAmount * _sharpTurnBoost);
+            float steerBlend = 1f - Mathf.Exp(-steerStrength * deltaTime);
+            Vector3 steeredDirection = Vector3.Slerp(_horizontalVelocity.normalized, desiredVelocity.normalized, steerBlend).normalized;
+            float steeredSpeed = Mathf.Min(_horizontalVelocity.magnitude, maxHorizontalSpeed);
+
+            _horizontalVelocity = steeredDirection * steeredSpeed;
+
+            Vector3 lateralVelocity = _horizontalVelocity - Vector3.Project(_horizontalVelocity, desiredVelocity.normalized);
+            float lateralBlend = 1f - Mathf.Exp(-_sidewaysFriction * deltaTime);
+            _horizontalVelocity -= lateralVelocity * lateralBlend;
+        }
+
+        if (_horizontalVelocity.sqrMagnitude > maxHorizontalSpeed * maxHorizontalSpeed)
+        {
+            _horizontalVelocity = _horizontalVelocity.normalized * maxHorizontalSpeed;
         }
 
         if (inputMagnitude <= 0.001f)
@@ -705,6 +888,13 @@ public class PlayerController : MonoBehaviour
         _verticalVelocity -= gravity * deltaTime;
 
         if(_playerLocomotionInput.JumpPressed && isGrounded){
+            if (IsSprinting() && _horizontalVelocity.sqrMagnitude > 0.001f)
+            {
+                Vector3 horizontalDirection = _horizontalVelocity.normalized;
+                float boostedSpeed = _horizontalVelocity.magnitude + fullSprintJumpSpeedBonus;
+                _horizontalVelocity = horizontalDirection * boostedSpeed;
+            }
+
             _verticalVelocity += MathF.Sqrt(jumpForce * JUMP_VELOCITY_MULTIPLIER * gravity);
         }
     }
@@ -719,9 +909,35 @@ public class PlayerController : MonoBehaviour
         return _horizontalVelocity + Vector3.up * _verticalVelocity;
     }
 
+    public float GetHorizontalSpeed()
+    {
+        return _horizontalVelocity.magnitude;
+    }
+
+    private float GetCurrentMoveSpeed()
+    {
+        float baseSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
+        return baseSpeed;
+    }
+
+    private float GetSprintProgress()
+    {
+        if (_playerLocomotionInput == null || _playerLocomotionInput.MovementInput.sqrMagnitude <= 0.01f)
+        {
+            return 0f;
+        }
+
+        if (autoSprintDelay <= 0f)
+        {
+            return 1f;
+        }
+
+        return Mathf.Clamp01(_runHeldTime / autoSprintDelay);
+    }
+
     private bool IsSprinting()
     {
-        return Keyboard.current != null && Keyboard.current.leftShiftKey.isPressed;
+        return GetSprintProgress() >= 0.999f;
     }
 
     private bool IsZooming()
