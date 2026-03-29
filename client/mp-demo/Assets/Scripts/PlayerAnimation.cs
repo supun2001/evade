@@ -6,6 +6,7 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private Animator _animator;
     public Animator Animator => _animator;
     [SerializeField] private float animationSmoothTime = 0.1f;
+    [SerializeField] private bool _useSingleForwardRunAnimation = false;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -86,6 +87,17 @@ public class PlayerAnimation : MonoBehaviour
         return $"State Hash: {stateInfo.fullPathHash}\nClip: {clipName}";
     }
 
+    public bool UsesSingleForwardRunController()
+    {
+        if (_animator == null || _animator.runtimeAnimatorController == null)
+        {
+            return _useSingleForwardRunAnimation;
+        }
+
+        string controllerName = _animator.runtimeAnimatorController.name;
+        return _useSingleForwardRunAnimation || controllerName.StartsWith("AC_NewPlayer");
+    }
+
     private void UpdateAnimation()
     {
         if (_animator == null)
@@ -104,8 +116,17 @@ public class PlayerAnimation : MonoBehaviour
             ? _networkIsJumping
             : (_playerLocomotionInput != null && _playerLocomotionInput.JumpPressed);
 
-        _currentInputX = Mathf.Lerp(_currentInputX, input.x, _smoothSpeed * deltaTime);
-        _currentInputY = Mathf.Lerp(_currentInputY, input.y, _smoothSpeed * deltaTime);
+        if (UsesSingleForwardRunController())
+        {
+            float moveAmount = Mathf.Clamp01(input.magnitude);
+            _currentInputX = Mathf.Lerp(_currentInputX, 0f, _smoothSpeed * deltaTime);
+            _currentInputY = Mathf.Lerp(_currentInputY, moveAmount, _smoothSpeed * deltaTime);
+        }
+        else
+        {
+            _currentInputX = Mathf.Lerp(_currentInputX, input.x, _smoothSpeed * deltaTime);
+            _currentInputY = Mathf.Lerp(_currentInputY, input.y, _smoothSpeed * deltaTime);
+        }
 
         _animator.SetFloat(_inputXHash, _currentInputX);
         _animator.SetFloat(_inputYHash, _currentInputY);
