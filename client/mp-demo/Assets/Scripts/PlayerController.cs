@@ -59,12 +59,17 @@ public class PlayerController : MonoBehaviour
     [Header("Sprint Camera Feel")]
     [SerializeField] private float _sprintFovBonus = 8f;
     [SerializeField] private float _sprintFovBlendSpeed = 8f;
+    [SerializeField] private float _firstPersonWalkBobAmplitude = 0.02f;
+    [SerializeField] private float _firstPersonWalkBobFrequency = 6f;
     [SerializeField] private float _sprintBobAmplitude = 0.06f;
     [SerializeField] private float _sprintBobFrequency = 9f;
     [SerializeField] private float _sprintBobBlendSpeed = 10f;
 
     [Header("View Toggle")]
     [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.ThirdPerson;
+    [SerializeField] private bool _useManualThirdPersonCamera = true;
+    [SerializeField] private Vector3 _thirdPersonCameraOffset = new Vector3(1f, 0.55f, -3.2f);
+    [SerializeField] private float _thirdPersonCameraPitch = 8f;
     [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
     [SerializeField] private float _firstPersonNearClipPlane = 0.01f;
     [SerializeField] private float _cameraTransitionDuration = 0.3f;
@@ -100,8 +105,9 @@ public class PlayerController : MonoBehaviour
     private float _sprintFovWeight;
     private float _sprintBobWeight;
     private float _sprintBobTime;
-    private Vector3 _thirdPersonCameraLocalPosition;
-    private Quaternion _thirdPersonCameraLocalRotation;
+    private float _firstPersonBobWeight;
+    private Vector3 _cachedThirdPersonCameraLocalPosition;
+    private Quaternion _cachedThirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
     private ShadowCastingMode[] _defaultShadowCastingModes;
     private Renderer[] _firstPersonHiddenRenderers;
@@ -258,8 +264,8 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        _thirdPersonCameraLocalPosition = _gameplayCameraTransform.localPosition;
-        _thirdPersonCameraLocalRotation = _gameplayCameraTransform.localRotation;
+        _cachedThirdPersonCameraLocalPosition = _gameplayCameraTransform.localPosition;
+        _cachedThirdPersonCameraLocalRotation = _gameplayCameraTransform.localRotation;
     }
 
     private void CacheLocalRenderers()
@@ -513,7 +519,14 @@ public class PlayerController : MonoBehaviour
         }
         else
         {
-            SetThirdPersonCameraActive(true);
+            SetThirdPersonCameraActive(!_useManualThirdPersonCamera);
+
+            if (_gameplayCameraTransform != null)
+            {
+                GetThirdPersonTargetLocalPose(out Vector3 targetLocalPosition, out Quaternion targetLocalRotation);
+                _gameplayCameraTransform.localPosition = targetLocalPosition;
+                _gameplayCameraTransform.localRotation = targetLocalRotation;
+            }
         }
 
         if (_gameplayCamera != null)
@@ -610,7 +623,7 @@ public class PlayerController : MonoBehaviour
 
         if (!firstPerson)
         {
-            SetThirdPersonCameraActive(true);
+            SetThirdPersonCameraActive(!_useManualThirdPersonCamera);
         }
 
         _cameraTransitionCoroutine = null;
@@ -618,8 +631,15 @@ public class PlayerController : MonoBehaviour
 
     private void GetThirdPersonTargetLocalPose(out Vector3 targetLocalPosition, out Quaternion targetLocalRotation)
     {
-        targetLocalPosition = _thirdPersonCameraLocalPosition;
-        targetLocalRotation = _thirdPersonCameraLocalRotation;
+        if (_useManualThirdPersonCamera)
+        {
+            targetLocalPosition = _thirdPersonCameraOffset;
+            targetLocalRotation = Quaternion.Euler(_thirdPersonCameraPitch, 0f, 0f);
+            return;
+        }
+
+        targetLocalPosition = _cachedThirdPersonCameraLocalPosition;
+        targetLocalRotation = _cachedThirdPersonCameraLocalRotation;
 
         if (_cinemachineCamera == null || _gameplayCameraTransform == null)
         {
@@ -674,8 +694,9 @@ public class PlayerController : MonoBehaviour
     {
         bool zooming = IsZooming();
         float sprintProgress = GetSprintProgress();
+        bool allowSprintFovKick = _currentViewMode == CameraViewMode.FirstPerson;
 
-        float sprintTargetWeight = !zooming ? sprintProgress : 0f;
+        float sprintTargetWeight = allowSprintFovKick && !zooming ? sprintProgress : 0f;
         float sprintBlend = 1f - Mathf.Exp(-_sprintFovBlendSpeed * Time.deltaTime);
         _sprintFovWeight = Mathf.Lerp(_sprintFovWeight, sprintTargetWeight, sprintBlend);
 
@@ -705,19 +726,23 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        float horizontalSpeed = GetHorizontalSpeed();
+        float moveSpeedRatio = Mathf.Clamp01(horizontalSpeed / Mathf.Max(runSpeed, 0.01f));
         float sprintProgress = GetSprintProgress();
-        bool sprintingInFirstPerson =
+        bool movingInFirstPerson =
             _currentViewMode == CameraViewMode.FirstPerson
-            && sprintProgress > 0.001f
-            && _horizontalVelocity.sqrMagnitude > 0.01f;
+            && horizontalSpeed > 0.01f;
 
-        float bobTargetWeight = sprintingInFirstPerson ? sprintProgress : 0f;
+        float walkBobTargetWeight = movingInFirstPerson ? moveSpeedRatio : 0f;
+        float bobTargetWeight = movingInFirstPerson ? sprintProgress : 0f;
         float blend = 1f - Mathf.Exp(-_sprintBobBlendSpeed * Time.deltaTime);
+        _firstPersonBobWeight = Mathf.Lerp(_firstPersonBobWeight, walkBobTargetWeight, blend);
         _sprintBobWeight = Mathf.Lerp(_sprintBobWeight, bobTargetWeight, blend);
 
-        if (_sprintBobWeight > 0.001f)
+        if (_firstPersonBobWeight > 0.001f || _sprintBobWeight > 0.001f)
         {
-            _sprintBobTime += Time.deltaTime * _sprintBobFrequency;
+            float bobFrequency = Mathf.Lerp(_firstPersonWalkBobFrequency, _sprintBobFrequency, _sprintBobWeight);
+            _sprintBobTime += Time.deltaTime * bobFrequency;
         }
         else
         {
@@ -729,7 +754,8 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        float bobOffsetY = Mathf.Sin(_sprintBobTime) * _sprintBobAmplitude * _sprintBobWeight;
+        float bobAmplitude = Mathf.Lerp(_firstPersonWalkBobAmplitude, _sprintBobAmplitude, _sprintBobWeight) * _firstPersonBobWeight;
+        float bobOffsetY = Mathf.Sin(_sprintBobTime) * bobAmplitude;
         Vector3 bobbedPosition = _firstPersonCameraLocalPosition + new Vector3(0f, bobOffsetY, 0f);
         _gameplayCameraTransform.localPosition = bobbedPosition;
     }
