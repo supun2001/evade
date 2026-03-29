@@ -17,6 +17,7 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _inputYHash = Animator.StringToHash("inputY");
     private static readonly int _groundedHash = Animator.StringToHash("IsGrounded");
     private static readonly int _jumpHash = Animator.StringToHash("IsJumping");
+    private static readonly int _verticalSpeedHash = Animator.StringToHash("VerticalSpeed");
 
     private float _currentInputX;
     private float _currentInputY;
@@ -26,6 +27,7 @@ public class PlayerAnimation : MonoBehaviour
     private Vector2 _networkAnimationInput;
     private bool _networkIsGrounded = true;
     private bool _networkIsJumping;
+    private float _networkVerticalSpeed;
 
     private const float DEFAULT_SMOOTH_SPEED = 10f;
     #endregion
@@ -73,12 +75,13 @@ public class PlayerAnimation : MonoBehaviour
         _useNetworkAnimationState = useNetworkAnimationState;
     }
 
-    public void ApplyNetworkState(float inputX, float inputY, bool isGrounded, bool isJumping)
+    public void ApplyNetworkState(float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)
     {
         _useNetworkAnimationState = true;
         _networkAnimationInput = new Vector2(inputX, inputY);
         _networkIsGrounded = isGrounded;
         _networkIsJumping = isJumping;
+        _networkVerticalSpeed = verticalSpeed;
     }
 
     public string GetAnimatorDebugInfo()
@@ -199,13 +202,13 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.Update(0f);
     }
 
-    private void ApplyAnimationStateToAllAnimators(float inputX, float inputY, bool isGrounded, bool isJumping)
+    private void ApplyAnimationStateToAllAnimators(float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)
     {
         if (_childAnimators == null || _childAnimators.Length == 0)
         {
             if (_animator != null)
             {
-                ApplyAnimationState(_animator, inputX, inputY, isGrounded, isJumping);
+                ApplyAnimationState(_animator, inputX, inputY, isGrounded, isJumping, verticalSpeed);
             }
 
             return;
@@ -220,11 +223,11 @@ public class PlayerAnimation : MonoBehaviour
             }
 
             ApplyAnimatorOverrideIfNeeded(targetAnimator);
-            ApplyAnimationState(targetAnimator, inputX, inputY, isGrounded, isJumping);
+            ApplyAnimationState(targetAnimator, inputX, inputY, isGrounded, isJumping, verticalSpeed);
         }
     }
 
-    private void ApplyAnimationState(Animator targetAnimator, float inputX, float inputY, bool isGrounded, bool isJumping)
+    private void ApplyAnimationState(Animator targetAnimator, float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)
     {
         if (targetAnimator == null)
         {
@@ -242,6 +245,7 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetFloat(_inputYHash, inputY);
         targetAnimator.SetBool(_groundedHash, isGrounded);
         targetAnimator.SetBool(_jumpHash, isJumping);
+        targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
     }
 
     public bool UsesSingleForwardRunController()
@@ -271,7 +275,10 @@ public class PlayerAnimation : MonoBehaviour
             : (_playerController != null && _playerController.IsGrounded());
         bool isJumping = _useNetworkAnimationState
             ? _networkIsJumping
-            : (_playerLocomotionInput != null && _playerLocomotionInput.JumpPressed);
+            : (_playerController != null ? _playerController.DidJumpThisFrame() : (_playerLocomotionInput != null && _playerLocomotionInput.JumpPressed));
+        float verticalSpeed = _useNetworkAnimationState
+            ? _networkVerticalSpeed
+            : (_playerController != null ? _playerController.GetVerticalVelocity() : 0f);
 
         Vector2 targetAnimationInput = UsesSingleForwardRunController()
             ? new Vector2(0f, GetAnimationSpeedFactor(input))
@@ -280,7 +287,7 @@ public class PlayerAnimation : MonoBehaviour
         _currentInputX = Mathf.Lerp(_currentInputX, targetAnimationInput.x, _smoothSpeed * deltaTime);
         _currentInputY = Mathf.Lerp(_currentInputY, targetAnimationInput.y, _smoothSpeed * deltaTime);
 
-        ApplyAnimationStateToAllAnimators(_currentInputX, _currentInputY, isGrounded, isJumping);
+        ApplyAnimationStateToAllAnimators(_currentInputX, _currentInputY, isGrounded, isJumping, verticalSpeed);
         _wasGrounded = isGrounded;
     }
 

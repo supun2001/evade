@@ -68,6 +68,7 @@ public class NetworkPlayer : MonoBehaviour
     private static readonly int InputYHash = Animator.StringToHash("inputY");
     private static readonly int GroundedHash = Animator.StringToHash("IsGrounded");
     private static readonly int JumpHash = Animator.StringToHash("IsJumping");
+    private static readonly int VerticalSpeedHash = Animator.StringToHash("VerticalSpeed");
 
     private void Update()
     {
@@ -134,7 +135,7 @@ public class NetworkPlayer : MonoBehaviour
 
             if (anim != null)
             {
-                anim.ApplyNetworkState(_remoteAnimX, _remoteAnimY, playerState.isGrounded, playerState.isJumping);
+                anim.ApplyNetworkState(_remoteAnimX, _remoteAnimY, playerState.isGrounded, playerState.isJumping, playerState.velocityY);
             }
             else
             {
@@ -142,6 +143,7 @@ public class NetworkPlayer : MonoBehaviour
                 animator.SetFloat(InputYHash, _remoteAnimY);
                 animator.SetBool(GroundedHash, playerState.isGrounded);
                 animator.SetBool(JumpHash, playerState.isJumping);
+                animator.SetFloat(VerticalSpeedHash, playerState.velocityY);
             }
         }
     }

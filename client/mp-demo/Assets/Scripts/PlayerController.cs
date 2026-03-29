@@ -91,6 +91,7 @@ public class PlayerController : MonoBehaviour
     private float _verticalVelocity = 0f;
     private Vector3 _horizontalVelocity = Vector3.zero;
     private float _runHeldTime = 0f;
+    private bool _jumpedThisFrame;
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
@@ -151,6 +152,7 @@ public class PlayerController : MonoBehaviour
     private void Update() {
         if (!_playerLocomotionInput.InputEnabled) return;
 
+        _jumpedThisFrame = false;
         HandlePauseMenuToggle();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
@@ -916,6 +918,7 @@ public class PlayerController : MonoBehaviour
                 _horizontalVelocity = horizontalDirection * boostedSpeed;
             }
 
+            _jumpedThisFrame = true;
             _verticalVelocity += MathF.Sqrt(jumpForce * JUMP_VELOCITY_MULTIPLIER * gravity);
         }
     }
@@ -933,6 +936,16 @@ public class PlayerController : MonoBehaviour
     public float GetHorizontalSpeed()
     {
         return _horizontalVelocity.magnitude;
+    }
+
+    public float GetVerticalVelocity()
+    {
+        return _verticalVelocity;
+    }
+
+    public bool DidJumpThisFrame()
+    {
+        return _jumpedThisFrame;
     }
 
     private float GetCurrentMoveSpeed()
