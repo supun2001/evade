@@ -38,6 +38,16 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _sidewaysFriction = 16f;
     [SerializeField] private float _nonForwardSpeedMultiplier = 0.5f;
 
+    [Header("Bhop & Strafing")]
+    [SerializeField] private bool _enableBunnyHop = true;
+    [SerializeField] private float _groundFriction = 10f;
+    [SerializeField] private float _groundControl = 8f;
+    [SerializeField] private float _airAcceleration = 42f;
+    [SerializeField] private float _airStrafeAccelerationMultiplier = 1.35f;
+    [SerializeField] private float _airMaxSpeed = 42f;
+    [SerializeField] private float _bunnyHopSpeedGain = 1.08f;
+    [SerializeField] private float _bunnyHopMaxSpeed = 48f;
+
     [Header("Camera Settings")]
     public float lookSenseH = 0.1f;
     public float lookSenseV = 0.1f;
@@ -834,16 +844,9 @@ public class PlayerController : MonoBehaviour
     private void HandleHorizontalMovement() {
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
         bool isGrounded = IsGrounded();
-
-        float targetSpeed = GetCurrentMoveSpeed() * GetDirectionalSpeedMultiplier(movementInput);
-        bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
-        if (treatAsAirborne)
-        {
-            movementInput.x = 0f;
-        }
-        float maxHorizontalSpeed = treatAsAirborne ? Mathf.Max(targetSpeed, _horizontalVelocity.magnitude) : targetSpeed;
         float deltaTime = Time.deltaTime;
-        
+        bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
+
         Vector3 cameraForward = _transform.forward;
         Vector3 cameraRight = _transform.right;
         
@@ -852,10 +855,23 @@ public class PlayerController : MonoBehaviour
         
         Vector3 movementDirection = cameraForwardXZ * movementInput.y + cameraRightXZ * movementInput.x;
         float inputMagnitude = Mathf.Clamp01(movementInput.magnitude);
+        float targetSpeed = GetCurrentMoveSpeed() * GetDirectionalSpeedMultiplier(movementInput) * inputMagnitude;
+
+        if (treatAsAirborne)
+        {
+            HandleAirMovement(movementInput, movementDirection, inputMagnitude, targetSpeed, deltaTime);
+            return;
+        }
+
+        HandleGroundMovement(movementDirection, inputMagnitude, targetSpeed, deltaTime);
+    }
+
+    private void HandleGroundMovement(Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)
+    {
+        ApplyGroundFriction(deltaTime, _playerLocomotionInput.JumpPressed);
 
         if (movementDirection.sqrMagnitude < 0.001f)
         {
-            _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, drag * deltaTime);
             _horizontalVelocity.y = 0f;
 
             if (_horizontalVelocity.sqrMagnitude < 0.0001f)
@@ -866,40 +882,114 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector3 desiredVelocity = movementDirection.normalized * (maxHorizontalSpeed * inputMagnitude);
-        float turnDot = _horizontalVelocity.sqrMagnitude > 0.001f
-            ? Vector3.Dot(_horizontalVelocity.normalized, desiredVelocity.normalized)
-            : 1f;
-        float turnBoost = turnDot < 0.5f ? 1.75f : 1f;
-        float accelerationStep = runAcceleration * turnBoost * deltaTime;
+        Vector3 desiredDirection = movementDirection.normalized;
+        AccelerateHorizontal(desiredDirection, targetSpeed, runAcceleration, deltaTime);
 
-        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, accelerationStep);
+        float currentSpeed = _horizontalVelocity.magnitude;
+        if (currentSpeed > targetSpeed && targetSpeed > 0.001f)
+        {
+            float controlFactor = 1f - Mathf.Exp(-_groundControl * deltaTime);
+            Vector3 controlledVelocity = desiredDirection * Mathf.Lerp(currentSpeed, targetSpeed, controlFactor);
+            _horizontalVelocity = Vector3.Lerp(_horizontalVelocity, controlledVelocity, controlFactor);
+        }
 
         if (_horizontalVelocity.sqrMagnitude > 0.001f)
         {
+            float turnDot = Vector3.Dot(_horizontalVelocity.normalized, desiredDirection);
             float sharpTurnAmount = (1f - turnDot) * 0.5f;
             float steerStrength = _turnResponsiveness * (1f + sharpTurnAmount * _sharpTurnBoost);
             float steerBlend = 1f - Mathf.Exp(-steerStrength * deltaTime);
-            Vector3 steeredDirection = Vector3.Slerp(_horizontalVelocity.normalized, desiredVelocity.normalized, steerBlend).normalized;
-            float steeredSpeed = Mathf.Min(_horizontalVelocity.magnitude, maxHorizontalSpeed);
+            Vector3 steeredDirection = Vector3.Slerp(_horizontalVelocity.normalized, desiredDirection, steerBlend).normalized;
+            _horizontalVelocity = steeredDirection * _horizontalVelocity.magnitude;
 
-            _horizontalVelocity = steeredDirection * steeredSpeed;
-
-            Vector3 lateralVelocity = _horizontalVelocity - Vector3.Project(_horizontalVelocity, desiredVelocity.normalized);
+            Vector3 lateralVelocity = _horizontalVelocity - Vector3.Project(_horizontalVelocity, desiredDirection);
             float lateralBlend = 1f - Mathf.Exp(-_sidewaysFriction * deltaTime);
             _horizontalVelocity -= lateralVelocity * lateralBlend;
         }
 
-        if (_horizontalVelocity.sqrMagnitude > maxHorizontalSpeed * maxHorizontalSpeed)
+        if (_horizontalVelocity.sqrMagnitude > targetSpeed * targetSpeed && targetSpeed > 0.001f)
         {
-            _horizontalVelocity = _horizontalVelocity.normalized * maxHorizontalSpeed;
+            _horizontalVelocity = _horizontalVelocity.normalized * targetSpeed;
         }
 
-        if (inputMagnitude <= 0.001f)
+        _horizontalVelocity.y = 0f;
+    }
+
+    private void HandleAirMovement(Vector2 movementInput, Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)
+    {
+        float airSpeedLimit = Mathf.Max(_airMaxSpeed, _bunnyHopMaxSpeed + fullSprintJumpSpeedBonus);
+
+        if (movementDirection.sqrMagnitude <= 0.001f || inputMagnitude <= 0.001f)
+        {
+            if (_horizontalVelocity.magnitude > airSpeedLimit)
+            {
+                _horizontalVelocity = _horizontalVelocity.normalized * airSpeedLimit;
+            }
+
+            _horizontalVelocity.y = 0f;
+            return;
+        }
+
+        Vector3 desiredDirection = movementDirection.normalized;
+        float airAcceleration = _airAcceleration;
+
+        if (Mathf.Abs(movementInput.x) > 0.01f && movementInput.y <= 0.01f)
+        {
+            airAcceleration *= _airStrafeAccelerationMultiplier;
+        }
+
+        float airTargetSpeed = Mathf.Min(Mathf.Max(targetSpeed, GetCurrentMoveSpeed() * inputMagnitude), airSpeedLimit);
+        AccelerateHorizontal(desiredDirection, airTargetSpeed, airAcceleration, deltaTime);
+
+        if (_horizontalVelocity.magnitude > airSpeedLimit)
+        {
+            _horizontalVelocity = _horizontalVelocity.normalized * airSpeedLimit;
+        }
+
+        _horizontalVelocity.y = 0f;
+    }
+
+    private void ApplyGroundFriction(float deltaTime, bool preserveMomentumForJump)
+    {
+        if (preserveMomentumForJump || _horizontalVelocity.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        float speed = _horizontalVelocity.magnitude;
+        float drop = speed * Mathf.Max(_groundFriction, 0f) * deltaTime;
+        float newSpeed = Mathf.Max(speed - drop, 0f);
+
+        if (newSpeed <= 0.0001f)
         {
             _horizontalVelocity = Vector3.zero;
+            return;
         }
 
+        _horizontalVelocity *= newSpeed / speed;
+    }
+
+    private void AccelerateHorizontal(Vector3 desiredDirection, float targetSpeed, float acceleration, float deltaTime)
+    {
+        if (desiredDirection.sqrMagnitude <= 0.001f || targetSpeed <= 0.001f)
+        {
+            return;
+        }
+
+        float currentSpeedInDirection = Vector3.Dot(_horizontalVelocity, desiredDirection);
+        float addSpeed = targetSpeed - currentSpeedInDirection;
+        if (addSpeed <= 0f)
+        {
+            return;
+        }
+
+        float accelSpeed = acceleration * deltaTime * targetSpeed;
+        if (accelSpeed > addSpeed)
+        {
+            accelSpeed = addSpeed;
+        }
+
+        _horizontalVelocity += desiredDirection * accelSpeed;
         _horizontalVelocity.y = 0f;
     }
 
@@ -937,10 +1027,22 @@ public class PlayerController : MonoBehaviour
         _verticalVelocity -= gravity * deltaTime;
 
         if(_playerLocomotionInput.JumpPressed && isGrounded){
-            if (IsSprinting() && _horizontalVelocity.sqrMagnitude > 0.001f)
+            if (_horizontalVelocity.sqrMagnitude > 0.001f)
             {
                 Vector3 horizontalDirection = _horizontalVelocity.normalized;
-                float boostedSpeed = _horizontalVelocity.magnitude + fullSprintJumpSpeedBonus;
+                float currentSpeed = _horizontalVelocity.magnitude;
+                float boostedSpeed = currentSpeed;
+
+                if (_enableBunnyHop)
+                {
+                    boostedSpeed = Mathf.Min(currentSpeed * _bunnyHopSpeedGain, _bunnyHopMaxSpeed);
+                }
+
+                if (IsSprinting())
+                {
+                    boostedSpeed += fullSprintJumpSpeedBonus;
+                }
+
                 _horizontalVelocity = horizontalDirection * boostedSpeed;
             }
 
