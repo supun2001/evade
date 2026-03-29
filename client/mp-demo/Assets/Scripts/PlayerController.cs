@@ -36,6 +36,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _turnResponsiveness = 14f;
     [SerializeField] private float _sharpTurnBoost = 2.5f;
     [SerializeField] private float _sidewaysFriction = 16f;
+    [SerializeField] private float _nonForwardSpeedMultiplier = 0.5f;
 
     [Header("Camera Settings")]
     public float lookSenseH = 0.1f;
@@ -806,7 +807,7 @@ public class PlayerController : MonoBehaviour
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
         bool isGrounded = IsGrounded();
 
-        float targetSpeed = GetCurrentMoveSpeed();
+        float targetSpeed = GetCurrentMoveSpeed() * GetDirectionalSpeedMultiplier(movementInput);
         bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
         if (treatAsAirborne)
         {
@@ -872,6 +873,26 @@ public class PlayerController : MonoBehaviour
         }
 
         _horizontalVelocity.y = 0f;
+    }
+
+    private float GetDirectionalSpeedMultiplier(Vector2 movementInput)
+    {
+        if (movementInput.sqrMagnitude <= 0.0001f)
+        {
+            return 1f;
+        }
+
+        if (movementInput.y < -0.01f)
+        {
+            return _nonForwardSpeedMultiplier;
+        }
+
+        if (Mathf.Abs(movementInput.x) > 0.01f && movementInput.y <= 0.01f)
+        {
+            return _nonForwardSpeedMultiplier;
+        }
+
+        return 1f;
     }
     #endregion
 
