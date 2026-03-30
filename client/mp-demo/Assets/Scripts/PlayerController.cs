@@ -171,6 +171,7 @@ public class PlayerController : MonoBehaviour
 
         _jumpedThisFrame = false;
         HandlePauseMenuToggle();
+        EnforceInjuredCameraView();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
 
@@ -219,6 +220,7 @@ public class PlayerController : MonoBehaviour
     private void HandleViewToggle()
     {
         if (!_playerLocomotionInput.InputEnabled) return;
+        if (IsInjured()) return;
 
         if (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
         {
@@ -229,6 +231,16 @@ public class PlayerController : MonoBehaviour
 
             SetCameraView(nextView);
         }
+    }
+
+    private void EnforceInjuredCameraView()
+    {
+        if (!IsInjured() || _currentViewMode == CameraViewMode.ThirdPerson)
+        {
+            return;
+        }
+
+        SetCameraView(CameraViewMode.ThirdPerson);
     }
 
     private void UpdateAutoSprint()
@@ -498,6 +510,11 @@ public class PlayerController : MonoBehaviour
 
     private void SetCameraView(CameraViewMode newViewMode, bool force = false)
     {
+        if (IsInjured() && newViewMode == CameraViewMode.FirstPerson)
+        {
+            newViewMode = CameraViewMode.ThirdPerson;
+        }
+
         if (!force && _currentViewMode == newViewMode)
         {
             return;
