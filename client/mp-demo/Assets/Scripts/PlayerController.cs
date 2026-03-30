@@ -1030,9 +1030,10 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        Quaternion correctedForwardRotation = Quaternion.Euler(0f, 180f, 0f) * _injuredVisualRootBaseLocalRotation;
         _injuredVisualRoot.localRotation = Quaternion.Slerp(
             _injuredVisualRoot.localRotation,
-            _injuredVisualRootBaseLocalRotation,
+            correctedForwardRotation,
             1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime));
     }
 
