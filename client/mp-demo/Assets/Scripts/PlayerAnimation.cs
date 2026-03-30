@@ -354,11 +354,14 @@ public class PlayerAnimation : MonoBehaviour
     {
         if (IsInjuredActive)
         {
+            if (fallbackInput.sqrMagnitude <= 0.0001f)
+            {
+                return Vector2.zero;
+            }
+
             if (_useNetworkAnimationState || _playerController == null)
             {
-                return fallbackInput.sqrMagnitude > 0.0001f
-                    ? Vector2.ClampMagnitude(fallbackInput.normalized, 1f)
-                    : Vector2.zero;
+                return Vector2.ClampMagnitude(fallbackInput.normalized, 1f);
             }
 
             Vector3 injuredLocalVelocity = transform.InverseTransformDirection(_playerController.GetVelocity());
@@ -369,9 +372,7 @@ public class PlayerAnimation : MonoBehaviour
                 return Vector2.ClampMagnitude(injuredPlanarVelocity.normalized, 1f);
             }
 
-            return fallbackInput.sqrMagnitude > 0.0001f
-                ? Vector2.ClampMagnitude(fallbackInput.normalized, 1f)
-                : Vector2.zero;
+            return Vector2.ClampMagnitude(fallbackInput.normalized, 1f);
         }
 
         float speedFactor = GetAnimationSpeedFactor(fallbackInput);
