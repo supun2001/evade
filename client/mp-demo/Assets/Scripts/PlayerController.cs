@@ -38,6 +38,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _sharpTurnBoost = 2.5f;
     [SerializeField] private float _sidewaysFriction = 16f;
     [SerializeField] private float _nonForwardSpeedMultiplier = 0.5f;
+    [SerializeField] private float _injuredRotationSharpness = 12f;
 
     [Header("Bhop & Strafing")]
     [SerializeField] private bool _enableBunnyHop = true;
@@ -92,6 +93,7 @@ public class PlayerController : MonoBehaviour
     private Transform _gameplayCameraTransform;
     private Camera _gameplayCamera;
     private PlayerAnimation _playerAnimation;
+    private Transform _injuredVisualRoot;
     private UIDocument _playerHudDocument;
     private Label _speedLabel;
     private Label _animationDebugLabel;
@@ -128,11 +130,14 @@ public class PlayerController : MonoBehaviour
     private Transform _rightArmTransform;
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
+    private Quaternion _injuredVisualRootBaseLocalRotation = Quaternion.identity;
     private Coroutine _cameraTransitionCoroutine;
     private bool _isPauseMenuOpen;
     private bool _hudEventsBound;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
+    private const string INJURED_VISUAL_ROOT_NAME = "player";
+    private const string INJURED_VISUAL_PIVOT_NAME = "InjuredVisualPivot";
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     #endregion
@@ -154,6 +159,7 @@ public class PlayerController : MonoBehaviour
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
         CacheArmTransforms();
+        CacheInjuredVisualRoot();
         CacheHudElements();
     }
     
@@ -275,9 +281,19 @@ public class PlayerController : MonoBehaviour
         
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, minPitch, maxPitch);
-        
+
         _playerRotationY += lookSenseH * lookInput.x;
+
         _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
+
+        if (IsInjured())
+        {
+            UpdateInjuredFacing();
+        }
+        else
+        {
+            ResetInjuredVisualRootRotation();
+        }
 
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
         UpdateSprintCameraBob();
@@ -383,6 +399,100 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+    }
+
+    private void CacheInjuredVisualRoot()
+    {
+        if (_injuredVisualRoot != null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _transform.childCount; i++)
+        {
+            Transform child = _transform.GetChild(i);
+            if (string.Equals(child.name, INJURED_VISUAL_ROOT_NAME, StringComparison.OrdinalIgnoreCase))
+            {
+                _injuredVisualRoot = EnsureInjuredVisualPivot(child);
+                _injuredVisualRootBaseLocalRotation = _injuredVisualRoot.localRotation;
+                return;
+            }
+        }
+
+        Transform bestChild = null;
+        int bestScore = int.MinValue;
+        for (int i = 0; i < _transform.childCount; i++)
+        {
+            Transform child = _transform.GetChild(i);
+            Animator childAnimator = child.GetComponentInChildren<Animator>(true);
+            if (childAnimator == null)
+            {
+                continue;
+            }
+
+            int score = child.GetComponentsInChildren<Renderer>(true).Length * 10
+                + child.GetComponentsInChildren<Transform>(true).Length;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestChild = child;
+            }
+        }
+
+        if (bestChild != null)
+        {
+            _injuredVisualRoot = EnsureInjuredVisualPivot(bestChild);
+            _injuredVisualRootBaseLocalRotation = _injuredVisualRoot.localRotation;
+            return;
+        }
+
+        if (_playerAnimation == null || _playerAnimation.VisualRootTransform == null)
+        {
+            return;
+        }
+
+        _injuredVisualRoot = EnsureInjuredVisualPivot(_playerAnimation.VisualRootTransform);
+        _injuredVisualRootBaseLocalRotation = _injuredVisualRoot.localRotation;
+    }
+
+    private Transform EnsureInjuredVisualPivot(Transform visualTransform)
+    {
+        if (visualTransform == null)
+        {
+            return null;
+        }
+
+        if (visualTransform.parent == _transform && string.Equals(visualTransform.name, INJURED_VISUAL_PIVOT_NAME, StringComparison.OrdinalIgnoreCase))
+        {
+            return visualTransform;
+        }
+
+        if (visualTransform.parent != null
+            && visualTransform.parent.parent == _transform
+            && string.Equals(visualTransform.parent.name, INJURED_VISUAL_PIVOT_NAME, StringComparison.OrdinalIgnoreCase))
+        {
+            return visualTransform.parent;
+        }
+
+        Transform existingPivot = _transform.Find(INJURED_VISUAL_PIVOT_NAME);
+        if (existingPivot == null)
+        {
+            GameObject pivotObject = new GameObject(INJURED_VISUAL_PIVOT_NAME);
+            existingPivot = pivotObject.transform;
+            existingPivot.SetParent(_transform, false);
+            existingPivot.localPosition = visualTransform.localPosition;
+            existingPivot.localRotation = visualTransform.localRotation;
+            existingPivot.localScale = Vector3.one;
+            existingPivot.SetSiblingIndex(visualTransform.GetSiblingIndex());
+        }
+
+        if (visualTransform.parent != existingPivot)
+        {
+            visualTransform.SetParent(existingPivot, true);
+        }
+
+        return existingPivot;
     }
 
     private void CacheHudElements()
@@ -890,6 +1000,42 @@ public class PlayerController : MonoBehaviour
         HandleGroundMovement(movementDirection, inputMagnitude, targetSpeed, deltaTime);
     }
 
+    private void UpdateInjuredFacing()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+        if (movementInput.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        float localYaw = Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f;
+        float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
+        Quaternion targetLocalRotation = Quaternion.Euler(0f, localYaw, 0f) * _injuredVisualRootBaseLocalRotation;
+        _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+    }
+
+    private void ResetInjuredVisualRootRotation()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        _injuredVisualRoot.localRotation = Quaternion.Slerp(
+            _injuredVisualRoot.localRotation,
+            _injuredVisualRootBaseLocalRotation,
+            1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime));
+    }
+
     private void HandleGroundMovement(Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)
     {
         ApplyGroundFriction(deltaTime, _playerLocomotionInput.JumpPressed);
@@ -1055,7 +1201,7 @@ public class PlayerController : MonoBehaviour
         
         _verticalVelocity -= gravity * deltaTime;
 
-        if(_playerLocomotionInput.JumpPressed && isGrounded){
+        if(!IsInjured() && _playerLocomotionInput.JumpPressed && isGrounded){
             if (_horizontalVelocity.sqrMagnitude > 0.001f)
             {
                 Vector3 horizontalDirection = _horizontalVelocity.normalized;

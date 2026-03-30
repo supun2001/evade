@@ -6,12 +6,14 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private Animator _animator;
     [SerializeField] private RuntimeAnimatorController _childAnimatorControllerOverride;
     public Animator Animator => _animator;
+    public Transform VisualRootTransform => _animator != null ? _animator.transform : null;
     public bool IsInjuredActive => _debugForceInjured || _isInjured;
     [SerializeField] private float animationSmoothTime = 0.1f;
     [SerializeField] private bool _useSingleForwardRunAnimation = false;
     [SerializeField] private bool _debugForceInjured = false;
     [SerializeField] private float _jumpAnimationMinAirTime = 0.12f;
     [SerializeField] private float _landingGroundedBuffer = 0.05f;
+    [SerializeField] private float _injuredReleaseBlendDuration = 0.16f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -36,6 +38,8 @@ public class PlayerAnimation : MonoBehaviour
     private float _jumpAnimationLatchTimer;
     private float _groundedStableTimer;
     private bool _isInjured;
+    private float _injuredMoveAmount;
+    private float _injuredReleaseTimer;
     private Vector2 _lastAppliedAnimationInput;
     private bool _lastAppliedGrounded = true;
     private bool _lastAppliedJumping;
@@ -292,6 +296,12 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
+        if (!IsInjuredActive)
+        {
+            _injuredMoveAmount = 0f;
+            _injuredReleaseTimer = 0f;
+        }
+
         Vector2 input = _useNetworkAnimationState
             ? _networkAnimationInput
             : (_playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero);
@@ -354,25 +364,7 @@ public class PlayerAnimation : MonoBehaviour
     {
         if (IsInjuredActive)
         {
-            if (fallbackInput.sqrMagnitude <= 0.0001f)
-            {
-                return Vector2.zero;
-            }
-
-            if (_useNetworkAnimationState || _playerController == null)
-            {
-                return Vector2.ClampMagnitude(fallbackInput.normalized, 1f);
-            }
-
-            Vector3 injuredLocalVelocity = transform.InverseTransformDirection(_playerController.GetVelocity());
-            Vector2 injuredPlanarVelocity = new Vector2(injuredLocalVelocity.x, injuredLocalVelocity.z);
-
-            if (injuredPlanarVelocity.sqrMagnitude > 0.0001f)
-            {
-                return Vector2.ClampMagnitude(injuredPlanarVelocity.normalized, 1f);
-            }
-
-            return Vector2.ClampMagnitude(fallbackInput.normalized, 1f);
+            return GetInjuredAnimationInput(fallbackInput, Time.deltaTime);
         }
 
         float speedFactor = GetAnimationSpeedFactor(fallbackInput);
@@ -404,6 +396,53 @@ public class PlayerAnimation : MonoBehaviour
             ? Mathf.Max(_playerController.GetInjuredMoveSpeed(), 0.01f)
             : Mathf.Max(_playerController.sprintSpeed, 0.01f);
         return Mathf.Clamp01(_playerController.GetHorizontalSpeed() / maxAnimationSpeed);
+    }
+
+    private Vector2 GetInjuredAnimationInput(Vector2 fallbackInput, float deltaTime)
+    {
+        if (_useNetworkAnimationState || _playerController == null)
+        {
+            if (fallbackInput.sqrMagnitude > 0.0001f)
+            {
+                _injuredMoveAmount = 1f;
+                _injuredReleaseTimer = _injuredReleaseBlendDuration;
+            }
+            else
+            {
+                _injuredMoveAmount = GetInjuredReleaseAmount(deltaTime);
+            }
+
+            return new Vector2(0f, _injuredMoveAmount);
+        }
+
+        if (fallbackInput.sqrMagnitude > 0.0001f)
+        {
+            _injuredMoveAmount = 1f;
+            _injuredReleaseTimer = _injuredReleaseBlendDuration;
+        }
+        else
+        {
+            _injuredMoveAmount = GetInjuredReleaseAmount(deltaTime);
+        }
+
+        return new Vector2(0f, _injuredMoveAmount);
+    }
+
+    private float GetInjuredReleaseAmount(float deltaTime)
+    {
+        if (_injuredMoveAmount <= 0.0001f)
+        {
+            _injuredReleaseTimer = 0f;
+            return 0f;
+        }
+
+        _injuredReleaseTimer = Mathf.Max(0f, _injuredReleaseTimer - deltaTime);
+        if (_injuredReleaseTimer <= 0f)
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01(_injuredReleaseTimer / Mathf.Max(_injuredReleaseBlendDuration, 0.001f));
     }
 
     private void OnAnimatorMove()
