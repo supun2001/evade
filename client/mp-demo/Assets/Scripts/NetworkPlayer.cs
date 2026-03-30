@@ -11,6 +11,7 @@ public class NetworkPlayer : MonoBehaviour
     private Vector3 targetPos;
     private Quaternion targetRot;
     private float lerpSpeed = 15f;
+    private Vector3 _remoteVelocity;
 
     // References
     private PlayerController controller;
@@ -101,24 +102,39 @@ public class NetworkPlayer : MonoBehaviour
         float camRx = Camera.main ? Camera.main.transform.localEulerAngles.x : 0;
         float camRy = Camera.main ? Camera.main.transform.localEulerAngles.y : 0;
 
-        // Use raw input for more reliability
-        Vector2 moveInput = input ? input.MovementInput : Vector2.zero;
-        
+        Vector2 animationInput = input ? input.MovementInput : Vector2.zero;
+        bool isGrounded = controller != null && controller.IsGrounded();
+        bool isJumping = _jumpQueued;
+        float verticalSpeed = controller != null ? controller.GetVerticalVelocity() : 0f;
+
+        if (anim != null)
+        {
+            anim.GetAnimationSyncState(out Vector2 syncedAnimationInput, out bool syncedGrounded, out bool syncedJumping, out float syncedVerticalSpeed);
+            animationInput = syncedAnimationInput;
+            isGrounded = syncedGrounded;
+            isJumping = isJumping || syncedJumping;
+            verticalSpeed = syncedVerticalSpeed;
+        }
+
+        Vector3 velocity = controller != null ? controller.GetVelocity() : Vector3.up * verticalSpeed;
+
         NetworkManager.Instance.SendPlayerUpdate(
             transform.position,
             transform.eulerAngles.y,
-            controller.GetVelocity(),
-            moveInput.x,
-            moveInput.y,
-            controller.IsGrounded(),
-            _jumpQueued, // Send the latched value
+            velocity,
+            animationInput.x,
+            animationInput.y,
+            isGrounded,
+            isJumping,
             new Vector2(camRx, camRy)
         );
     }
 
     private void UpdateRemoteState()
     {
-        targetPos = new Vector3(playerState.x, playerState.y, playerState.z);
+        _remoteVelocity = new Vector3(playerState.velocityX, playerState.velocityY, playerState.velocityZ);
+        Vector3 extrapolatedOffset = new Vector3(_remoteVelocity.x, 0f, _remoteVelocity.z) * sendInterval;
+        targetPos = new Vector3(playerState.x, playerState.y, playerState.z) + extrapolatedOffset;
         targetRot = Quaternion.Euler(0, playerState.rotationY, 0);
 
         if (animator)
@@ -150,7 +166,10 @@ public class NetworkPlayer : MonoBehaviour
 
     private void InterpolateRemotePlayer()
     {
-        transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * lerpSpeed);
-        transform.rotation = Quaternion.Lerp(transform.rotation, targetRot, Time.deltaTime * lerpSpeed);
+        float positionBlend = 1f - Mathf.Exp(-lerpSpeed * Time.deltaTime);
+        float rotationBlend = 1f - Mathf.Exp(-(lerpSpeed + 4f) * Time.deltaTime);
+
+        transform.position = Vector3.Lerp(transform.position, targetPos, positionBlend);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationBlend);
     }
 }

@@ -8,6 +8,8 @@ public class PlayerAnimation : MonoBehaviour
     public Animator Animator => _animator;
     [SerializeField] private float animationSmoothTime = 0.1f;
     [SerializeField] private bool _useSingleForwardRunAnimation = false;
+    [SerializeField] private float _jumpAnimationMinAirTime = 0.12f;
+    [SerializeField] private float _landingGroundedBuffer = 0.05f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -28,6 +30,12 @@ public class PlayerAnimation : MonoBehaviour
     private bool _networkIsGrounded = true;
     private bool _networkIsJumping;
     private float _networkVerticalSpeed;
+    private float _jumpAnimationLatchTimer;
+    private float _groundedStableTimer;
+    private Vector2 _lastAppliedAnimationInput;
+    private bool _lastAppliedGrounded = true;
+    private bool _lastAppliedJumping;
+    private float _lastAppliedVerticalSpeed;
 
     private const float DEFAULT_SMOOTH_SPEED = 10f;
     #endregion
@@ -82,6 +90,14 @@ public class PlayerAnimation : MonoBehaviour
         _networkIsGrounded = isGrounded;
         _networkIsJumping = isJumping;
         _networkVerticalSpeed = verticalSpeed;
+    }
+
+    public void GetAnimationSyncState(out Vector2 animationInput, out bool isGrounded, out bool isJumping, out float verticalSpeed)
+    {
+        animationInput = _lastAppliedAnimationInput;
+        isGrounded = _lastAppliedGrounded;
+        isJumping = _lastAppliedJumping;
+        verticalSpeed = _lastAppliedVerticalSpeed;
     }
 
     public string GetAnimatorDebugInfo()
@@ -273,12 +289,13 @@ public class PlayerAnimation : MonoBehaviour
         bool isGrounded = _useNetworkAnimationState
             ? _networkIsGrounded
             : (_playerController != null && _playerController.IsGrounded());
-        bool isJumping = _useNetworkAnimationState
+        bool isJumpTriggered = _useNetworkAnimationState
             ? _networkIsJumping
             : (_playerController != null ? _playerController.DidJumpThisFrame() : (_playerLocomotionInput != null && _playerLocomotionInput.JumpPressed));
         float verticalSpeed = _useNetworkAnimationState
             ? _networkVerticalSpeed
             : (_playerController != null ? _playerController.GetVerticalVelocity() : 0f);
+        bool visualGrounded = GetStableGroundedState(isGrounded, verticalSpeed, isJumpTriggered, deltaTime);
 
         Vector2 targetAnimationInput = UsesSingleForwardRunController()
             ? new Vector2(0f, GetAnimationSpeedFactor(input))
@@ -287,8 +304,40 @@ public class PlayerAnimation : MonoBehaviour
         _currentInputX = Mathf.Lerp(_currentInputX, targetAnimationInput.x, _smoothSpeed * deltaTime);
         _currentInputY = Mathf.Lerp(_currentInputY, targetAnimationInput.y, _smoothSpeed * deltaTime);
 
-        ApplyAnimationStateToAllAnimators(_currentInputX, _currentInputY, isGrounded, isJumping, verticalSpeed);
-        _wasGrounded = isGrounded;
+        _lastAppliedAnimationInput = new Vector2(_currentInputX, _currentInputY);
+        _lastAppliedGrounded = visualGrounded;
+        _lastAppliedJumping = isJumpTriggered;
+        _lastAppliedVerticalSpeed = verticalSpeed;
+
+        ApplyAnimationStateToAllAnimators(_currentInputX, _currentInputY, visualGrounded, isJumpTriggered, verticalSpeed);
+        _wasGrounded = visualGrounded;
+    }
+
+    private bool GetStableGroundedState(bool rawGrounded, float verticalSpeed, bool isJumpTriggered, float deltaTime)
+    {
+        if (isJumpTriggered)
+        {
+            _jumpAnimationLatchTimer = _jumpAnimationMinAirTime;
+            _groundedStableTimer = 0f;
+            return false;
+        }
+
+        if (_jumpAnimationLatchTimer > 0f)
+        {
+            _jumpAnimationLatchTimer = Mathf.Max(0f, _jumpAnimationLatchTimer - deltaTime);
+        }
+
+        bool canBeGrounded = rawGrounded && verticalSpeed <= 0.01f && _jumpAnimationLatchTimer <= 0f;
+        if (canBeGrounded)
+        {
+            _groundedStableTimer += deltaTime;
+        }
+        else
+        {
+            _groundedStableTimer = 0f;
+        }
+
+        return canBeGrounded && _groundedStableTimer >= _landingGroundedBuffer;
     }
 
     private Vector2 GetDirectionalAnimationInput(Vector2 fallbackInput)

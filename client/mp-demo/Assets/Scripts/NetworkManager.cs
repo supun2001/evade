@@ -3,8 +3,11 @@ using Colyseus;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Colyseus.Schema;
+using System;
 public class NetworkManager : MonoBehaviour
 {
+    private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
+
     public static NetworkManager Instance;
     
     [Header("Network Configuration")]
@@ -12,14 +15,16 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private string localServerUrl = "ws://localhost:2567";
 
     [Tooltip("Production server URL (Render/Railway). Must use wss:// for WebGL.")]
-    [SerializeField] private string productionServerUrl = "wss://unity6-demo-new-gmc8axbnc2fugtdw.canadacentral-01.azurewebsites.net";
+    [SerializeField] private string productionServerUrl = HostedServerUrl;
+    [Tooltip("Use the production URL even while running in the Unity Editor.")]
+    [SerializeField] private bool useProductionServerInEditor = false;
 
     public string serverUrl 
     {
         get 
         {
             #if UNITY_EDITOR
-                return localServerUrl;
+                return useProductionServerInEditor ? productionServerUrl : localServerUrl;
             #else
                 return productionServerUrl;
             #endif
@@ -43,6 +48,8 @@ public class NetworkManager : MonoBehaviour
         } 
         Instance = this; 
         DontDestroyOnLoad(gameObject); 
+
+        MigrateLegacyServerUrls();
         
         // Ensure the game keeps running and syncing when focus is lost (e.g., when testing multiple instances)
         Application.runInBackground = true;
@@ -50,7 +57,7 @@ public class NetworkManager : MonoBehaviour
 
     private async void Start()
     {
-        client = new ColyseusClient(serverUrl);
+        client = CreateClient();
     }
 
     public System.Action<string, Player> OnPlayerAddedEvent;
@@ -179,7 +186,69 @@ public class NetworkManager : MonoBehaviour
 
     private void InitializeClient()
     {
-        if (client == null) client = new ColyseusClient(serverUrl);
+        if (client == null) client = CreateClient();
+    }
+
+    private ColyseusClient CreateClient()
+    {
+        Uri uri = BuildServerUri(serverUrl);
+        bool secure = string.Equals(uri.Scheme, "wss", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase);
+
+        ColyseusSettings settings = ScriptableObject.CreateInstance<ColyseusSettings>();
+        settings.colyseusServerAddress = uri.Host;
+        settings.colyseusServerPort = uri.IsDefaultPort
+            ? (secure ? "443" : "80")
+            : uri.Port.ToString();
+        settings.useSecureProtocol = secure;
+
+        Debug.Log($"Connecting to Colyseus: {(secure ? "secure" : "insecure")}://{settings.colyseusServerAddress}:{settings.colyseusServerPort}");
+        return new ColyseusClient(settings);
+    }
+
+    private void MigrateLegacyServerUrls()
+    {
+        if (IsLegacyHostedUrl(localServerUrl))
+        {
+            localServerUrl = HostedServerUrl;
+        }
+
+        if (IsLegacyHostedUrl(productionServerUrl) || string.IsNullOrWhiteSpace(productionServerUrl))
+        {
+            productionServerUrl = HostedServerUrl;
+        }
+    }
+
+    private bool IsLegacyHostedUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        return url.Contains("azurewebsites.net", StringComparison.OrdinalIgnoreCase)
+            || url.Contains("unity6-demo-mp.onrender.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private Uri BuildServerUri(string rawServerUrl)
+    {
+        string candidate = (rawServerUrl ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(candidate))
+        {
+            candidate = "ws://localhost:2567";
+        }
+
+        if (!candidate.Contains("://", StringComparison.Ordinal))
+        {
+            candidate = $"ws://{candidate}";
+        }
+
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out Uri uri))
+        {
+            throw new InvalidOperationException($"Invalid Colyseus server URL: {rawServerUrl}");
+        }
+
+        return uri;
     }
 
     private void OnRoomJoined()
