@@ -255,7 +255,7 @@ public class PlayerController : MonoBehaviour
         float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
         
         _cameraRotation.x += lookSenseH * lookInput.x;
-        _cameraRotation.y = Mathf.Clamp(_cameraRotation.y + lookSenseV * lookInput.y, minPitch, maxPitch);
+        _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, minPitch, maxPitch);
         
         _playerRotationY += lookSenseH * lookInput.x;
         _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);

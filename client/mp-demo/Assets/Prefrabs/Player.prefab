@@ -162,7 +162,7 @@ Transform:
   m_GameObject: {fileID: 4842325826247379024}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.21, z: 0}
+  m_LocalPosition: {x: 0, y: 0.12, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -197,6 +197,14 @@ MonoBehaviour:
   _sharpTurnBoost: 2.5
   _sidewaysFriction: 16
   _nonForwardSpeedMultiplier: 0.5
+  _enableBunnyHop: 1
+  _groundFriction: 10
+  _groundControl: 8
+  _airAcceleration: 42
+  _airStrafeAccelerationMultiplier: 1.35
+  _airMaxSpeed: 42
+  _bunnyHopSpeedGain: 1.08
+  _bunnyHopMaxSpeed: 48
   lookSenseH: 0.1
   lookSenseV: 0.1
   lookLimitV: 70
@@ -280,6 +288,8 @@ MonoBehaviour:
   _childAnimatorControllerOverride: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
   animationSmoothTime: 0.1
   _useSingleForwardRunAnimation: 0
+  _jumpAnimationMinAirTime: 0.12
+  _landingGroundedBuffer: 0.05
 --- !u!114 &7426455774788748035
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -514,7 +524,7 @@ Transform:
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
   m_LocalRotation: {x: 0.034122106, y: 0.0000000074063085, z: 8.110277e-10, w: 0.9994177}
-  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
+  m_LocalPosition: {x: -108.453514, y: 2.5193248, z: -23.767899}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -681,7 +691,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.01
+      value: -0.06
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
       propertyPath: m_LocalPosition.z
