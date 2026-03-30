@@ -26,6 +26,7 @@ public class PlayerController : MonoBehaviour
     public float runAcceleration = 0.25f;
     public float runSpeed = 4f;
     public float sprintSpeed = 7f;
+    [SerializeField] private float _injuredMoveSpeed = 1.75f;
     public float autoSprintDelay = 5f;
     public float drag = 0.1f;
     public float gravity = 25f;
@@ -232,6 +233,12 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateAutoSprint()
     {
+        if (IsInjured())
+        {
+            _runHeldTime = 0f;
+            return;
+        }
+
         bool hasMovementInput = _playerLocomotionInput.MovementInput.sqrMagnitude > 0.01f;
 
         if (hasMovementInput)
@@ -995,6 +1002,11 @@ public class PlayerController : MonoBehaviour
 
     private float GetDirectionalSpeedMultiplier(Vector2 movementInput)
     {
+        if (IsInjured())
+        {
+            return 1f;
+        }
+
         if (movementInput.sqrMagnitude <= 0.0001f)
         {
             return 1f;
@@ -1066,6 +1078,11 @@ public class PlayerController : MonoBehaviour
         return _horizontalVelocity.magnitude;
     }
 
+    public float GetInjuredMoveSpeed()
+    {
+        return _injuredMoveSpeed;
+    }
+
     public float GetVerticalVelocity()
     {
         return _verticalVelocity;
@@ -1078,12 +1095,22 @@ public class PlayerController : MonoBehaviour
 
     private float GetCurrentMoveSpeed()
     {
+        if (IsInjured())
+        {
+            return _injuredMoveSpeed;
+        }
+
         float baseSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
         return baseSpeed;
     }
 
     private float GetSprintProgress()
     {
+        if (IsInjured())
+        {
+            return 0f;
+        }
+
         if (_playerLocomotionInput == null || _playerLocomotionInput.MovementInput.sqrMagnitude <= 0.01f)
         {
             return 0f;
@@ -1100,6 +1127,11 @@ public class PlayerController : MonoBehaviour
     private bool IsSprinting()
     {
         return GetSprintProgress() >= 0.999f;
+    }
+
+    private bool IsInjured()
+    {
+        return _playerAnimation != null && _playerAnimation.IsInjuredActive;
     }
 
     private bool IsZooming()

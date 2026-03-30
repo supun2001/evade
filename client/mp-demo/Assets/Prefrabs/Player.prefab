@@ -288,6 +288,7 @@ MonoBehaviour:
   _childAnimatorControllerOverride: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
   animationSmoothTime: 0.1
   _useSingleForwardRunAnimation: 0
+  _debugForceInjured: 1
   _jumpAnimationMinAirTime: 0.12
   _landingGroundedBuffer: 0.05
 --- !u!114 &7426455774788748035
@@ -524,7 +525,7 @@ Transform:
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
   m_LocalRotation: {x: 0.034122106, y: 0.0000000074063085, z: 8.110277e-10, w: 0.9994177}
-  m_LocalPosition: {x: -108.453514, y: 2.5193248, z: -23.767899}
+  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

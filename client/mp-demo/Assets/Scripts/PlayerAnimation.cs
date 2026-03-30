@@ -6,8 +6,10 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private Animator _animator;
     [SerializeField] private RuntimeAnimatorController _childAnimatorControllerOverride;
     public Animator Animator => _animator;
+    public bool IsInjuredActive => _debugForceInjured || _isInjured;
     [SerializeField] private float animationSmoothTime = 0.1f;
     [SerializeField] private bool _useSingleForwardRunAnimation = false;
+    [SerializeField] private bool _debugForceInjured = false;
     [SerializeField] private float _jumpAnimationMinAirTime = 0.12f;
     [SerializeField] private float _landingGroundedBuffer = 0.05f;
 
@@ -20,6 +22,7 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _groundedHash = Animator.StringToHash("IsGrounded");
     private static readonly int _jumpHash = Animator.StringToHash("IsJumping");
     private static readonly int _verticalSpeedHash = Animator.StringToHash("VerticalSpeed");
+    private static readonly int _injuredHash = Animator.StringToHash("IsInjured");
 
     private float _currentInputX;
     private float _currentInputY;
@@ -32,6 +35,7 @@ public class PlayerAnimation : MonoBehaviour
     private float _networkVerticalSpeed;
     private float _jumpAnimationLatchTimer;
     private float _groundedStableTimer;
+    private bool _isInjured;
     private Vector2 _lastAppliedAnimationInput;
     private bool _lastAppliedGrounded = true;
     private bool _lastAppliedJumping;
@@ -98,6 +102,11 @@ public class PlayerAnimation : MonoBehaviour
         isGrounded = _lastAppliedGrounded;
         isJumping = _lastAppliedJumping;
         verticalSpeed = _lastAppliedVerticalSpeed;
+    }
+
+    public void SetInjured(bool isInjured)
+    {
+        _isInjured = isInjured;
     }
 
     public string GetAnimatorDebugInfo()
@@ -262,6 +271,7 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetBool(_groundedHash, isGrounded);
         targetAnimator.SetBool(_jumpHash, isJumping);
         targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
+        targetAnimator.SetBool(_injuredHash, IsInjuredActive);
     }
 
     public bool UsesSingleForwardRunController()
@@ -342,6 +352,28 @@ public class PlayerAnimation : MonoBehaviour
 
     private Vector2 GetDirectionalAnimationInput(Vector2 fallbackInput)
     {
+        if (IsInjuredActive)
+        {
+            if (_useNetworkAnimationState || _playerController == null)
+            {
+                return fallbackInput.sqrMagnitude > 0.0001f
+                    ? Vector2.ClampMagnitude(fallbackInput.normalized, 1f)
+                    : Vector2.zero;
+            }
+
+            Vector3 injuredLocalVelocity = transform.InverseTransformDirection(_playerController.GetVelocity());
+            Vector2 injuredPlanarVelocity = new Vector2(injuredLocalVelocity.x, injuredLocalVelocity.z);
+
+            if (injuredPlanarVelocity.sqrMagnitude > 0.0001f)
+            {
+                return Vector2.ClampMagnitude(injuredPlanarVelocity.normalized, 1f);
+            }
+
+            return fallbackInput.sqrMagnitude > 0.0001f
+                ? Vector2.ClampMagnitude(fallbackInput.normalized, 1f)
+                : Vector2.zero;
+        }
+
         float speedFactor = GetAnimationSpeedFactor(fallbackInput);
 
         if (_useNetworkAnimationState || _playerController == null)
@@ -367,7 +399,9 @@ public class PlayerAnimation : MonoBehaviour
             return Mathf.Clamp01(fallbackInput.magnitude);
         }
 
-        float maxAnimationSpeed = Mathf.Max(_playerController.sprintSpeed, 0.01f);
+        float maxAnimationSpeed = IsInjuredActive
+            ? Mathf.Max(_playerController.GetInjuredMoveSpeed(), 0.01f)
+            : Mathf.Max(_playerController.sprintSpeed, 0.01f);
         return Mathf.Clamp01(_playerController.GetHorizontalSpeed() / maxAnimationSpeed);
     }
 
