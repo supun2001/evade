@@ -290,7 +290,7 @@ MonoBehaviour:
   _childAnimatorControllerOverride: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
   animationSmoothTime: 0.1
   _useSingleForwardRunAnimation: 0
-  _debugForceInjured: 0
+  _debugForceInjured: 1
   _jumpAnimationMinAirTime: 0.12
   _landingGroundedBuffer: 0.05
   _injuredReleaseBlendDuration: 0.16
