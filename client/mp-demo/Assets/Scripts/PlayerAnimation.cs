@@ -11,9 +11,11 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private float animationSmoothTime = 0.1f;
     [SerializeField] private bool _useSingleForwardRunAnimation = false;
     [SerializeField] private bool _debugForceInjured = false;
+    [SerializeField] private bool _debugForceCrouching = false;
     [SerializeField] private float _jumpAnimationMinAirTime = 0.12f;
     [SerializeField] private float _landingGroundedBuffer = 0.05f;
     [SerializeField] private float _injuredReleaseBlendDuration = 0.16f;
+    [SerializeField] private float _crouchReleaseBlendDuration = 0.12f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -25,6 +27,7 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _jumpHash = Animator.StringToHash("IsJumping");
     private static readonly int _verticalSpeedHash = Animator.StringToHash("VerticalSpeed");
     private static readonly int _injuredHash = Animator.StringToHash("IsInjured");
+    private static readonly int _crouchHash = Animator.StringToHash("IsCrouching");
 
     private float _currentInputX;
     private float _currentInputY;
@@ -40,6 +43,8 @@ public class PlayerAnimation : MonoBehaviour
     private bool _isInjured;
     private float _injuredMoveAmount;
     private float _injuredReleaseTimer;
+    private float _crouchMoveAmount;
+    private float _crouchReleaseTimer;
     private Vector2 _lastAppliedAnimationInput;
     private bool _lastAppliedGrounded = true;
     private bool _lastAppliedJumping;
@@ -112,6 +117,8 @@ public class PlayerAnimation : MonoBehaviour
     {
         _isInjured = isInjured;
     }
+
+    public bool IsCrouchingActive => _debugForceCrouching || (_playerController != null && _playerController.IsCrouching());
 
     public string GetAnimatorDebugInfo()
     {
@@ -276,6 +283,7 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetBool(_jumpHash, isJumping);
         targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
         targetAnimator.SetBool(_injuredHash, IsInjuredActive);
+        targetAnimator.SetBool(_crouchHash, !IsInjuredActive && IsCrouchingActive);
     }
 
     public bool UsesSingleForwardRunController()
@@ -300,6 +308,12 @@ public class PlayerAnimation : MonoBehaviour
         {
             _injuredMoveAmount = 0f;
             _injuredReleaseTimer = 0f;
+        }
+
+        if (!IsCrouchingActive)
+        {
+            _crouchMoveAmount = 0f;
+            _crouchReleaseTimer = 0f;
         }
 
         Vector2 input = _useNetworkAnimationState
@@ -367,6 +381,11 @@ public class PlayerAnimation : MonoBehaviour
             return GetInjuredAnimationInput(fallbackInput, Time.deltaTime);
         }
 
+        if (IsCrouchingActive)
+        {
+            return GetCrouchAnimationInput(fallbackInput, Time.deltaTime);
+        }
+
         float speedFactor = GetAnimationSpeedFactor(fallbackInput);
 
         if (_useNetworkAnimationState || _playerController == null)
@@ -394,6 +413,8 @@ public class PlayerAnimation : MonoBehaviour
 
         float maxAnimationSpeed = IsInjuredActive
             ? Mathf.Max(_playerController.GetInjuredMoveSpeed(), 0.01f)
+            : IsCrouchingActive
+                ? Mathf.Max(_playerController.GetCrouchMoveSpeed(), 0.01f)
             : Mathf.Max(_playerController.sprintSpeed, 0.01f);
         return Mathf.Clamp01(_playerController.GetHorizontalSpeed() / maxAnimationSpeed);
     }
@@ -443,6 +464,38 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         return Mathf.Clamp01(_injuredReleaseTimer / Mathf.Max(_injuredReleaseBlendDuration, 0.001f));
+    }
+
+    private Vector2 GetCrouchAnimationInput(Vector2 fallbackInput, float deltaTime)
+    {
+        if (fallbackInput.sqrMagnitude > 0.0001f)
+        {
+            _crouchMoveAmount = 1f;
+            _crouchReleaseTimer = _crouchReleaseBlendDuration;
+        }
+        else
+        {
+            _crouchMoveAmount = GetCrouchReleaseAmount(deltaTime);
+        }
+
+        return new Vector2(0f, _crouchMoveAmount);
+    }
+
+    private float GetCrouchReleaseAmount(float deltaTime)
+    {
+        if (_crouchMoveAmount <= 0.0001f)
+        {
+            _crouchReleaseTimer = 0f;
+            return 0f;
+        }
+
+        _crouchReleaseTimer = Mathf.Max(0f, _crouchReleaseTimer - deltaTime);
+        if (_crouchReleaseTimer <= 0f)
+        {
+            return 0f;
+        }
+
+        return Mathf.Clamp01(_crouchReleaseTimer / Mathf.Max(_crouchReleaseBlendDuration, 0.001f));
     }
 
     private void OnAnimatorMove()

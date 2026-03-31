@@ -189,6 +189,7 @@ MonoBehaviour:
   runSpeed: 18
   sprintSpeed: 34
   _injuredMoveSpeed: 1.75
+  _crouchMoveSpeed: 2
   autoSprintDelay: 3
   drag: 45
   gravity: 20
@@ -290,10 +291,12 @@ MonoBehaviour:
   _childAnimatorControllerOverride: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
   animationSmoothTime: 0.1
   _useSingleForwardRunAnimation: 0
-  _debugForceInjured: 1
+  _debugForceInjured: 0
+  _debugForceCrouching: 0
   _jumpAnimationMinAirTime: 0.12
   _landingGroundedBuffer: 0.05
   _injuredReleaseBlendDuration: 0.16
+  _crouchReleaseBlendDuration: 0.12
 --- !u!114 &7426455774788748035
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -27,6 +27,7 @@ public class PlayerController : MonoBehaviour
     public float runSpeed = 4f;
     public float sprintSpeed = 7f;
     [SerializeField] private float _injuredMoveSpeed = 1.75f;
+    [SerializeField] private float _crouchMoveSpeed = 2f;
     public float autoSprintDelay = 5f;
     public float drag = 0.1f;
     public float gravity = 25f;
@@ -110,6 +111,7 @@ public class PlayerController : MonoBehaviour
     private Vector3 _horizontalVelocity = Vector3.zero;
     private float _runHeldTime = 0f;
     private bool _jumpedThisFrame;
+    private bool _isCrouching;
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
@@ -178,6 +180,7 @@ public class PlayerController : MonoBehaviour
         _jumpedThisFrame = false;
         HandlePauseMenuToggle();
         EnforceInjuredCameraView();
+        UpdateCrouchState();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
 
@@ -251,7 +254,7 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateAutoSprint()
     {
-        if (IsInjured())
+        if (IsInjured() || IsCrouching())
         {
             _runHeldTime = 0f;
             return;
@@ -289,6 +292,10 @@ public class PlayerController : MonoBehaviour
         if (IsInjured())
         {
             UpdateInjuredFacing();
+        }
+        else if (IsCrouching())
+        {
+            UpdateCrouchFacing();
         }
         else
         {
@@ -1002,6 +1009,16 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateInjuredFacing()
     {
+        UpdateDirectionalVisualFacing();
+    }
+
+    private void UpdateCrouchFacing()
+    {
+        UpdateDirectionalVisualFacing();
+    }
+
+    private void UpdateDirectionalVisualFacing()
+    {
         CacheInjuredVisualRoot();
 
         if (_injuredVisualRoot == null)
@@ -1202,7 +1219,7 @@ public class PlayerController : MonoBehaviour
         
         _verticalVelocity -= gravity * deltaTime;
 
-        if(!IsInjured() && _playerLocomotionInput.JumpPressed && isGrounded){
+        if(!IsInjured() && !IsCrouching() && _playerLocomotionInput.JumpPressed && isGrounded){
             if (_horizontalVelocity.sqrMagnitude > 0.001f)
             {
                 Vector3 horizontalDirection = _horizontalVelocity.normalized;
@@ -1247,6 +1264,11 @@ public class PlayerController : MonoBehaviour
         return _injuredMoveSpeed;
     }
 
+    public float GetCrouchMoveSpeed()
+    {
+        return _crouchMoveSpeed;
+    }
+
     public float GetVerticalVelocity()
     {
         return _verticalVelocity;
@@ -1262,6 +1284,11 @@ public class PlayerController : MonoBehaviour
         if (IsInjured())
         {
             return _injuredMoveSpeed;
+        }
+
+        if (IsCrouching())
+        {
+            return _crouchMoveSpeed;
         }
 
         float baseSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
@@ -1293,9 +1320,22 @@ public class PlayerController : MonoBehaviour
         return GetSprintProgress() >= 0.999f;
     }
 
+    public bool IsCrouching()
+    {
+        return _isCrouching;
+    }
+
     private bool IsInjured()
     {
         return _playerAnimation != null && _playerAnimation.IsInjuredActive;
+    }
+
+    private void UpdateCrouchState()
+    {
+        _isCrouching =
+            !IsInjured()
+            && Keyboard.current != null
+            && Keyboard.current.cKey.isPressed;
     }
 
     private bool IsZooming()
