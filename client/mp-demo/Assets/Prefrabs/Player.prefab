@@ -328,6 +328,8 @@ MonoBehaviour:
   _injuredReleaseBlendDuration: 0.16
   _crouchReleaseBlendDuration: 0.12
   _wallRunAnimationExitBuffer: 0.1
+  _networkAnimationBlendSpeed: 18
+  _networkAnimationReleaseSpeed: 32
 --- !u!114 &7426455774788748035
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -348,6 +350,7 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   - {fileID: 0}
+  _skinPollInterval: 0.25
 --- !u!1 &4978651277537230969
 GameObject:
   m_ObjectHideFlags: 0
