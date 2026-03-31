@@ -41,6 +41,26 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _nonForwardSpeedMultiplier = 0.5f;
     [SerializeField] private float _injuredRotationSharpness = 12f;
 
+    [Header("Nextbot Hit Reaction")]
+    [SerializeField] private float _nextbotHitReactionDuration = 0.45f;
+    [SerializeField] private float _nextbotHitHorizontalImpulse = 8f;
+    [SerializeField] private float _nextbotHitVerticalImpulse = 4f;
+    [SerializeField] private float _nextbotHitHorizontalDamping = 10f;
+    [SerializeField] private float _nextbotHitVisualPitch = 70f;
+    [SerializeField] private float _nextbotHitVisualRoll = 35f;
+    [SerializeField] private float _nextbotHitVisualBlend = 14f;
+
+    [Header("Downed Pose")]
+    [SerializeField] private Vector3 _injuredVisualPositionOffset = new Vector3(0f, 0f, 0.06f);
+    [SerializeField] private Vector3 _hitReactionVisualPositionOffset = new Vector3(0f, 0f, 0.12f);
+    [SerializeField] private float _downedVisualPositionBlend = 10f;
+    [SerializeField] private float _downedVisualGroundClearance = 0.04f;
+    [SerializeField] private float _downedVisualMaxAutoLift = 1.4f;
+    [SerializeField] private float _downedControllerHeight = 1.6f;
+    [SerializeField] private float _downedControllerRadius = 0.7f;
+    [SerializeField] private Vector3 _downedControllerCenter = new Vector3(0f, 0.82f, 0f);
+    [SerializeField] private float _downedControllerBlend = 12f;
+
     [Header("Bhop & Strafing")]
     [SerializeField] private bool _enableBunnyHop = true;
     [SerializeField] private float _groundFriction = 10f;
@@ -147,6 +167,10 @@ public class PlayerController : MonoBehaviour
     private Vector3 _wallRunNormal = Vector3.zero;
     private float _wallRunSprintGraceTimer;
     private float _wallRunContactHoldTimer;
+    private bool _isHitReacting;
+    private float _nextbotHitReactionTimer;
+    private float _nextbotHitReactionPitch;
+    private float _nextbotHitReactionRoll;
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
@@ -173,7 +197,11 @@ public class PlayerController : MonoBehaviour
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Quaternion _injuredVisualRootBaseLocalRotation = Quaternion.identity;
+    private Vector3 _injuredVisualRootBaseLocalPosition = Vector3.zero;
     private float _firstPersonWallRetreat;
+    private float _defaultCharacterControllerHeight;
+    private float _defaultCharacterControllerRadius;
+    private Vector3 _defaultCharacterControllerCenter;
     private readonly Collider[] _armWallHitBuffer = new Collider[8];
     private Coroutine _cameraTransitionCoroutine;
     private bool _isPauseMenuOpen;
@@ -206,6 +234,13 @@ public class PlayerController : MonoBehaviour
         CacheFirstPersonWallHideRenderers();
         CacheInjuredVisualRoot();
         CacheHudElements();
+
+        if (_characterController != null)
+        {
+            _defaultCharacterControllerHeight = _characterController.height;
+            _defaultCharacterControllerRadius = _characterController.radius;
+            _defaultCharacterControllerCenter = _characterController.center;
+        }
     }
     
     private void Start() {
@@ -224,6 +259,7 @@ public class PlayerController : MonoBehaviour
         HandlePauseMenuToggle();
         EnforceInjuredCameraView();
         UpdateCrouchState();
+        UpdateDownedCollisionShape();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
 
@@ -233,6 +269,12 @@ public class PlayerController : MonoBehaviour
         UpdateWallRunEligibility();
         UpdateWallRunState();
         UpdateZoom();
+
+        if (HandleNextbotHitReaction())
+        {
+            return;
+        }
+
         HandleVerticalMovement();
         HandleHorizontalMovement();
 
@@ -323,6 +365,19 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (_isHitReacting)
+        {
+            UpdateNextbotHitReactionVisual();
+            UpdateDownedVisualRootPosition();
+            _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
+            UpdateSprintCameraBob();
+            UpdateFirstPersonWallRunCameraPose();
+            ResolveCameraWallCollision();
+            UpdateSprintArmPose();
+            UpdateArmWallClipVisibility();
+            return;
+        }
+
         Vector2 lookInput = _playerLocomotionInput.LookInput;
         float minPitch = _currentViewMode == CameraViewMode.FirstPerson ? -_firstPersonLookUpLimit : -lookLimitV;
         float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
@@ -347,6 +402,7 @@ public class PlayerController : MonoBehaviour
             ResetInjuredVisualRootRotation();
         }
 
+        UpdateDownedVisualRootPosition();
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
         UpdateSprintCameraBob();
         UpdateFirstPersonWallRunCameraPose();
@@ -506,6 +562,7 @@ public class PlayerController : MonoBehaviour
             {
                 _injuredVisualRoot = EnsureInjuredVisualPivot(child);
                 _injuredVisualRootBaseLocalRotation = _injuredVisualRoot.localRotation;
+                _injuredVisualRootBaseLocalPosition = _injuredVisualRoot.localPosition;
                 return;
             }
         }
@@ -535,6 +592,7 @@ public class PlayerController : MonoBehaviour
         {
             _injuredVisualRoot = EnsureInjuredVisualPivot(bestChild);
             _injuredVisualRootBaseLocalRotation = _injuredVisualRoot.localRotation;
+            _injuredVisualRootBaseLocalPosition = _injuredVisualRoot.localPosition;
             return;
         }
 
@@ -545,6 +603,7 @@ public class PlayerController : MonoBehaviour
 
         _injuredVisualRoot = EnsureInjuredVisualPivot(_playerAnimation.VisualRootTransform);
         _injuredVisualRootBaseLocalRotation = _injuredVisualRoot.localRotation;
+        _injuredVisualRootBaseLocalPosition = _injuredVisualRoot.localPosition;
     }
 
     private Transform EnsureInjuredVisualPivot(Transform visualTransform)
@@ -1394,6 +1453,84 @@ public class PlayerController : MonoBehaviour
         _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
     }
 
+    private void UpdateNextbotHitReactionVisual()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        Quaternion correctedForwardRotation = Quaternion.Euler(0f, 180f, 0f) * _injuredVisualRootBaseLocalRotation;
+        Quaternion hitReactionRotation = correctedForwardRotation * Quaternion.Euler(_nextbotHitReactionPitch, 0f, _nextbotHitReactionRoll);
+        float blend = 1f - Mathf.Exp(-_nextbotHitVisualBlend * Time.deltaTime);
+        _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, hitReactionRotation, blend);
+    }
+
+    private void UpdateDownedVisualRootPosition()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        Vector3 targetLocalPosition = _injuredVisualRootBaseLocalPosition;
+        if (_isHitReacting)
+        {
+            targetLocalPosition += _hitReactionVisualPositionOffset;
+        }
+        else if (IsInjured())
+        {
+            targetLocalPosition += _injuredVisualPositionOffset;
+        }
+
+        float autoLift = GetDownedVisualAutoLift();
+        targetLocalPosition.y += autoLift;
+
+        float blend = 1f - Mathf.Exp(-_downedVisualPositionBlend * Time.deltaTime);
+        _injuredVisualRoot.localPosition = Vector3.Lerp(_injuredVisualRoot.localPosition, targetLocalPosition, blend);
+    }
+
+    private float GetDownedVisualAutoLift()
+    {
+        if ((!_isHitReacting && !IsInjured()) || _injuredVisualRoot == null || _characterController == null)
+        {
+            return 0f;
+        }
+
+        Renderer[] renderers = _injuredVisualRoot.GetComponentsInChildren<Renderer>(true);
+        if (renderers == null || renderers.Length == 0)
+        {
+            return 0f;
+        }
+
+        bool hasBounds = false;
+        float lowestPoint = float.PositiveInfinity;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            lowestPoint = Mathf.Min(lowestPoint, renderer.bounds.min.y);
+            hasBounds = true;
+        }
+
+        if (!hasBounds)
+        {
+            return 0f;
+        }
+
+        float controllerBottom = _transform.position.y + _characterController.center.y - (_characterController.height * 0.5f);
+        float requiredLift = (controllerBottom + _downedVisualGroundClearance) - lowestPoint;
+        return Mathf.Clamp(requiredLift, 0f, _downedVisualMaxAutoLift);
+    }
+
     private void ResetInjuredVisualRootRotation()
     {
         CacheInjuredVisualRoot();
@@ -1517,6 +1654,100 @@ public class PlayerController : MonoBehaviour
         }
 
         _horizontalVelocity.y = 0f;
+    }
+
+    private bool HandleNextbotHitReaction()
+    {
+        if (!_isHitReacting)
+        {
+            return false;
+        }
+
+        float deltaTime = Time.deltaTime;
+        bool isGrounded = IsGrounded();
+
+        if (isGrounded && _verticalVelocity < 0f)
+        {
+            _verticalVelocity = -1f;
+        }
+        else
+        {
+            _verticalVelocity -= gravity * deltaTime;
+        }
+
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, _nextbotHitHorizontalDamping * deltaTime);
+        _nextbotHitReactionTimer = Mathf.Max(0f, _nextbotHitReactionTimer - deltaTime);
+
+        Vector3 finalVelocity = _horizontalVelocity;
+        finalVelocity.y = _verticalVelocity;
+        _characterController.Move(finalVelocity * deltaTime);
+
+        if (_nextbotHitReactionTimer <= 0f)
+        {
+            _isHitReacting = false;
+            _playerAnimation?.SetInjured(true);
+        }
+
+        return true;
+    }
+
+    private void UpdateDownedCollisionShape()
+    {
+        if (_characterController == null)
+        {
+            return;
+        }
+
+        float targetHeight = _defaultCharacterControllerHeight;
+        float targetRadius = _defaultCharacterControllerRadius;
+        Vector3 targetCenter = _defaultCharacterControllerCenter;
+
+        if (_isHitReacting || IsInjured())
+        {
+            targetHeight = Mathf.Max(_downedControllerHeight, _downedControllerRadius * 2f);
+            targetRadius = Mathf.Min(_downedControllerRadius, targetHeight * 0.5f);
+            targetCenter = _downedControllerCenter;
+        }
+
+        float blend = 1f - Mathf.Exp(-_downedControllerBlend * Time.deltaTime);
+        _characterController.height = Mathf.Lerp(_characterController.height, targetHeight, blend);
+        _characterController.radius = Mathf.Lerp(_characterController.radius, targetRadius, blend);
+        _characterController.center = Vector3.Lerp(_characterController.center, targetCenter, blend);
+    }
+
+    public bool TriggerNextbotHit(Vector3 sourcePosition)
+    {
+        if (!enabled || _playerAnimation == null || _isHitReacting || IsInjured())
+        {
+            return false;
+        }
+
+        Vector3 awayDirection = _transform.position - sourcePosition;
+        awayDirection.y = 0f;
+        if (awayDirection.sqrMagnitude <= 0.0001f)
+        {
+            awayDirection = -_transform.forward;
+        }
+
+        awayDirection.Normalize();
+        Vector3 lateralDirection = Vector3.Cross(Vector3.up, awayDirection);
+        awayDirection = (awayDirection + lateralDirection * UnityEngine.Random.Range(-0.35f, 0.35f)).normalized;
+
+        _isHitReacting = true;
+        _nextbotHitReactionTimer = _nextbotHitReactionDuration;
+        _nextbotHitReactionPitch = UnityEngine.Random.Range(_nextbotHitVisualPitch * 0.7f, _nextbotHitVisualPitch);
+        _nextbotHitReactionRoll = UnityEngine.Random.Range(-_nextbotHitVisualRoll, _nextbotHitVisualRoll);
+        _horizontalVelocity = awayDirection * _nextbotHitHorizontalImpulse;
+        _verticalVelocity = Mathf.Max(_verticalVelocity, _nextbotHitVerticalImpulse);
+        _runHeldTime = 0f;
+        _isCrouching = false;
+        _isWallRunning = false;
+        _wallRunContactHoldTimer = 0f;
+        _wallRunSprintGraceTimer = 0f;
+        _playerAnimation.SetInjured(false);
+        SetCameraView(CameraViewMode.ThirdPerson, true);
+
+        return true;
     }
 
     private void HandleAirMovement(Vector2 movementInput, Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)
@@ -1742,6 +1973,21 @@ public class PlayerController : MonoBehaviour
     public bool IsWallRunning()
     {
         return _isWallRunning;
+    }
+
+    public bool IsHitReacting()
+    {
+        return _isHitReacting;
+    }
+
+    public bool IsInjuredOrHitReacting()
+    {
+        return _isHitReacting || IsInjured();
+    }
+
+    public CharacterController GetCharacterController()
+    {
+        return _characterController;
     }
 
     public int GetWallRunSide()

@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 public class NextbotFollowPlayer : MonoBehaviour
 {
@@ -14,6 +15,10 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private bool _lockToStartingHeight = true;
     [SerializeField] private float _gravity = 20f;
 
+    [Header("Hit")]
+    [SerializeField] private float _hitDistance = 1.6f;
+    [SerializeField] private float _hitCooldown = 1.25f;
+
     [Header("Billboard")]
     [SerializeField] private bool _billboardToCamera = true;
     [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
@@ -24,12 +29,16 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _verticalVelocity;
     private float _lockedHeight;
     private float _nextTargetRefreshTime;
+    private float _nextHitTime;
     private Camera _targetCamera;
+    private Collider[] _nextbotColliders = System.Array.Empty<Collider>();
+    private readonly HashSet<CharacterController> _ignoredInjuredTargets = new HashSet<CharacterController>();
 
     private void Awake()
     {
         _characterController = GetComponent<CharacterController>();
         _lockedHeight = transform.position.y;
+        _nextbotColliders = GetComponentsInChildren<Collider>(true);
     }
 
     private void Update()
@@ -51,6 +60,15 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (!_followNearestPlayer)
         {
             return;
+        }
+
+        if (_target != null)
+        {
+            PlayerController currentTargetController = ResolvePlayerController(_target);
+            if (currentTargetController == null || currentTargetController.IsInjuredOrHitReacting())
+            {
+                _target = null;
+            }
         }
 
         if (Time.time < _nextTargetRefreshTime && _target != null)
@@ -82,6 +100,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, _acceleration * Time.deltaTime);
 
         ApplyMovement(_horizontalVelocity);
+        TryHitTarget(distance);
     }
 
     private void ApplyMovement(Vector3 horizontalVelocity)
@@ -135,6 +154,12 @@ public class NextbotFollowPlayer : MonoBehaviour
                 continue;
             }
 
+            PlayerController networkPlayerController = ResolvePlayerController(networkPlayer.transform);
+            if (networkPlayerController != null && (!networkPlayerController.enabled || networkPlayerController.IsInjuredOrHitReacting()))
+            {
+                continue;
+            }
+
             float distanceSqr = GetPlanarDistanceSqr(networkPlayer.transform.position, transform.position);
             if (distanceSqr >= nearestDistanceSqr)
             {
@@ -154,7 +179,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         for (int i = 0; i < playerControllers.Length; i++)
         {
             PlayerController playerController = playerControllers[i];
-            if (playerController == null || playerController.transform == transform)
+            if (playerController == null || !playerController.enabled || playerController.transform == transform || playerController.IsInjuredOrHitReacting())
             {
                 continue;
             }
@@ -170,6 +195,73 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return nearestPlayer;
+    }
+
+    private void TryHitTarget(float distanceToTarget)
+    {
+        if (_target == null || Time.time < _nextHitTime || distanceToTarget > _hitDistance)
+        {
+            return;
+        }
+
+        PlayerController targetController = ResolvePlayerController(_target);
+
+        if (targetController == null || !targetController.enabled || targetController.IsInjuredOrHitReacting())
+        {
+            return;
+        }
+
+        if (targetController.TriggerNextbotHit(transform.position))
+        {
+            IgnoreCollisionWithPlayer(targetController);
+            _target = null;
+            _horizontalVelocity = Vector3.zero;
+            _nextTargetRefreshTime = 0f;
+            _nextHitTime = Time.time + Mathf.Max(0.1f, _hitCooldown);
+        }
+    }
+
+    private PlayerController ResolvePlayerController(Transform targetTransform)
+    {
+        if (targetTransform == null)
+        {
+            return null;
+        }
+
+        PlayerController targetController = targetTransform.GetComponent<PlayerController>();
+        if (targetController == null)
+        {
+            targetController = targetTransform.GetComponentInParent<PlayerController>();
+        }
+
+        return targetController;
+    }
+
+    private void IgnoreCollisionWithPlayer(PlayerController targetController)
+    {
+        if (targetController == null)
+        {
+            return;
+        }
+
+        CharacterController targetCharacterController = targetController.GetCharacterController();
+        if (targetCharacterController == null || _ignoredInjuredTargets.Contains(targetCharacterController))
+        {
+            return;
+        }
+
+        for (int i = 0; i < _nextbotColliders.Length; i++)
+        {
+            Collider nextbotCollider = _nextbotColliders[i];
+            if (nextbotCollider == null)
+            {
+                continue;
+            }
+
+            Physics.IgnoreCollision(nextbotCollider, targetCharacterController, true);
+        }
+
+        _ignoredInjuredTargets.Add(targetCharacterController);
     }
 
     private static float GetPlanarDistanceSqr(Vector3 a, Vector3 b)
