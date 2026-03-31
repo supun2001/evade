@@ -11,6 +11,7 @@ public class PlayerLocomotionInput : MonoBehaviour,
     public Vector2 MovementInput { get; private set; }
     public Vector2 LookInput { get; private set; }
     public bool JumpPressed { get; private set; }
+    public bool JumpHeld { get; private set; }
     #endregion
 
     #region Setup
@@ -27,6 +28,7 @@ public class PlayerLocomotionInput : MonoBehaviour,
     {
         Controls.PlayerLocomotionMap.RemoveCallbacks(this);
         Controls.PlayerLocomotionMap.Disable();
+        JumpHeld = false;
     }
 
     #endregion
@@ -65,12 +67,27 @@ public class PlayerLocomotionInput : MonoBehaviour,
 
     public void OnJump(InputAction.CallbackContext context)
     {
-        if (!context.performed || !InputEnabled)
+        if (!InputEnabled)
         {
+            JumpHeld = false;
             return;
         }
 
-        JumpPressed = true;
+        if (context.canceled)
+        {
+            JumpHeld = false;
+            return;
+        }
+
+        if (context.started || context.performed)
+        {
+            JumpHeld = true;
+        }
+
+        if (context.performed)
+        {
+            JumpPressed = true;
+        }
     }
 
  

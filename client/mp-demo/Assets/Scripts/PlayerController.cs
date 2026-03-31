@@ -51,6 +51,18 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _bunnyHopSpeedGain = 1.08f;
     [SerializeField] private float _bunnyHopMaxSpeed = 48f;
 
+    [Header("Wall Run")]
+    [SerializeField] private LayerMask _wallRunLayers = ~0;
+    [SerializeField] private float _wallRunCheckDistance = 0.8f;
+    [SerializeField] private float _wallRunMinSpeed = 5.5f;
+    [SerializeField] private float _wallRunGravityMultiplier = 0.35f;
+    [SerializeField] private float _wallRunMaxFallSpeed = 2.5f;
+    [SerializeField] private float _wallRunSpeed = 8.5f;
+    [SerializeField] private float _wallRunTurnBlend = 12f;
+    [SerializeField] private float _wallRunGroundSprintGraceTime = 0.25f;
+    [SerializeField] private float _wallRunContactLossBuffer = 0.18f;
+    [SerializeField] private float _wallRunStartIntoWallThreshold = 0.2f;
+
     [Header("Camera Settings")]
     public float lookSenseH = 0.1f;
     public float lookSenseV = 0.1f;
@@ -112,6 +124,11 @@ public class PlayerController : MonoBehaviour
     private float _runHeldTime = 0f;
     private bool _jumpedThisFrame;
     private bool _isCrouching;
+    private bool _isWallRunning;
+    private int _wallRunSide;
+    private Vector3 _wallRunNormal = Vector3.zero;
+    private float _wallRunSprintGraceTimer;
+    private float _wallRunContactHoldTimer;
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
@@ -187,6 +204,8 @@ public class PlayerController : MonoBehaviour
         HandleCursorLock();
         HandleViewToggle();
         UpdateAutoSprint();
+        UpdateWallRunEligibility();
+        UpdateWallRunState();
         UpdateZoom();
         HandleVerticalMovement();
         HandleHorizontalMovement();
@@ -998,6 +1017,12 @@ public class PlayerController : MonoBehaviour
         float inputMagnitude = Mathf.Clamp01(movementInput.magnitude);
         float targetSpeed = GetCurrentMoveSpeed() * GetDirectionalSpeedMultiplier(movementInput) * inputMagnitude;
 
+        if (_isWallRunning)
+        {
+            HandleWallRunMovement(movementDirection, targetSpeed, deltaTime);
+            return;
+        }
+
         if (treatAsAirborne)
         {
             HandleAirMovement(movementInput, movementDirection, inputMagnitude, targetSpeed, deltaTime);
@@ -1137,6 +1162,31 @@ public class PlayerController : MonoBehaviour
         _horizontalVelocity.y = 0f;
     }
 
+    private void HandleWallRunMovement(Vector3 movementDirection, float targetSpeed, float deltaTime)
+    {
+        if (_wallRunNormal.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        Vector3 alongWall = Vector3.Cross(Vector3.up, _wallRunNormal).normalized;
+        if (Vector3.Dot(alongWall, _transform.forward) < 0f)
+        {
+            alongWall = -alongWall;
+        }
+
+        if (movementDirection.sqrMagnitude > 0.001f && Vector3.Dot(alongWall, movementDirection.normalized) < 0f)
+        {
+            alongWall = -alongWall;
+        }
+
+        float desiredSpeed = Mathf.Max(targetSpeed, _wallRunSpeed);
+        float blend = 1f - Mathf.Exp(-_wallRunTurnBlend * deltaTime);
+        Vector3 targetVelocity = alongWall * desiredSpeed;
+        _horizontalVelocity = Vector3.Lerp(_horizontalVelocity, targetVelocity, blend);
+        _horizontalVelocity.y = 0f;
+    }
+
     private void ApplyGroundFriction(float deltaTime, bool preserveMomentumForJump)
     {
         if (preserveMomentumForJump || _horizontalVelocity.sqrMagnitude <= 0.0001f)
@@ -1217,7 +1267,13 @@ public class PlayerController : MonoBehaviour
             _verticalVelocity = 0f;
         }
         
-        _verticalVelocity -= gravity * deltaTime;
+        float gravityMultiplier = _isWallRunning ? _wallRunGravityMultiplier : 1f;
+        _verticalVelocity -= gravity * gravityMultiplier * deltaTime;
+
+        if (_isWallRunning)
+        {
+            _verticalVelocity = Mathf.Max(_verticalVelocity, -_wallRunMaxFallSpeed);
+        }
 
         if(!IsInjured() && !IsCrouching() && _playerLocomotionInput.JumpPressed && isGrounded){
             if (_horizontalVelocity.sqrMagnitude > 0.001f)
@@ -1238,6 +1294,14 @@ public class PlayerController : MonoBehaviour
 
                 _horizontalVelocity = horizontalDirection * boostedSpeed;
             }
+
+            Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+            bool canPrimeWallRun =
+                IsSprinting()
+                && movementInput.y > 0.1f
+                && Mathf.Abs(movementInput.x) > 0.1f;
+
+            _wallRunSprintGraceTimer = canPrimeWallRun ? _wallRunGroundSprintGraceTime : 0f;
 
             _jumpedThisFrame = true;
             _verticalVelocity += MathF.Sqrt(jumpForce * JUMP_VELOCITY_MULTIPLIER * gravity);
@@ -1277,6 +1341,16 @@ public class PlayerController : MonoBehaviour
     public bool DidJumpThisFrame()
     {
         return _jumpedThisFrame;
+    }
+
+    public bool IsWallRunning()
+    {
+        return _isWallRunning;
+    }
+
+    public int GetWallRunSide()
+    {
+        return _wallRunSide;
     }
 
     private float GetCurrentMoveSpeed()
@@ -1336,6 +1410,154 @@ public class PlayerController : MonoBehaviour
             !IsInjured()
             && Keyboard.current != null
             && Keyboard.current.cKey.isPressed;
+    }
+
+    private void UpdateWallRunState()
+    {
+        bool canMaintainWallRun = CanMaintainWallRun();
+        bool foundWallContact = TryGetWallRunContact(out int detectedWallSide, out Vector3 detectedWallNormal);
+
+        if (!_isWallRunning)
+        {
+            bool canStartWallRun = canMaintainWallRun && _wallRunSprintGraceTimer > 0f;
+            if (canStartWallRun && foundWallContact && IsPushingIntoWall(detectedWallNormal))
+            {
+                _isWallRunning = true;
+                _wallRunSide = detectedWallSide;
+                _wallRunNormal = detectedWallNormal;
+                _wallRunContactHoldTimer = _wallRunContactLossBuffer;
+                return;
+            }
+
+            _wallRunSide = 0;
+            _wallRunNormal = Vector3.zero;
+            _wallRunContactHoldTimer = 0f;
+            return;
+        }
+
+        if (!canMaintainWallRun)
+        {
+            StopWallRun();
+            return;
+        }
+
+        if (foundWallContact)
+        {
+            _wallRunSide = detectedWallSide;
+            _wallRunNormal = detectedWallNormal;
+            _wallRunContactHoldTimer = _wallRunContactLossBuffer;
+            return;
+        }
+
+        if (_wallRunContactHoldTimer > 0f)
+        {
+            _wallRunContactHoldTimer = Mathf.Max(0f, _wallRunContactHoldTimer - Time.deltaTime);
+            return;
+        }
+
+        StopWallRun();
+    }
+
+    private void UpdateWallRunEligibility()
+    {
+        if (IsGrounded() && !_isWallRunning)
+        {
+            _wallRunSprintGraceTimer = 0f;
+            return;
+        }
+
+        _wallRunSprintGraceTimer = Mathf.Max(0f, _wallRunSprintGraceTimer - Time.deltaTime);
+    }
+
+    private bool CanMaintainWallRun()
+    {
+        if (_playerLocomotionInput == null || IsGrounded() || IsInjured() || IsCrouching())
+        {
+            return false;
+        }
+
+        if (!_playerLocomotionInput.JumpHeld)
+        {
+            return false;
+        }
+
+        Vector2 movementInput = _playerLocomotionInput.MovementInput;
+        if (movementInput.y <= 0.1f || Mathf.Abs(movementInput.x) <= 0.1f)
+        {
+            return false;
+        }
+
+        if (GetHorizontalSpeed() < _wallRunMinSpeed)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool IsPushingIntoWall(Vector3 wallNormal)
+    {
+        if (_playerLocomotionInput == null || wallNormal.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector3 desiredMovementDirection = GetPlanarMovementDirection(_playerLocomotionInput.MovementInput);
+        if (desiredMovementDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float intoWallAmount = Vector3.Dot(desiredMovementDirection, -wallNormal.normalized);
+        return intoWallAmount >= _wallRunStartIntoWallThreshold;
+    }
+
+    private Vector3 GetPlanarMovementDirection(Vector2 movementInput)
+    {
+        Vector3 forward = _transform.forward;
+        Vector3 right = _transform.right;
+        Vector3 forwardXZ = new Vector3(forward.x, 0f, forward.z).normalized;
+        Vector3 rightXZ = new Vector3(right.x, 0f, right.z).normalized;
+        return (forwardXZ * movementInput.y + rightXZ * movementInput.x).normalized;
+    }
+
+    private bool TryGetWallRunContact(out int wallSide, out Vector3 wallNormal)
+    {
+        wallSide = 0;
+        wallNormal = Vector3.zero;
+
+        if (_playerLocomotionInput == null)
+        {
+            return false;
+        }
+
+        Vector2 movementInput = _playerLocomotionInput.MovementInput;
+
+        int desiredSide = movementInput.x > 0f ? 1 : -1;
+        Vector3 rayDirection = desiredSide > 0 ? _transform.right : -_transform.right;
+        Vector3 rayOrigin = _transform.position + Vector3.up * (_characterController.height * 0.5f);
+
+        if (!Physics.Raycast(rayOrigin, rayDirection, out RaycastHit hit, _wallRunCheckDistance, _wallRunLayers, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        if (Mathf.Abs(hit.normal.y) > 0.2f)
+        {
+            return false;
+        }
+
+        wallSide = desiredSide;
+        wallNormal = hit.normal;
+        return true;
+    }
+
+    private void StopWallRun()
+    {
+        _isWallRunning = false;
+        _wallRunSide = 0;
+        _wallRunNormal = Vector3.zero;
+        _wallRunContactHoldTimer = 0f;
     }
 
     private bool IsZooming()

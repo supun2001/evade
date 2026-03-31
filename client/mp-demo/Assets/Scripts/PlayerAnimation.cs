@@ -16,6 +16,7 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private float _landingGroundedBuffer = 0.05f;
     [SerializeField] private float _injuredReleaseBlendDuration = 0.16f;
     [SerializeField] private float _crouchReleaseBlendDuration = 0.12f;
+    [SerializeField] private float _wallRunAnimationExitBuffer = 0.04f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -28,6 +29,12 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _verticalSpeedHash = Animator.StringToHash("VerticalSpeed");
     private static readonly int _injuredHash = Animator.StringToHash("IsInjured");
     private static readonly int _crouchHash = Animator.StringToHash("IsCrouching");
+    private const string WALL_SLIDE_LEFT_STATE = "Base Layer.WallSlideLeft";
+    private const string WALL_SLIDE_RIGHT_STATE = "Base Layer.WallSlideRight";
+    private const string FALLING_STATE = "Base Layer.Falling";
+    private const string IN_AIR_STATE = "Base Layer.InAir";
+    private const string IDLE_RUN_STATE = "Base Layer.Idle/Run";
+    private const string CROUCH_STATE = "Base Layer.Crouch";
 
     private float _currentInputX;
     private float _currentInputY;
@@ -45,6 +52,8 @@ public class PlayerAnimation : MonoBehaviour
     private float _injuredReleaseTimer;
     private float _crouchMoveAmount;
     private float _crouchReleaseTimer;
+    private float _wallRunAnimationHoldTimer;
+    private string _lastWallRunState = WALL_SLIDE_LEFT_STATE;
     private Vector2 _lastAppliedAnimationInput;
     private bool _lastAppliedGrounded = true;
     private bool _lastAppliedJumping;
@@ -284,6 +293,7 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
         targetAnimator.SetBool(_injuredHash, IsInjuredActive);
         targetAnimator.SetBool(_crouchHash, !IsInjuredActive && IsCrouchingActive);
+        ApplyWallRunState(targetAnimator, isGrounded, verticalSpeed);
     }
 
     public bool UsesSingleForwardRunController()
@@ -496,6 +506,67 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         return Mathf.Clamp01(_crouchReleaseTimer / Mathf.Max(_crouchReleaseBlendDuration, 0.001f));
+    }
+
+    private void ApplyWallRunState(Animator targetAnimator, bool isGrounded, float verticalSpeed)
+    {
+        if (targetAnimator == null || _playerController == null || _useNetworkAnimationState)
+        {
+            return;
+        }
+
+        bool wallRunning = _playerController.IsWallRunning();
+        if (wallRunning)
+        {
+            string targetState = _playerController.GetWallRunSide() < 0 ? WALL_SLIDE_RIGHT_STATE : WALL_SLIDE_LEFT_STATE;
+            _lastWallRunState = targetState;
+            _wallRunAnimationHoldTimer = _wallRunAnimationExitBuffer;
+            CrossFadeIfNeeded(targetAnimator, targetState, 0.08f);
+            return;
+        }
+
+        AnimatorStateInfo currentState = targetAnimator.GetCurrentAnimatorStateInfo(0);
+        if (!currentState.IsName(WALL_SLIDE_LEFT_STATE) && !currentState.IsName(WALL_SLIDE_RIGHT_STATE))
+        {
+            return;
+        }
+
+        bool shouldHoldWallRunAnimation =
+            !isGrounded
+            && _playerLocomotionInput != null
+            && _playerLocomotionInput.JumpHeld
+            && _playerLocomotionInput.MovementInput.y > 0.1f
+            && Mathf.Abs(_playerLocomotionInput.MovementInput.x) > 0.1f;
+
+        if (_wallRunAnimationHoldTimer > 0f && shouldHoldWallRunAnimation)
+        {
+            _wallRunAnimationHoldTimer = Mathf.Max(0f, _wallRunAnimationHoldTimer - Time.deltaTime);
+            CrossFadeIfNeeded(targetAnimator, _lastWallRunState, 0.05f);
+            return;
+        }
+
+        _wallRunAnimationHoldTimer = 0f;
+
+        string recoveryState = isGrounded
+            ? (IsCrouchingActive ? CROUCH_STATE : IDLE_RUN_STATE)
+            : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
+
+        CrossFadeIfNeeded(targetAnimator, recoveryState, 0.08f);
+    }
+
+    private static void CrossFadeIfNeeded(Animator targetAnimator, string stateName, float duration)
+    {
+        if (targetAnimator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
+        {
+            return;
+        }
+
+        if (targetAnimator.IsInTransition(0) && targetAnimator.GetNextAnimatorStateInfo(0).IsName(stateName))
+        {
+            return;
+        }
+
+        targetAnimator.CrossFadeInFixedTime(stateName, duration);
     }
 
     private void OnAnimatorMove()
