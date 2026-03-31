@@ -7,7 +7,7 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private RuntimeAnimatorController _childAnimatorControllerOverride;
     public Animator Animator => _animator;
     public Transform VisualRootTransform => _animator != null ? _animator.transform : null;
-    public bool IsInjuredActive => _debugForceInjured || _isInjured;
+    public bool IsInjuredActive => _debugForceInjured || (_useNetworkAnimationState ? _networkIsInjured : _isInjured);
     [SerializeField] private float animationSmoothTime = 0.1f;
     [SerializeField] private bool _useSingleForwardRunAnimation = false;
     [SerializeField] private bool _debugForceInjured = false;
@@ -17,6 +17,8 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private float _injuredReleaseBlendDuration = 0.16f;
     [SerializeField] private float _crouchReleaseBlendDuration = 0.12f;
     [SerializeField] private float _wallRunAnimationExitBuffer = 0.04f;
+    [SerializeField] private float _networkAnimationBlendSpeed = 18f;
+    [SerializeField] private float _networkAnimationReleaseSpeed = 32f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -45,6 +47,10 @@ public class PlayerAnimation : MonoBehaviour
     private bool _networkIsGrounded = true;
     private bool _networkIsJumping;
     private float _networkVerticalSpeed;
+    private bool _networkIsInjured;
+    private bool _networkIsCrouching;
+    private bool _networkIsWallRunning;
+    private int _networkWallRunSide;
     private float _jumpAnimationLatchTimer;
     private float _groundedStableTimer;
     private bool _isInjured;
@@ -105,13 +111,26 @@ public class PlayerAnimation : MonoBehaviour
         _useNetworkAnimationState = useNetworkAnimationState;
     }
 
-    public void ApplyNetworkState(float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)
+    public void ApplyNetworkState(
+        float inputX,
+        float inputY,
+        bool isGrounded,
+        bool isJumping,
+        float verticalSpeed,
+        bool isInjured,
+        bool isCrouching,
+        bool isWallRunning,
+        int wallRunSide)
     {
         _useNetworkAnimationState = true;
         _networkAnimationInput = new Vector2(inputX, inputY);
         _networkIsGrounded = isGrounded;
         _networkIsJumping = isJumping;
         _networkVerticalSpeed = verticalSpeed;
+        _networkIsInjured = isInjured;
+        _networkIsCrouching = isCrouching;
+        _networkIsWallRunning = isWallRunning;
+        _networkWallRunSide = wallRunSide;
     }
 
     public void GetAnimationSyncState(out Vector2 animationInput, out bool isGrounded, out bool isJumping, out float verticalSpeed)
@@ -127,7 +146,7 @@ public class PlayerAnimation : MonoBehaviour
         _isInjured = isInjured;
     }
 
-    public bool IsCrouchingActive => _debugForceCrouching || (_playerController != null && _playerController.IsCrouching());
+    public bool IsCrouchingActive => _debugForceCrouching || (_useNetworkAnimationState ? _networkIsCrouching : (_playerController != null && _playerController.IsCrouching()));
 
     public string GetAnimatorDebugInfo()
     {
@@ -291,8 +310,10 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetBool(_groundedHash, isGrounded);
         targetAnimator.SetBool(_jumpHash, isJumping);
         targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
-        targetAnimator.SetBool(_injuredHash, IsInjuredActive);
-        targetAnimator.SetBool(_crouchHash, !IsInjuredActive && IsCrouchingActive);
+        bool isInjuredActive = IsInjuredActive;
+        bool isCrouchingActive = IsCrouchingActive;
+        targetAnimator.SetBool(_injuredHash, isInjuredActive);
+        targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive);
         ApplyWallRunState(targetAnimator, isGrounded, verticalSpeed);
     }
 
@@ -341,12 +362,28 @@ public class PlayerAnimation : MonoBehaviour
             : (_playerController != null ? _playerController.GetVerticalVelocity() : 0f);
         bool visualGrounded = GetStableGroundedState(isGrounded, verticalSpeed, isJumpTriggered, deltaTime);
 
-        Vector2 targetAnimationInput = UsesSingleForwardRunController()
-            ? new Vector2(0f, GetAnimationSpeedFactor(input))
-            : GetDirectionalAnimationInput(input);
+        Vector2 targetAnimationInput = _useNetworkAnimationState
+            ? Vector2.ClampMagnitude(input, 1f)
+            : (UsesSingleForwardRunController()
+                ? new Vector2(0f, GetAnimationSpeedFactor(input))
+                : GetDirectionalAnimationInput(input));
 
-        _currentInputX = Mathf.Lerp(_currentInputX, targetAnimationInput.x, _smoothSpeed * deltaTime);
-        _currentInputY = Mathf.Lerp(_currentInputY, targetAnimationInput.y, _smoothSpeed * deltaTime);
+        if (_useNetworkAnimationState)
+        {
+            bool releasingToIdle =
+                targetAnimationInput.sqrMagnitude <= 0.0001f
+                && visualGrounded
+                && Mathf.Abs(verticalSpeed) <= 0.01f;
+
+            float moveSpeed = releasingToIdle ? _networkAnimationReleaseSpeed : _networkAnimationBlendSpeed;
+            _currentInputX = Mathf.MoveTowards(_currentInputX, targetAnimationInput.x, moveSpeed * deltaTime);
+            _currentInputY = Mathf.MoveTowards(_currentInputY, targetAnimationInput.y, moveSpeed * deltaTime);
+        }
+        else
+        {
+            _currentInputX = Mathf.Lerp(_currentInputX, targetAnimationInput.x, _smoothSpeed * deltaTime);
+            _currentInputY = Mathf.Lerp(_currentInputY, targetAnimationInput.y, _smoothSpeed * deltaTime);
+        }
 
         _lastAppliedAnimationInput = new Vector2(_currentInputX, _currentInputY);
         _lastAppliedGrounded = visualGrounded;
@@ -398,7 +435,12 @@ public class PlayerAnimation : MonoBehaviour
 
         float speedFactor = GetAnimationSpeedFactor(fallbackInput);
 
-        if (_useNetworkAnimationState || _playerController == null)
+        if (_useNetworkAnimationState)
+        {
+            return Vector2.ClampMagnitude(fallbackInput, 1f);
+        }
+
+        if (_playerController == null)
         {
             return Vector2.ClampMagnitude(fallbackInput, 1f) * speedFactor;
         }
@@ -416,7 +458,12 @@ public class PlayerAnimation : MonoBehaviour
 
     private float GetAnimationSpeedFactor(Vector2 fallbackInput)
     {
-        if (_useNetworkAnimationState || _playerController == null)
+        if (_useNetworkAnimationState)
+        {
+            return 1f;
+        }
+
+        if (_playerController == null)
         {
             return Mathf.Clamp01(fallbackInput.magnitude);
         }
@@ -515,10 +562,15 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
-        bool wallRunning = _playerController.IsWallRunning();
+        bool wallRunning = _useNetworkAnimationState
+            ? _networkIsWallRunning
+            : (_playerController != null && _playerController.IsWallRunning());
         if (wallRunning)
         {
-            string targetState = _playerController.GetWallRunSide() < 0 ? WALL_SLIDE_RIGHT_STATE : WALL_SLIDE_LEFT_STATE;
+            int wallRunSide = _useNetworkAnimationState
+                ? _networkWallRunSide
+                : (_playerController != null ? _playerController.GetWallRunSide() : 0);
+            string targetState = wallRunSide < 0 ? WALL_SLIDE_RIGHT_STATE : WALL_SLIDE_LEFT_STATE;
             _lastWallRunState = targetState;
             _wallRunAnimationHoldTimer = _wallRunAnimationExitBuffer;
             CrossFadeIfNeeded(targetAnimator, targetState, 0.08f);

@@ -119,7 +119,21 @@ public class NetworkManager : MonoBehaviour
         // Occurs when the room state is updated
     }
 
-    public void SendPlayerUpdate(Vector3 pos, float rotY, Vector3 vel, float aX, float aY, bool g, bool j, Vector2 camRot)
+    public void SendPlayerUpdate(
+        Vector3 pos,
+        float rotY,
+        Vector3 vel,
+        float aX,
+        float aY,
+        bool g,
+        bool j,
+        bool injured,
+        bool crouching,
+        bool wallRunning,
+        int wallRunSide,
+        Vector2 moveInput,
+        float visualYaw,
+        Vector2 camRot)
     {
         if (room == null) return;
         
@@ -129,6 +143,13 @@ public class NetworkManager : MonoBehaviour
             velocityX = vel.x, velocityY = vel.y, velocityZ = vel.z,
             animInputX = aX, animInputY = aY,
             isGrounded = g, isJumping = j,
+            isInjured = injured,
+            isCrouching = crouching,
+            isWallRunning = wallRunning,
+            wallRunSide = wallRunSide,
+            moveInputX = moveInput.x,
+            moveInputY = moveInput.y,
+            visualYaw = visualYaw,
             cameraRotationX = camRot.x, cameraRotationY = camRot.y
         });
     }

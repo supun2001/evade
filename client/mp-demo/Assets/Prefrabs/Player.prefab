@@ -146,7 +146,6 @@ GameObject:
   - component: {fileID: 4370817863378094090}
   - component: {fileID: 1598502036679147204}
   - component: {fileID: 7426455774788748035}
-  - component: {fileID: 285435525388412735}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -245,6 +244,12 @@ MonoBehaviour:
   _thirdPersonCameraOffset: {x: 1.2, y: -0.62, z: -3.6}
   _thirdPersonCameraPitch: 8
   _firstPersonCameraLocalPosition: {x: 0, y: -0.6, z: 0.2}
+  _firstPersonCrouchCameraOffset: {x: 0, y: -0.45, z: 0}
+  _firstPersonCrouchCameraBlend: 12
+  _firstPersonWallRunCameraOffset: {x: -1, y: 1, z: 0}
+  _firstPersonWallRunCameraRoll: 12
+  _firstPersonWallRunCameraBlend: 10
+  _firstPersonWallRunCameraRotationBlend: 14
   _firstPersonNearClipPlane: 0.01
   _cameraTransitionDuration: 0.3
   _firstPersonHiddenBoneNames:
@@ -343,27 +348,6 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   - {fileID: 0}
---- !u!65 &285435525388412735
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4842325826247379024}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 0
-  serializedVersion: 3
-  m_Size: {x: 2.034842, y: 2.772772, z: 1}
-  m_Center: {x: 0.019984007, y: 1.3013145, z: 0}
 --- !u!1 &4978651277537230969
 GameObject:
   m_ObjectHideFlags: 0

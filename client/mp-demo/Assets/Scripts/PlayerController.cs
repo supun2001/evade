@@ -96,6 +96,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Vector3 _thirdPersonCameraOffset = new Vector3(1f, 0.55f, -3.2f);
     [SerializeField] private float _thirdPersonCameraPitch = 8f;
     [SerializeField] private Vector3 _firstPersonCameraLocalPosition = Vector3.zero;
+    [SerializeField] private Vector3 _firstPersonCrouchCameraOffset = new Vector3(0f, -0.45f, 0f);
+    [SerializeField] private float _firstPersonCrouchCameraBlend = 12f;
+    [SerializeField] private Vector3 _firstPersonWallRunCameraOffset = new Vector3(0.16f, -0.08f, 0f);
+    [SerializeField] private float _firstPersonWallRunCameraRoll = 12f;
+    [SerializeField] private float _firstPersonWallRunCameraBlend = 10f;
+    [SerializeField] private float _firstPersonWallRunCameraRotationBlend = 14f;
     [SerializeField] private float _firstPersonNearClipPlane = 0.01f;
     [SerializeField] private float _cameraTransitionDuration = 0.3f;
     [SerializeField] private string[] _firstPersonHiddenBoneNames = { "head", "torso" };
@@ -150,6 +156,9 @@ public class PlayerController : MonoBehaviour
     private float _sprintBobWeight;
     private float _sprintBobTime;
     private float _firstPersonBobWeight;
+    private float _firstPersonCrouchCameraWeight;
+    private float _firstPersonWallRunCameraWeight;
+    private int _lastWallRunCameraSide;
     private Vector3 _cachedThirdPersonCameraLocalPosition;
     private Quaternion _cachedThirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
@@ -340,6 +349,7 @@ public class PlayerController : MonoBehaviour
 
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
         UpdateSprintCameraBob();
+        UpdateFirstPersonWallRunCameraPose();
         ResolveCameraWallCollision();
         UpdateSprintArmPose();
         UpdateArmWallClipVisibility();
@@ -738,7 +748,7 @@ public class PlayerController : MonoBehaviour
 
             if (_gameplayCameraTransform != null)
             {
-                _gameplayCameraTransform.localPosition = _firstPersonCameraLocalPosition;
+                _gameplayCameraTransform.localPosition = GetFirstPersonTargetLocalPosition();
                 _gameplayCameraTransform.localRotation = Quaternion.identity;
             }
         }
@@ -793,7 +803,7 @@ public class PlayerController : MonoBehaviour
 
         if (firstPerson)
         {
-            targetLocalPosition = _firstPersonCameraLocalPosition;
+            targetLocalPosition = GetFirstPersonTargetLocalPosition();
             targetLocalRotation = Quaternion.identity;
 
             if (_gameplayCamera != null)
@@ -983,10 +993,64 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        UpdateFirstPersonCrouchCameraOffset();
         float bobAmplitude = Mathf.Lerp(_firstPersonWalkBobAmplitude, _sprintBobAmplitude, _sprintBobWeight) * _firstPersonBobWeight;
         float bobOffsetY = Mathf.Sin(_sprintBobTime) * bobAmplitude;
-        Vector3 bobbedPosition = _firstPersonCameraLocalPosition + new Vector3(0f, bobOffsetY, 0f);
+        Vector3 bobbedPosition = GetFirstPersonTargetLocalPosition() + new Vector3(0f, bobOffsetY, 0f);
         _gameplayCameraTransform.localPosition = bobbedPosition;
+    }
+
+    private void UpdateFirstPersonCrouchCameraOffset()
+    {
+        float targetWeight = _currentViewMode == CameraViewMode.FirstPerson && IsCrouching() ? 1f : 0f;
+        float blend = 1f - Mathf.Exp(-_firstPersonCrouchCameraBlend * Time.deltaTime);
+        _firstPersonCrouchCameraWeight = Mathf.Lerp(_firstPersonCrouchCameraWeight, targetWeight, blend);
+    }
+
+    private Vector3 GetFirstPersonTargetLocalPosition()
+    {
+        return _firstPersonCameraLocalPosition + _firstPersonCrouchCameraOffset * _firstPersonCrouchCameraWeight;
+    }
+
+    private void UpdateFirstPersonWallRunCameraPose()
+    {
+        if (_gameplayCameraTransform == null || _cameraTransitionCoroutine != null)
+        {
+            return;
+        }
+
+        bool useWallRunPose = _currentViewMode == CameraViewMode.FirstPerson && _isWallRunning && _wallRunSide != 0;
+        float targetWeight = useWallRunPose ? 1f : 0f;
+        float blend = 1f - Mathf.Exp(-_firstPersonWallRunCameraBlend * Time.deltaTime);
+        _firstPersonWallRunCameraWeight = Mathf.Lerp(_firstPersonWallRunCameraWeight, targetWeight, blend);
+
+        if (useWallRunPose)
+        {
+            _lastWallRunCameraSide = _wallRunSide;
+        }
+
+        if (_firstPersonWallRunCameraWeight <= 0.001f)
+        {
+            if (_currentViewMode == CameraViewMode.FirstPerson)
+            {
+                float resetBlend = 1f - Mathf.Exp(-_firstPersonWallRunCameraRotationBlend * Time.deltaTime);
+                _gameplayCameraTransform.localRotation = Quaternion.Slerp(_gameplayCameraTransform.localRotation, Quaternion.identity, resetBlend);
+            }
+            return;
+        }
+
+        float side = useWallRunPose ? _wallRunSide : (_lastWallRunCameraSide == 0 ? 1f : _lastWallRunCameraSide);
+        float cameraSide = -side;
+        Vector3 sideOffset = new Vector3(_firstPersonWallRunCameraOffset.x * cameraSide, _firstPersonWallRunCameraOffset.y, _firstPersonWallRunCameraOffset.z);
+        _gameplayCameraTransform.localPosition += sideOffset * _firstPersonWallRunCameraWeight;
+
+        float targetRoll = -_firstPersonWallRunCameraRoll * cameraSide;
+        Quaternion targetRotation = Quaternion.Euler(0f, 0f, targetRoll);
+        float rotationBlend = 1f - Mathf.Exp(-_firstPersonWallRunCameraRotationBlend * Time.deltaTime);
+        _gameplayCameraTransform.localRotation = Quaternion.Slerp(
+            _gameplayCameraTransform.localRotation,
+            targetRotation,
+            rotationBlend);
     }
 
     private void ResolveCameraWallCollision()
@@ -1287,15 +1351,21 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateInjuredFacing()
     {
-        UpdateDirectionalVisualFacing();
+        UpdateDirectionalVisualFacing(_playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero);
     }
 
     private void UpdateCrouchFacing()
     {
-        UpdateDirectionalVisualFacing();
+        if (_currentViewMode == CameraViewMode.FirstPerson)
+        {
+            ResetInjuredVisualRootRotation();
+            return;
+        }
+
+        UpdateDirectionalVisualFacing(_playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero);
     }
 
-    private void UpdateDirectionalVisualFacing()
+    private void UpdateDirectionalVisualFacing(Vector2 movementInput)
     {
         CacheInjuredVisualRoot();
 
@@ -1304,7 +1374,6 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
         if (movementInput.sqrMagnitude <= 0.0001f)
         {
             return;
@@ -1330,6 +1399,66 @@ public class PlayerController : MonoBehaviour
             _injuredVisualRoot.localRotation,
             correctedForwardRotation,
             1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime));
+    }
+
+    public void ApplyRemoteVisualState(Vector2 movementInput, bool injured, bool crouching)
+    {
+        if (injured || crouching)
+        {
+            UpdateDirectionalVisualFacing(movementInput);
+            return;
+        }
+
+        ResetInjuredVisualRootRotation();
+    }
+
+    public float GetVisualYaw()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return 180f;
+        }
+
+        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+        if ((IsInjured() || IsCrouching()) && movementInput.sqrMagnitude > 0.0001f)
+        {
+            return NormalizeSignedAngle(Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f);
+        }
+
+        Quaternion relativeRotation = Quaternion.Inverse(_injuredVisualRootBaseLocalRotation) * _injuredVisualRoot.localRotation;
+        return NormalizeSignedAngle(relativeRotation.eulerAngles.y);
+    }
+
+    public void ApplyRemoteVisualYaw(float visualYaw)
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        Quaternion targetLocalRotation = Quaternion.Euler(0f, visualYaw, 0f) * _injuredVisualRootBaseLocalRotation;
+        float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
+        _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+    }
+
+    private static float NormalizeSignedAngle(float angle)
+    {
+        angle %= 360f;
+        if (angle > 180f)
+        {
+            angle -= 360f;
+        }
+
+        if (angle < -180f)
+        {
+            angle += 360f;
+        }
+
+        return angle;
     }
 
     private void HandleGroundMovement(Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)

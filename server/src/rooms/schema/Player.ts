@@ -17,6 +17,13 @@ export class Player extends Schema {
     @type("number") animInputY: number = 0;
     @type("boolean") isGrounded: boolean = true;
     @type("boolean") isJumping: boolean = false;
+    @type("boolean") isInjured: boolean = false;
+    @type("boolean") isCrouching: boolean = false;
+    @type("boolean") isWallRunning: boolean = false;
+    @type("number") wallRunSide: number = 0;
+    @type("number") moveInputX: number = 0;
+    @type("number") moveInputY: number = 0;
+    @type("number") visualYaw: number = 180;
 
     // Camera Rotation (for looking up/down)
     @type("number") cameraRotationX: number = 0;

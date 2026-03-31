@@ -57,10 +57,6 @@ public class NetworkPlayer : MonoBehaviour
     private float nextSendTime = 0f;
     public float sendInterval = 0.05f; // 20 times per second
     
-    // Animation Smoothing for Remote Players
-    private float _remoteAnimX;
-    private float _remoteAnimY;
-    
     // Jump latching
     private bool _jumpQueued;
 
@@ -106,6 +102,10 @@ public class NetworkPlayer : MonoBehaviour
         bool isGrounded = controller != null && controller.IsGrounded();
         bool isJumping = _jumpQueued;
         float verticalSpeed = controller != null ? controller.GetVerticalVelocity() : 0f;
+        bool isInjured = anim != null && anim.IsInjuredActive;
+        bool isCrouching = controller != null && controller.IsCrouching();
+        bool isWallRunning = controller != null && controller.IsWallRunning();
+        int wallRunSide = controller != null ? controller.GetWallRunSide() : 0;
 
         if (anim != null)
         {
@@ -126,6 +126,12 @@ public class NetworkPlayer : MonoBehaviour
             animationInput.y,
             isGrounded,
             isJumping,
+            isInjured,
+            isCrouching,
+            isWallRunning,
+            wallRunSide,
+            input ? input.MovementInput : Vector2.zero,
+            controller != null ? controller.GetVisualYaw() : 180f,
             new Vector2(camRx, camRy)
         );
     }
@@ -139,27 +145,31 @@ public class NetworkPlayer : MonoBehaviour
 
         if (animator)
         {
-            // Debugging Sync
-            if (Mathf.Abs(playerState.animInputX) > 0.1f || Mathf.Abs(playerState.animInputY) > 0.1f)
-            {
-               Debug.Log($"Remote Anim: Target({playerState.animInputX:F2}, {playerState.animInputY:F2}) -> Smooth({_remoteAnimX:F2}, {_remoteAnimY:F2})");
-            }
-
-            // Smoothly interpolate the values locally
-            _remoteAnimX = Mathf.Lerp(_remoteAnimX, playerState.animInputX, Time.deltaTime * lerpSpeed);
-            _remoteAnimY = Mathf.Lerp(_remoteAnimY, playerState.animInputY, Time.deltaTime * lerpSpeed);
-
             if (anim != null)
             {
-                anim.ApplyNetworkState(_remoteAnimX, _remoteAnimY, playerState.isGrounded, playerState.isJumping, playerState.velocityY);
+                anim.ApplyNetworkState(
+                    playerState.animInputX,
+                    playerState.animInputY,
+                    playerState.isGrounded,
+                    playerState.isJumping,
+                    playerState.velocityY,
+                    playerState.isInjured,
+                    playerState.isCrouching,
+                    playerState.isWallRunning,
+                    Mathf.RoundToInt(playerState.wallRunSide));
             }
             else
             {
-                animator.SetFloat(InputXHash, _remoteAnimX);
-                animator.SetFloat(InputYHash, _remoteAnimY);
+                animator.SetFloat(InputXHash, playerState.animInputX);
+                animator.SetFloat(InputYHash, playerState.animInputY);
                 animator.SetBool(GroundedHash, playerState.isGrounded);
                 animator.SetBool(JumpHash, playerState.isJumping);
                 animator.SetFloat(VerticalSpeedHash, playerState.velocityY);
+            }
+
+            if (controller != null)
+            {
+                controller.ApplyRemoteVisualYaw(playerState.visualYaw);
             }
         }
     }

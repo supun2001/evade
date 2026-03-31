@@ -49,6 +49,13 @@ export class MyRoom extends Room<MyRoomState> {
       player.animInputY = message.animInputY;
       player.isGrounded = message.isGrounded;
       player.isJumping = message.isJumping;
+      player.isInjured = message.isInjured;
+      player.isCrouching = message.isCrouching;
+      player.isWallRunning = message.isWallRunning;
+      player.wallRunSide = message.wallRunSide;
+      player.moveInputX = message.moveInputX;
+      player.moveInputY = message.moveInputY;
+      player.visualYaw = message.visualYaw;
     });
 
     this.onMessage("playerReady", (client, isReady) => {
@@ -99,6 +106,15 @@ export class MyRoom extends Room<MyRoomState> {
     player.x = Math.random() * 10 - 5;
     player.y = 0;
     player.z = Math.random() * 10 - 5;
+    player.isGrounded = true;
+    player.isJumping = false;
+    player.isInjured = false;
+    player.isCrouching = false;
+    player.isWallRunning = false;
+    player.wallRunSide = 0;
+    player.moveInputX = 0;
+    player.moveInputY = 0;
+    player.visualYaw = 180;
 
     //Add player to state
     this.state.players.set(client.sessionId, player);

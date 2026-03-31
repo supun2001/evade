@@ -48,21 +48,42 @@ public Player() { }
 	[Type(10, "boolean")]
 	public bool isJumping = default(bool);
 
-	[Type(11, "number")]
-	public float cameraRotationX = default(float);
+	[Type(11, "boolean")]
+	public bool isInjured = default(bool);
 
-	[Type(12, "number")]
-	public float cameraRotationY = default(float);
+	[Type(12, "boolean")]
+	public bool isCrouching = default(bool);
 
-	[Type(13, "string")]
-	public string sessionId = default(string);
+	[Type(13, "boolean")]
+	public bool isWallRunning = default(bool);
 
 	[Type(14, "number")]
+	public float wallRunSide = default(float);
+
+	[Type(15, "number")]
+	public float moveInputX = default(float);
+
+	[Type(16, "number")]
+	public float moveInputY = default(float);
+
+	[Type(17, "number")]
+	public float visualYaw = 180f;
+
+	[Type(18, "number")]
+	public float cameraRotationX = default(float);
+
+	[Type(19, "number")]
+	public float cameraRotationY = default(float);
+
+	[Type(20, "string")]
+	public string sessionId = default(string);
+
+	[Type(21, "number")]
 	public float timestamp = default(float);
 
-		[Type(15, "boolean")]
+		[Type(22, "boolean")]
 		public bool isReady = default(bool);
 
-		[Type(16, "number")]
+		[Type(23, "number")]
 		public float skinIndex = default(float);
 	}
