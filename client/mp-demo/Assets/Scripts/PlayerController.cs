@@ -42,13 +42,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _injuredRotationSharpness = 12f;
 
     [Header("Nextbot Hit Reaction")]
-    [SerializeField] private float _nextbotHitReactionDuration = 0.45f;
-    [SerializeField] private float _nextbotHitHorizontalImpulse = 8f;
-    [SerializeField] private float _nextbotHitVerticalImpulse = 4f;
-    [SerializeField] private float _nextbotHitHorizontalDamping = 10f;
-    [SerializeField] private float _nextbotHitVisualPitch = 70f;
-    [SerializeField] private float _nextbotHitVisualRoll = 35f;
-    [SerializeField] private float _nextbotHitVisualBlend = 14f;
+    [SerializeField] private float _nextbotHitReactionDuration = 3f;
+    [SerializeField] private float _nextbotHitShoveForce = 8f;
+    [SerializeField] private float _nextbotHitUpwardForce = 4f;
+    [SerializeField, Range(0f, 1f)] private float _nextbotHitRandomness = 0.55f;
+    [SerializeField, Range(0f, 1f)] private float _nextbotHitTumble = 0.65f;
+    [SerializeField, Range(0f, 1f)] private float _nextbotHitLimbFlail = 0.45f;
 
     [Header("Downed Pose")]
     [SerializeField] private Vector3 _injuredVisualPositionOffset = new Vector3(0f, 0f, 0.06f);
@@ -172,6 +171,11 @@ public class PlayerController : MonoBehaviour
     private float _nextbotHitReactionTimer;
     private float _nextbotHitReactionPitch;
     private float _nextbotHitReactionRoll;
+    private float _nextbotHitAngularVelocityPitch;
+    private float _nextbotHitAngularVelocityRoll;
+    private Vector3 _nextbotHitImpactVelocity = Vector3.zero;
+    private float _nextbotHitImpactTimer;
+    private float _nextbotHitReactionSeed;
 
     private CameraViewMode _currentViewMode;
     private float _defaultNearClipPlane;
@@ -195,8 +199,20 @@ public class PlayerController : MonoBehaviour
     private bool[] _defaultWallHideRendererEnabledStates;
     private Transform _leftArmTransform;
     private Transform _rightArmTransform;
+    private Transform _nextbotHitLeftArmTransform;
+    private Transform _nextbotHitRightArmTransform;
+    private Transform _nextbotHitLeftLegTransform;
+    private Transform _nextbotHitRightLegTransform;
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
+    private Quaternion _nextbotHitLeftArmBaseLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitRightArmBaseLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitLeftLegBaseLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitRightLegBaseLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitLeftArmTargetLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitRightArmTargetLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitLeftLegTargetLocalRotation = Quaternion.identity;
+    private Quaternion _nextbotHitRightLegTargetLocalRotation = Quaternion.identity;
     private Quaternion _injuredVisualRootBaseLocalRotation = Quaternion.identity;
     private Vector3 _injuredVisualRootBaseLocalPosition = Vector3.zero;
     private float _firstPersonWallRetreat;
@@ -204,6 +220,7 @@ public class PlayerController : MonoBehaviour
     private float _defaultCharacterControllerRadius;
     private Vector3 _defaultCharacterControllerCenter;
     private Transform[] _downedGroundReferenceTransforms = Array.Empty<Transform>();
+    private Renderer[] _downedGroundReferenceRenderers = Array.Empty<Renderer>();
     private readonly Collider[] _armWallHitBuffer = new Collider[8];
     private Coroutine _cameraTransitionCoroutine;
     private bool _isPauseMenuOpen;
@@ -212,8 +229,38 @@ public class PlayerController : MonoBehaviour
     private const float SHOW_HEAD_PROGRESS = 0.2f;
     private const string INJURED_VISUAL_ROOT_NAME = "player";
     private const string INJURED_VISUAL_PIVOT_NAME = "InjuredVisualPivot";
+    private const float NEXTBOT_HIT_HORIZONTAL_DAMPING = 10f;
+    private const float NEXTBOT_HIT_IMPACT_DURATION = 0.18f;
+    private const float NEXTBOT_HIT_IMPACT_DAMPING = 22f;
+    private const float NEXTBOT_HIT_VISUAL_BLEND = 14f;
+    private const float NEXTBOT_HIT_ARM_BLEND = 12f;
+    private const float NEXTBOT_HIT_LEG_BLEND = 10f;
+    private const string NEXTBOT_HIT_LEFT_ARM_BONE_NAME = "ArmL1";
+    private const string NEXTBOT_HIT_RIGHT_ARM_BONE_NAME = "ArmR1";
+    private const string NEXTBOT_HIT_LEFT_LEG_BONE_NAME = "LegL1";
+    private const string NEXTBOT_HIT_RIGHT_LEG_BONE_NAME = "LegR1";
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
+    private float NextbotHitImpactForce => Mathf.Lerp(_nextbotHitShoveForce * 1.15f, _nextbotHitShoveForce * 1.75f, _nextbotHitTumble);
+    private float NextbotHitDirectionRandomAngle => Mathf.Lerp(12f, 40f, _nextbotHitRandomness);
+    private float NextbotHitHorizontalImpulseRandomness => Mathf.Lerp(0.1f, 0.35f, _nextbotHitRandomness);
+    private float NextbotHitVerticalImpulseRandomness => Mathf.Lerp(0.08f, 0.3f, _nextbotHitRandomness);
+    private float NextbotHitImpactForceRandomness => Mathf.Lerp(0.12f, 0.4f, _nextbotHitRandomness);
+    private float NextbotHitVisualPitch => Mathf.Lerp(34f, 54f, _nextbotHitTumble);
+    private float NextbotHitVisualRoll => Mathf.Lerp(8f, 16f, _nextbotHitTumble);
+    private float NextbotHitAngularDamping => Mathf.Lerp(6f, 4f, _nextbotHitTumble);
+    private float NextbotHitSettlePitch => Mathf.Lerp(42f, 62f, _nextbotHitTumble);
+    private float NextbotHitMaxPitch => Mathf.Lerp(52f, 72f, _nextbotHitTumble);
+    private float NextbotHitMaxRoll => Mathf.Lerp(12f, 22f, _nextbotHitTumble);
+    private float NextbotHitWobblePitch => Mathf.Lerp(2f, 8f, _nextbotHitTumble);
+    private float NextbotHitWobbleRoll => Mathf.Lerp(4f, 12f, _nextbotHitTumble);
+    private float NextbotHitWobbleFrequency => Mathf.Lerp(5f, 8f, _nextbotHitTumble);
+    private Vector2 NextbotHitArmPitchRange => Vector2.Lerp(new Vector2(-10f, 20f), new Vector2(-32f, 54f), _nextbotHitLimbFlail);
+    private float NextbotHitArmYawRange => Mathf.Lerp(4f, 12f, _nextbotHitLimbFlail);
+    private float NextbotHitArmRollRange => Mathf.Lerp(6f, 18f, _nextbotHitLimbFlail);
+    private Vector2 NextbotHitLegPitchRange => Vector2.Lerp(new Vector2(-18f, 12f), new Vector2(-48f, 28f), _nextbotHitLimbFlail);
+    private float NextbotHitLegYawRange => Mathf.Lerp(4f, 16f, _nextbotHitLimbFlail);
+    private float NextbotHitLegRollRange => Mathf.Lerp(6f, 22f, _nextbotHitLimbFlail);
     #endregion
 
     #region Setup
@@ -233,6 +280,7 @@ public class PlayerController : MonoBehaviour
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
         CacheArmTransforms();
+        CacheNextbotHitLimbTransforms();
         CacheFirstPersonWallHideRenderers();
         CacheInjuredVisualRoot();
         CacheDownedGroundReferenceTransforms();
@@ -551,6 +599,49 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void CacheNextbotHitLimbTransforms()
+    {
+        if (_nextbotHitLeftArmTransform != null
+            && _nextbotHitRightArmTransform != null
+            && _nextbotHitLeftLegTransform != null
+            && _nextbotHitRightLegTransform != null)
+        {
+            return;
+        }
+
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+        foreach (Transform child in transforms)
+        {
+            if (_nextbotHitLeftArmTransform == null && string.Equals(child.name, NEXTBOT_HIT_LEFT_ARM_BONE_NAME, StringComparison.OrdinalIgnoreCase))
+            {
+                _nextbotHitLeftArmTransform = child;
+                _nextbotHitLeftArmBaseLocalRotation = child.localRotation;
+                _nextbotHitLeftArmTargetLocalRotation = child.localRotation;
+            }
+
+            if (_nextbotHitRightArmTransform == null && string.Equals(child.name, NEXTBOT_HIT_RIGHT_ARM_BONE_NAME, StringComparison.OrdinalIgnoreCase))
+            {
+                _nextbotHitRightArmTransform = child;
+                _nextbotHitRightArmBaseLocalRotation = child.localRotation;
+                _nextbotHitRightArmTargetLocalRotation = child.localRotation;
+            }
+
+            if (_nextbotHitLeftLegTransform == null && string.Equals(child.name, NEXTBOT_HIT_LEFT_LEG_BONE_NAME, StringComparison.OrdinalIgnoreCase))
+            {
+                _nextbotHitLeftLegTransform = child;
+                _nextbotHitLeftLegBaseLocalRotation = child.localRotation;
+                _nextbotHitLeftLegTargetLocalRotation = child.localRotation;
+            }
+
+            if (_nextbotHitRightLegTransform == null && string.Equals(child.name, NEXTBOT_HIT_RIGHT_LEG_BONE_NAME, StringComparison.OrdinalIgnoreCase))
+            {
+                _nextbotHitRightLegTransform = child;
+                _nextbotHitRightLegBaseLocalRotation = child.localRotation;
+                _nextbotHitRightLegTargetLocalRotation = child.localRotation;
+            }
+        }
+    }
+
     private void CacheInjuredVisualRoot()
     {
         if (_injuredVisualRoot != null)
@@ -687,7 +778,7 @@ public class PlayerController : MonoBehaviour
 
     private void CacheDownedGroundReferenceTransforms()
     {
-        if (_downedGroundReferenceTransforms.Length > 0)
+        if (_downedGroundReferenceTransforms.Length > 0 || _downedGroundReferenceRenderers.Length > 0)
         {
             return;
         }
@@ -699,6 +790,7 @@ public class PlayerController : MonoBehaviour
 
         Transform[] transforms = GetComponentsInChildren<Transform>(true);
         var matches = new System.Collections.Generic.List<Transform>();
+        var referenceRenderers = new System.Collections.Generic.List<Renderer>();
         for (int i = 0; i < transforms.Length; i++)
         {
             Transform candidate = transforms[i];
@@ -714,12 +806,23 @@ public class PlayerController : MonoBehaviour
                     && string.Equals(candidate.name, referenceName, StringComparison.OrdinalIgnoreCase))
                 {
                     matches.Add(candidate);
+                    Renderer[] candidateRenderers = candidate.GetComponentsInChildren<Renderer>(true);
+                    for (int rendererIndex = 0; rendererIndex < candidateRenderers.Length; rendererIndex++)
+                    {
+                        Renderer renderer = candidateRenderers[rendererIndex];
+                        if (renderer != null && !referenceRenderers.Contains(renderer))
+                        {
+                            referenceRenderers.Add(renderer);
+                        }
+                    }
+
                     break;
                 }
             }
         }
 
         _downedGroundReferenceTransforms = matches.ToArray();
+        _downedGroundReferenceRenderers = referenceRenderers.ToArray();
     }
 
     private void UpdateSpeedHud()
@@ -1459,7 +1562,13 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateInjuredFacing()
     {
-        UpdateDirectionalVisualFacing(_playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero);
+        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+        if (movementInput.sqrMagnitude <= 0.0001f)
+        {
+            return;
+        }
+
+        UpdateDirectionalVisualFacing(movementInput);
     }
 
     private void UpdateCrouchFacing()
@@ -1503,9 +1612,70 @@ public class PlayerController : MonoBehaviour
         }
 
         Quaternion correctedForwardRotation = Quaternion.Euler(0f, 180f, 0f) * _injuredVisualRootBaseLocalRotation;
-        Quaternion hitReactionRotation = correctedForwardRotation * Quaternion.Euler(_nextbotHitReactionPitch, 0f, _nextbotHitReactionRoll);
-        float blend = 1f - Mathf.Exp(-_nextbotHitVisualBlend * Time.deltaTime);
+        float wobbleTime = (_nextbotHitReactionDuration - _nextbotHitReactionTimer) * NextbotHitWobbleFrequency + _nextbotHitReactionSeed;
+        float wobblePitch = Mathf.Sin(wobbleTime) * NextbotHitWobblePitch * (_nextbotHitReactionTimer / Mathf.Max(0.01f, _nextbotHitReactionDuration));
+        float wobbleRoll = Mathf.Cos(wobbleTime * 1.13f) * NextbotHitWobbleRoll * (_nextbotHitReactionTimer / Mathf.Max(0.01f, _nextbotHitReactionDuration));
+        Quaternion hitReactionRotation = correctedForwardRotation * Quaternion.Euler(
+            _nextbotHitReactionPitch + wobblePitch,
+            0f,
+            _nextbotHitReactionRoll + wobbleRoll);
+        float blend = 1f - Mathf.Exp(-NEXTBOT_HIT_VISUAL_BLEND * Time.deltaTime);
         _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, hitReactionRotation, blend);
+        UpdateNextbotHitReactionLimbPose();
+    }
+
+    private void UpdateNextbotHitReactionLimbPose()
+    {
+        CacheNextbotHitLimbTransforms();
+        float armBlend = 1f - Mathf.Exp(-NEXTBOT_HIT_ARM_BLEND * Time.deltaTime);
+        float legBlend = 1f - Mathf.Exp(-NEXTBOT_HIT_LEG_BLEND * Time.deltaTime);
+
+        if (_nextbotHitLeftArmTransform != null)
+        {
+            _nextbotHitLeftArmTransform.localRotation = Quaternion.Slerp(_nextbotHitLeftArmTransform.localRotation, _nextbotHitLeftArmTargetLocalRotation, armBlend);
+        }
+
+        if (_nextbotHitRightArmTransform != null)
+        {
+            _nextbotHitRightArmTransform.localRotation = Quaternion.Slerp(_nextbotHitRightArmTransform.localRotation, _nextbotHitRightArmTargetLocalRotation, armBlend);
+        }
+
+        if (_nextbotHitLeftLegTransform != null)
+        {
+            _nextbotHitLeftLegTransform.localRotation = Quaternion.Slerp(_nextbotHitLeftLegTransform.localRotation, _nextbotHitLeftLegTargetLocalRotation, legBlend);
+        }
+
+        if (_nextbotHitRightLegTransform != null)
+        {
+            _nextbotHitRightLegTransform.localRotation = Quaternion.Slerp(_nextbotHitRightLegTransform.localRotation, _nextbotHitRightLegTargetLocalRotation, legBlend);
+        }
+    }
+
+    private void ResetNextbotHitReactionLimbPose()
+    {
+        CacheNextbotHitLimbTransforms();
+        float armBlend = 1f - Mathf.Exp(-NEXTBOT_HIT_ARM_BLEND * Time.deltaTime);
+        float legBlend = 1f - Mathf.Exp(-NEXTBOT_HIT_LEG_BLEND * Time.deltaTime);
+
+        if (_nextbotHitLeftArmTransform != null)
+        {
+            _nextbotHitLeftArmTransform.localRotation = Quaternion.Slerp(_nextbotHitLeftArmTransform.localRotation, _nextbotHitLeftArmBaseLocalRotation, armBlend);
+        }
+
+        if (_nextbotHitRightArmTransform != null)
+        {
+            _nextbotHitRightArmTransform.localRotation = Quaternion.Slerp(_nextbotHitRightArmTransform.localRotation, _nextbotHitRightArmBaseLocalRotation, armBlend);
+        }
+
+        if (_nextbotHitLeftLegTransform != null)
+        {
+            _nextbotHitLeftLegTransform.localRotation = Quaternion.Slerp(_nextbotHitLeftLegTransform.localRotation, _nextbotHitLeftLegBaseLocalRotation, legBlend);
+        }
+
+        if (_nextbotHitRightLegTransform != null)
+        {
+            _nextbotHitRightLegTransform.localRotation = Quaternion.Slerp(_nextbotHitRightLegTransform.localRotation, _nextbotHitRightLegBaseLocalRotation, legBlend);
+        }
     }
 
     private void UpdateDownedVisualRootPosition()
@@ -1561,6 +1731,18 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        for (int i = 0; i < _downedGroundReferenceRenderers.Length; i++)
+        {
+            Renderer referenceRenderer = _downedGroundReferenceRenderers[i];
+            if (referenceRenderer == null || !referenceRenderer.enabled)
+            {
+                continue;
+            }
+
+            lowestPoint = Mathf.Min(lowestPoint, referenceRenderer.bounds.min.y);
+            hasBounds = true;
+        }
+
         for (int i = 0; i < _downedGroundReferenceTransforms.Length; i++)
         {
             Transform reference = _downedGroundReferenceTransforms[i];
@@ -1597,6 +1779,23 @@ public class PlayerController : MonoBehaviour
             _injuredVisualRoot.localRotation,
             correctedForwardRotation,
             1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime));
+        ResetNextbotHitReactionLimbPose();
+    }
+
+    private void ClearHitReactionTiltPreservingVisualYaw()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        Quaternion relativeRotation = Quaternion.Inverse(_injuredVisualRootBaseLocalRotation) * _injuredVisualRoot.localRotation;
+        float preservedYaw = NormalizeSignedAngle(relativeRotation.eulerAngles.y);
+        Quaternion targetLocalRotation = Quaternion.Euler(0f, preservedYaw, 0f) * _injuredVisualRootBaseLocalRotation;
+        _injuredVisualRoot.localRotation = targetLocalRotation;
+        ResetNextbotHitReactionLimbPose();
     }
 
     public void ApplyRemoteVisualState(Vector2 movementInput, bool injured, bool crouching)
@@ -1604,6 +1803,7 @@ public class PlayerController : MonoBehaviour
         if (injured || crouching)
         {
             UpdateDirectionalVisualFacing(movementInput);
+            ResetNextbotHitReactionLimbPose();
             return;
         }
 
@@ -1727,16 +1927,40 @@ public class PlayerController : MonoBehaviour
             _verticalVelocity -= gravity * deltaTime;
         }
 
-        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, _nextbotHitHorizontalDamping * deltaTime);
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, NEXTBOT_HIT_HORIZONTAL_DAMPING * deltaTime);
+        if (_nextbotHitImpactTimer > 0f)
+        {
+            _nextbotHitImpactTimer = Mathf.Max(0f, _nextbotHitImpactTimer - deltaTime);
+            _nextbotHitImpactVelocity = Vector3.MoveTowards(_nextbotHitImpactVelocity, Vector3.zero, NEXTBOT_HIT_IMPACT_DAMPING * deltaTime);
+        }
+        else
+        {
+            _nextbotHitImpactVelocity = Vector3.zero;
+        }
+
+        _nextbotHitReactionPitch += _nextbotHitAngularVelocityPitch * deltaTime;
+        _nextbotHitReactionRoll += _nextbotHitAngularVelocityRoll * deltaTime;
+        _nextbotHitAngularVelocityPitch = Mathf.Lerp(_nextbotHitAngularVelocityPitch, 0f, 1f - Mathf.Exp(-NextbotHitAngularDamping * deltaTime));
+        _nextbotHitAngularVelocityRoll = Mathf.Lerp(_nextbotHitAngularVelocityRoll, 0f, 1f - Mathf.Exp(-NextbotHitAngularDamping * deltaTime));
+        float settleBlend = 1f - Mathf.Exp(-NextbotHitAngularDamping * 0.65f * deltaTime);
+        _nextbotHitReactionPitch = Mathf.Lerp(_nextbotHitReactionPitch, NextbotHitSettlePitch, settleBlend);
+        _nextbotHitReactionRoll = Mathf.Lerp(_nextbotHitReactionRoll, 0f, settleBlend);
+        _nextbotHitReactionPitch = Mathf.Clamp(_nextbotHitReactionPitch, 0f, NextbotHitMaxPitch);
+        _nextbotHitReactionRoll = Mathf.Clamp(_nextbotHitReactionRoll, -NextbotHitMaxRoll, NextbotHitMaxRoll);
         _nextbotHitReactionTimer = Mathf.Max(0f, _nextbotHitReactionTimer - deltaTime);
 
-        Vector3 finalVelocity = _horizontalVelocity;
+        Vector3 finalVelocity = _horizontalVelocity + _nextbotHitImpactVelocity;
         finalVelocity.y = _verticalVelocity;
         _characterController.Move(finalVelocity * deltaTime);
 
         if (_nextbotHitReactionTimer <= 0f)
         {
             _isHitReacting = false;
+            _nextbotHitReactionPitch = 0f;
+            _nextbotHitReactionRoll = 0f;
+            _nextbotHitAngularVelocityPitch = 0f;
+            _nextbotHitAngularVelocityRoll = 0f;
+            ClearHitReactionTiltPreservingVisualYaw();
             _playerAnimation?.SetInjured(true);
         }
 
@@ -1774,6 +1998,8 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
+        CacheNextbotHitLimbTransforms();
+
         Vector3 awayDirection = _transform.position - sourcePosition;
         awayDirection.y = 0f;
         if (awayDirection.sqrMagnitude <= 0.0001f)
@@ -1782,15 +2008,47 @@ public class PlayerController : MonoBehaviour
         }
 
         awayDirection.Normalize();
-        Vector3 lateralDirection = Vector3.Cross(Vector3.up, awayDirection);
-        awayDirection = (awayDirection + lateralDirection * UnityEngine.Random.Range(-0.35f, 0.35f)).normalized;
+        awayDirection = Quaternion.Euler(0f, UnityEngine.Random.Range(-NextbotHitDirectionRandomAngle, NextbotHitDirectionRandomAngle), 0f) * awayDirection;
+        Vector3 lateralDirection = Vector3.Cross(Vector3.up, awayDirection).normalized;
+        awayDirection = (awayDirection + lateralDirection * UnityEngine.Random.Range(-0.25f, 0.25f)).normalized;
+
+        float horizontalImpulse = _nextbotHitShoveForce * UnityEngine.Random.Range(
+            1f - NextbotHitHorizontalImpulseRandomness,
+            1f + NextbotHitHorizontalImpulseRandomness);
+        float verticalImpulse = _nextbotHitUpwardForce * UnityEngine.Random.Range(
+            1f - NextbotHitVerticalImpulseRandomness,
+            1f + NextbotHitVerticalImpulseRandomness);
+        float impactForce = NextbotHitImpactForce * UnityEngine.Random.Range(
+            1f - NextbotHitImpactForceRandomness,
+            1f + NextbotHitImpactForceRandomness);
 
         _isHitReacting = true;
         _nextbotHitReactionTimer = _nextbotHitReactionDuration;
-        _nextbotHitReactionPitch = UnityEngine.Random.Range(_nextbotHitVisualPitch * 0.7f, _nextbotHitVisualPitch);
-        _nextbotHitReactionRoll = UnityEngine.Random.Range(-_nextbotHitVisualRoll, _nextbotHitVisualRoll);
-        _horizontalVelocity = awayDirection * _nextbotHitHorizontalImpulse;
-        _verticalVelocity = Mathf.Max(_verticalVelocity, _nextbotHitVerticalImpulse);
+        _nextbotHitReactionSeed = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+        _nextbotHitReactionPitch = UnityEngine.Random.Range(NextbotHitVisualPitch * 0.7f, NextbotHitVisualPitch);
+        _nextbotHitReactionRoll = UnityEngine.Random.Range(-NextbotHitVisualRoll, NextbotHitVisualRoll);
+        _nextbotHitAngularVelocityPitch = UnityEngine.Random.Range(-24f, 18f);
+        _nextbotHitAngularVelocityRoll = UnityEngine.Random.Range(-52f, 52f);
+        _nextbotHitLeftArmTargetLocalRotation = _nextbotHitLeftArmBaseLocalRotation * Quaternion.Euler(
+            UnityEngine.Random.Range(NextbotHitArmPitchRange.x, NextbotHitArmPitchRange.y),
+            UnityEngine.Random.Range(-NextbotHitArmYawRange, NextbotHitArmYawRange),
+            UnityEngine.Random.Range(-NextbotHitArmRollRange, NextbotHitArmRollRange));
+        _nextbotHitRightArmTargetLocalRotation = _nextbotHitRightArmBaseLocalRotation * Quaternion.Euler(
+            UnityEngine.Random.Range(NextbotHitArmPitchRange.x, NextbotHitArmPitchRange.y),
+            UnityEngine.Random.Range(-NextbotHitArmYawRange, NextbotHitArmYawRange),
+            UnityEngine.Random.Range(-NextbotHitArmRollRange, NextbotHitArmRollRange));
+        _nextbotHitLeftLegTargetLocalRotation = _nextbotHitLeftLegBaseLocalRotation * Quaternion.Euler(
+            UnityEngine.Random.Range(NextbotHitLegPitchRange.x, NextbotHitLegPitchRange.y),
+            UnityEngine.Random.Range(-NextbotHitLegYawRange, NextbotHitLegYawRange),
+            UnityEngine.Random.Range(-NextbotHitLegRollRange, NextbotHitLegRollRange));
+        _nextbotHitRightLegTargetLocalRotation = _nextbotHitRightLegBaseLocalRotation * Quaternion.Euler(
+            UnityEngine.Random.Range(NextbotHitLegPitchRange.x, NextbotHitLegPitchRange.y),
+            UnityEngine.Random.Range(-NextbotHitLegYawRange, NextbotHitLegYawRange),
+            UnityEngine.Random.Range(-NextbotHitLegRollRange, NextbotHitLegRollRange));
+        _horizontalVelocity = awayDirection * horizontalImpulse;
+        _nextbotHitImpactVelocity = awayDirection * impactForce;
+        _nextbotHitImpactTimer = NEXTBOT_HIT_IMPACT_DURATION;
+        _verticalVelocity = Mathf.Max(_verticalVelocity, verticalImpulse);
         _runHeldTime = 0f;
         _isCrouching = false;
         _isWallRunning = false;

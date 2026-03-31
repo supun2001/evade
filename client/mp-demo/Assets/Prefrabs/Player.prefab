@@ -204,9 +204,35 @@ MonoBehaviour:
   _nextbotHitHorizontalImpulse: 8
   _nextbotHitVerticalImpulse: 4
   _nextbotHitHorizontalDamping: 10
+  _nextbotHitImpactForce: 30
+  _nextbotHitImpactDuration: 0.18
+  _nextbotHitImpactDamping: 22
+  _nextbotHitDirectionRandomAngle: 40
+  _nextbotHitHorizontalImpulseRandomness: 0.35
+  _nextbotHitVerticalImpulseRandomness: 0.3
+  _nextbotHitImpactForceRandomness: 0.4
   _nextbotHitVisualPitch: 70
   _nextbotHitVisualRoll: 35
   _nextbotHitVisualBlend: 14
+  _nextbotHitAngularDamping: 20
+  _nextbotHitSettlePitch: 62
+  _nextbotHitMaxPitch: 72
+  _nextbotHitMaxRoll: 22
+  _nextbotHitWobblePitch: 8
+  _nextbotHitWobbleRoll: 12
+  _nextbotHitWobbleFrequency: 8
+  _nextbotHitLeftArmBoneName: ArmR_Offset
+  _nextbotHitRightArmBoneName: ArmL_Offset
+  _nextbotHitLeftLegBoneName: LegL1
+  _nextbotHitRightLegBoneName: LegR1
+  _nextbotHitArmPitchRange: {x: -90, y: 90}
+  _nextbotHitArmYawRange: 26
+  _nextbotHitArmRollRange: 38
+  _nextbotHitArmBlend: 12
+  _nextbotHitLegPitchRange: {x: -48, y: 28}
+  _nextbotHitLegYawRange: 16
+  _nextbotHitLegRollRange: 22
+  _nextbotHitLegBlend: 10
   _injuredVisualPositionOffset: {x: 0, y: 0.62, z: 0.06}
   _hitReactionVisualPositionOffset: {x: 0, y: 0.88, z: 0.12}
   _downedVisualPositionBlend: 10
@@ -325,7 +351,7 @@ CharacterController:
   m_StepOffset: 0.3
   m_SkinWidth: 0.1
   m_MinMoveDistance: 0.00001
-  m_Center: {x: 0, y: 1.5, z: 0}
+  m_Center: {x: 0, y: 1.67, z: 0}
 --- !u!114 &1598502036679147204
 MonoBehaviour:
   m_ObjectHideFlags: 0
