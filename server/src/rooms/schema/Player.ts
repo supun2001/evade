@@ -36,4 +36,15 @@ export class Player extends Schema {
 
     // Skin
     @type("number") skinIndex: number = 0;
+
+    // Temporary hit reaction sync
+    @type("boolean") isHitReacting: boolean = false;
+    @type("number") hitReactionTimeRemaining: number = 0;
+    @type("number") hitReactionPitch: number = 0;
+    @type("number") hitReactionRoll: number = 0;
+    @type("number") hitReactionSeed: number = 0;
+    @type("number") hitTriggerId: number = 0;
+    @type("number") hitSourceX: number = 0;
+    @type("number") hitSourceY: number = 0;
+    @type("number") hitSourceZ: number = 0;
 }

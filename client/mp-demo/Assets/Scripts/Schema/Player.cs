@@ -86,4 +86,31 @@ public Player() { }
 
 		[Type(23, "number")]
 		public float skinIndex = default(float);
+
+	[Type(24, "boolean")]
+	public bool isHitReacting = default(bool);
+
+	[Type(25, "number")]
+	public float hitReactionTimeRemaining = default(float);
+
+	[Type(26, "number")]
+	public float hitReactionPitch = default(float);
+
+	[Type(27, "number")]
+	public float hitReactionRoll = default(float);
+
+	[Type(28, "number")]
+	public float hitReactionSeed = default(float);
+
+	[Type(29, "number")]
+	public float hitTriggerId = default(float);
+
+	[Type(30, "number")]
+	public float hitSourceX = default(float);
+
+	[Type(31, "number")]
+	public float hitSourceY = default(float);
+
+	[Type(32, "number")]
+	public float hitSourceZ = default(float);
 	}

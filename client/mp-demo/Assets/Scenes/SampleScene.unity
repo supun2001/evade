@@ -1710,6 +1710,37 @@ MonoBehaviour:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.RectMask2D
   m_Padding: {x: -8, y: -5, z: -8, w: -5}
   m_Softness: {x: 0, y: 0}
+--- !u!1 &760390242
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 760390243}
+  m_Layer: 0
+  m_Name: GameObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &760390243
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 760390242}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -59.88255, y: 2.7, z: 24.67828}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &773935268
 GameObject:
   m_ObjectHideFlags: 0
@@ -1757,6 +1788,8 @@ MonoBehaviour:
   localServerUrl: ws://localhost:2567
   productionServerUrl: wss://evade-6o6d.onrender.com
   useProductionServerInEditor: 0
+  nextbotSpawnPoints:
+  - position: {x: -59.88255, y: 2.7, z: 24.67828}
   roomName: my_room
   playerPrefab: {fileID: 4842325826247379024, guid: fa064ee4d0a6048a298a22181dab671b, type: 3}
 --- !u!1 &832575517
@@ -4575,7 +4608,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5435419095315047119, guid: 2bef52227289d4abba506f9f5ba8329f, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -53.1
+      value: -60.08
       objectReference: {fileID: 0}
     - target: {fileID: 5435419095315047119, guid: 2bef52227289d4abba506f9f5ba8329f, type: 3}
       propertyPath: m_LocalPosition.y
@@ -4583,7 +4616,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5435419095315047119, guid: 2bef52227289d4abba506f9f5ba8329f, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 14.6
+      value: 29.78
       objectReference: {fileID: 0}
     - target: {fileID: 5435419095315047119, guid: 2bef52227289d4abba506f9f5ba8329f, type: 3}
       propertyPath: m_LocalRotation.w
@@ -5352,3 +5385,4 @@ SceneRoots:
   - {fileID: 1507598801}
   - {fileID: 1268492085}
   - {fileID: 1729705977}
+  - {fileID: 760390243}

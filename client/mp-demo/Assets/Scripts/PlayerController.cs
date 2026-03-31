@@ -261,6 +261,7 @@ public class PlayerController : MonoBehaviour
     private Vector2 NextbotHitLegPitchRange => Vector2.Lerp(new Vector2(-18f, 12f), new Vector2(-48f, 28f), _nextbotHitLimbFlail);
     private float NextbotHitLegYawRange => Mathf.Lerp(4f, 16f, _nextbotHitLimbFlail);
     private float NextbotHitLegRollRange => Mathf.Lerp(6f, 22f, _nextbotHitLimbFlail);
+    private float _lastAppliedRemoteHitReactionSeed = float.NaN;
     #endregion
 
     #region Setup
@@ -1651,6 +1652,28 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void SeedNextbotHitReactionLimbTargets(float seed)
+    {
+        CacheNextbotHitLimbTransforms();
+
+        _nextbotHitLeftArmTargetLocalRotation = _nextbotHitLeftArmBaseLocalRotation * Quaternion.Euler(
+            GetSeededRange(seed, 11f, NextbotHitArmPitchRange.x, NextbotHitArmPitchRange.y),
+            GetSeededRange(seed, 23f, -NextbotHitArmYawRange, NextbotHitArmYawRange),
+            GetSeededRange(seed, 37f, -NextbotHitArmRollRange, NextbotHitArmRollRange));
+        _nextbotHitRightArmTargetLocalRotation = _nextbotHitRightArmBaseLocalRotation * Quaternion.Euler(
+            GetSeededRange(seed, 53f, NextbotHitArmPitchRange.x, NextbotHitArmPitchRange.y),
+            GetSeededRange(seed, 67f, -NextbotHitArmYawRange, NextbotHitArmYawRange),
+            GetSeededRange(seed, 79f, -NextbotHitArmRollRange, NextbotHitArmRollRange));
+        _nextbotHitLeftLegTargetLocalRotation = _nextbotHitLeftLegBaseLocalRotation * Quaternion.Euler(
+            GetSeededRange(seed, 97f, NextbotHitLegPitchRange.x, NextbotHitLegPitchRange.y),
+            GetSeededRange(seed, 109f, -NextbotHitLegYawRange, NextbotHitLegYawRange),
+            GetSeededRange(seed, 127f, -NextbotHitLegRollRange, NextbotHitLegRollRange));
+        _nextbotHitRightLegTargetLocalRotation = _nextbotHitRightLegBaseLocalRotation * Quaternion.Euler(
+            GetSeededRange(seed, 149f, NextbotHitLegPitchRange.x, NextbotHitLegPitchRange.y),
+            GetSeededRange(seed, 163f, -NextbotHitLegYawRange, NextbotHitLegYawRange),
+            GetSeededRange(seed, 181f, -NextbotHitLegRollRange, NextbotHitLegRollRange));
+    }
+
     private void ResetNextbotHitReactionLimbPose()
     {
         CacheNextbotHitLimbTransforms();
@@ -1676,6 +1699,13 @@ public class PlayerController : MonoBehaviour
         {
             _nextbotHitRightLegTransform.localRotation = Quaternion.Slerp(_nextbotHitRightLegTransform.localRotation, _nextbotHitRightLegBaseLocalRotation, legBlend);
         }
+    }
+
+    private static float GetSeededRange(float seed, float salt, float min, float max)
+    {
+        float noise = Mathf.Sin(seed * 12.9898f + salt * 78.233f) * 43758.5453f;
+        float normalized = noise - Mathf.Floor(noise);
+        return Mathf.Lerp(min, max, normalized);
     }
 
     private void UpdateDownedVisualRootPosition()
@@ -1841,6 +1871,58 @@ public class PlayerController : MonoBehaviour
         Quaternion targetLocalRotation = Quaternion.Euler(0f, visualYaw, 0f) * _injuredVisualRootBaseLocalRotation;
         float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
         _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+    }
+
+    public void GetHitReactionSyncState(
+        out bool isHitReacting,
+        out float reactionTimeRemaining,
+        out float reactionPitch,
+        out float reactionRoll,
+        out float reactionSeed)
+    {
+        isHitReacting = _isHitReacting;
+        reactionTimeRemaining = _nextbotHitReactionTimer;
+        reactionPitch = _nextbotHitReactionPitch;
+        reactionRoll = _nextbotHitReactionRoll;
+        reactionSeed = _nextbotHitReactionSeed;
+    }
+
+    public void ApplyRemoteHitReactionState(
+        bool isHitReacting,
+        float reactionTimeRemaining,
+        float reactionPitch,
+        float reactionRoll,
+        float reactionSeed)
+    {
+        if (isHitReacting)
+        {
+            if (!Mathf.Approximately(_lastAppliedRemoteHitReactionSeed, reactionSeed))
+            {
+                SeedNextbotHitReactionLimbTargets(reactionSeed);
+                _lastAppliedRemoteHitReactionSeed = reactionSeed;
+            }
+
+            _isHitReacting = true;
+            _nextbotHitReactionTimer = reactionTimeRemaining;
+            _nextbotHitReactionPitch = reactionPitch;
+            _nextbotHitReactionRoll = reactionRoll;
+            _nextbotHitReactionSeed = reactionSeed;
+            UpdateNextbotHitReactionVisual();
+            UpdateDownedVisualRootPosition();
+            return;
+        }
+
+        if (_isHitReacting)
+        {
+            _isHitReacting = false;
+            _nextbotHitReactionTimer = 0f;
+            _nextbotHitReactionPitch = 0f;
+            _nextbotHitReactionRoll = 0f;
+            _nextbotHitReactionSeed = 0f;
+            _lastAppliedRemoteHitReactionSeed = float.NaN;
+            ClearHitReactionTiltPreservingVisualYaw();
+            UpdateDownedVisualRootPosition();
+        }
     }
 
     private static float NormalizeSignedAngle(float angle)
@@ -2024,27 +2106,12 @@ public class PlayerController : MonoBehaviour
 
         _isHitReacting = true;
         _nextbotHitReactionTimer = _nextbotHitReactionDuration;
-        _nextbotHitReactionSeed = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-        _nextbotHitReactionPitch = UnityEngine.Random.Range(NextbotHitVisualPitch * 0.7f, NextbotHitVisualPitch);
-        _nextbotHitReactionRoll = UnityEngine.Random.Range(-NextbotHitVisualRoll, NextbotHitVisualRoll);
-        _nextbotHitAngularVelocityPitch = UnityEngine.Random.Range(-24f, 18f);
-        _nextbotHitAngularVelocityRoll = UnityEngine.Random.Range(-52f, 52f);
-        _nextbotHitLeftArmTargetLocalRotation = _nextbotHitLeftArmBaseLocalRotation * Quaternion.Euler(
-            UnityEngine.Random.Range(NextbotHitArmPitchRange.x, NextbotHitArmPitchRange.y),
-            UnityEngine.Random.Range(-NextbotHitArmYawRange, NextbotHitArmYawRange),
-            UnityEngine.Random.Range(-NextbotHitArmRollRange, NextbotHitArmRollRange));
-        _nextbotHitRightArmTargetLocalRotation = _nextbotHitRightArmBaseLocalRotation * Quaternion.Euler(
-            UnityEngine.Random.Range(NextbotHitArmPitchRange.x, NextbotHitArmPitchRange.y),
-            UnityEngine.Random.Range(-NextbotHitArmYawRange, NextbotHitArmYawRange),
-            UnityEngine.Random.Range(-NextbotHitArmRollRange, NextbotHitArmRollRange));
-        _nextbotHitLeftLegTargetLocalRotation = _nextbotHitLeftLegBaseLocalRotation * Quaternion.Euler(
-            UnityEngine.Random.Range(NextbotHitLegPitchRange.x, NextbotHitLegPitchRange.y),
-            UnityEngine.Random.Range(-NextbotHitLegYawRange, NextbotHitLegYawRange),
-            UnityEngine.Random.Range(-NextbotHitLegRollRange, NextbotHitLegRollRange));
-        _nextbotHitRightLegTargetLocalRotation = _nextbotHitRightLegBaseLocalRotation * Quaternion.Euler(
-            UnityEngine.Random.Range(NextbotHitLegPitchRange.x, NextbotHitLegPitchRange.y),
-            UnityEngine.Random.Range(-NextbotHitLegYawRange, NextbotHitLegYawRange),
-            UnityEngine.Random.Range(-NextbotHitLegRollRange, NextbotHitLegRollRange));
+        _nextbotHitReactionSeed = UnityEngine.Random.Range(0f, 10000f);
+        _nextbotHitReactionPitch = GetSeededRange(_nextbotHitReactionSeed, 211f, NextbotHitVisualPitch * 0.7f, NextbotHitVisualPitch);
+        _nextbotHitReactionRoll = GetSeededRange(_nextbotHitReactionSeed, 223f, -NextbotHitVisualRoll, NextbotHitVisualRoll);
+        _nextbotHitAngularVelocityPitch = GetSeededRange(_nextbotHitReactionSeed, 239f, -24f, 18f);
+        _nextbotHitAngularVelocityRoll = GetSeededRange(_nextbotHitReactionSeed, 251f, -52f, 52f);
+        SeedNextbotHitReactionLimbTargets(_nextbotHitReactionSeed);
         _horizontalVelocity = awayDirection * horizontalImpulse;
         _nextbotHitImpactVelocity = awayDirection * impactForce;
         _nextbotHitImpactTimer = NEXTBOT_HIT_IMPACT_DURATION;

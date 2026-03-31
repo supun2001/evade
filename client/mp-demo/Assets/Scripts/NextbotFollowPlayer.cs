@@ -20,6 +20,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _hitCooldown = 1.25f;
 
     [Header("Billboard")]
+    [SerializeField] private bool _faceTargetPlayer = false;
     [SerializeField] private bool _billboardToCamera = true;
     [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
 
@@ -33,22 +34,40 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Camera _targetCamera;
     private Collider[] _nextbotColliders = System.Array.Empty<Collider>();
     private readonly HashSet<CharacterController> _ignoredInjuredTargets = new HashSet<CharacterController>();
+    private Renderer[] _renderers = System.Array.Empty<Renderer>();
+    private Collider[] _colliders = System.Array.Empty<Collider>();
+    private bool _hasAppliedServerState;
+    private Transform _visualTransform;
+    private MeshRenderer _rootMeshRenderer;
 
     private void Awake()
     {
         _characterController = GetComponent<CharacterController>();
         _lockedHeight = transform.position.y;
+        EnsureVisualBillboardChild();
         _nextbotColliders = GetComponentsInChildren<Collider>(true);
+        _renderers = GetComponentsInChildren<Renderer>(true);
+        _colliders = GetComponentsInChildren<Collider>(true);
     }
 
     private void Update()
     {
+        if (UpdateFromServerState())
+        {
+            return;
+        }
+
         RefreshTargetIfNeeded();
         UpdateMovement();
     }
 
     private void LateUpdate()
     {
+        if (_faceTargetPlayer && UpdateTargetFacingRotation())
+        {
+            return;
+        }
+
         if (_billboardToCamera)
         {
             UpdateBillboardRotation();
@@ -78,6 +97,86 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         _nextTargetRefreshTime = Time.time + Mathf.Max(0.05f, _targetRefreshInterval);
         _target = FindNearestPlayer();
+    }
+
+    private bool UpdateFromServerState()
+    {
+        NextbotState nextbotState = GetNextbotState();
+        if (nextbotState == null)
+        {
+            _hasAppliedServerState = false;
+            SetServerVisualState(true);
+            return false;
+        }
+
+        bool isActive = nextbotState.isActive;
+        SetServerVisualState(isActive);
+
+        if (!isActive)
+        {
+            _hasAppliedServerState = false;
+            _horizontalVelocity = Vector3.zero;
+            _target = null;
+            return true;
+        }
+
+        _target = ResolveServerTargetTransform(nextbotState.targetSessionId);
+
+        Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
+        if (_lockToStartingHeight)
+        {
+            targetPosition.y = _lockedHeight;
+        }
+
+        if (!_hasAppliedServerState)
+        {
+            transform.position = targetPosition;
+            _hasAppliedServerState = true;
+        }
+        else
+        {
+            float moveBlend = 1f - Mathf.Exp(-_acceleration * Time.deltaTime);
+            transform.position = Vector3.Lerp(transform.position, targetPosition, moveBlend);
+        }
+
+        return true;
+    }
+
+    private NextbotState GetNextbotState()
+    {
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null || networkManager.Room == null || networkManager.Room.State == null)
+        {
+            return null;
+        }
+
+        return networkManager.Room.State.nextbot;
+    }
+
+    private void SetServerVisualState(bool visible)
+    {
+        for (int i = 0; i < _renderers.Length; i++)
+        {
+            if (_renderers[i] != null)
+            {
+                if (_renderers[i] == _rootMeshRenderer)
+                {
+                    _renderers[i].enabled = false;
+                }
+                else
+                {
+                    _renderers[i].enabled = visible;
+                }
+            }
+        }
+
+        for (int i = 0; i < _colliders.Length; i++)
+        {
+            if (_colliders[i] != null)
+            {
+                _colliders[i].enabled = visible;
+            }
+        }
     }
 
     private void UpdateMovement()
@@ -271,6 +370,33 @@ public class NextbotFollowPlayer : MonoBehaviour
         return deltaX * deltaX + deltaZ * deltaZ;
     }
 
+    private bool UpdateTargetFacingRotation()
+    {
+        Transform facingTarget = _target;
+        if (facingTarget == null)
+        {
+            return false;
+        }
+
+        Vector3 flattenedDirection = facingTarget.position - transform.position;
+        flattenedDirection.y = 0f;
+
+        if (flattenedDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        float targetYaw = Mathf.Atan2(flattenedDirection.x, flattenedDirection.z) * Mathf.Rad2Deg;
+        Vector3 targetEuler = new Vector3(
+            _billboardRotationOffsetEuler.x,
+            targetYaw,
+            _billboardRotationOffsetEuler.z);
+        Quaternion targetRotation = Quaternion.Euler(targetEuler);
+        float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
+        ApplyVisualRotation(targetRotation, rotationBlend);
+        return true;
+    }
+
     private void UpdateBillboardRotation()
     {
         Camera targetCamera = ResolveTargetCamera();
@@ -291,11 +417,80 @@ public class NextbotFollowPlayer : MonoBehaviour
         Quaternion targetRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up)
             * Quaternion.Euler(_billboardRotationOffsetEuler);
         float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
+        ApplyVisualRotation(targetRotation, rotationBlend);
+    }
+
+    private void ApplyVisualRotation(Quaternion targetRotation, float rotationBlend)
+    {
+        Transform rotationTarget = _visualTransform != null ? _visualTransform : transform;
+        rotationTarget.rotation = Quaternion.Slerp(rotationTarget.rotation, targetRotation, rotationBlend);
+    }
+
+    private void EnsureVisualBillboardChild()
+    {
+        MeshRenderer rootMeshRenderer = GetComponent<MeshRenderer>();
+        MeshFilter rootMeshFilter = GetComponent<MeshFilter>();
+        _rootMeshRenderer = rootMeshRenderer;
+
+        if (rootMeshRenderer == null || rootMeshFilter == null || rootMeshFilter.sharedMesh == null)
+        {
+            _visualTransform = null;
+            return;
+        }
+
+        Transform existingVisual = transform.Find("NextbotVisual");
+        if (existingVisual != null)
+        {
+            _visualTransform = existingVisual;
+            rootMeshRenderer.enabled = false;
+            return;
+        }
+
+        GameObject visualObject = new GameObject("NextbotVisual");
+        visualObject.transform.SetParent(transform, false);
+        visualObject.transform.localPosition = Vector3.zero;
+        visualObject.transform.localRotation = Quaternion.identity;
+        visualObject.transform.localScale = Vector3.one;
+
+        MeshFilter visualMeshFilter = visualObject.AddComponent<MeshFilter>();
+        visualMeshFilter.sharedMesh = rootMeshFilter.sharedMesh;
+
+        MeshRenderer visualMeshRenderer = visualObject.AddComponent<MeshRenderer>();
+        visualMeshRenderer.sharedMaterials = rootMeshRenderer.sharedMaterials;
+        visualMeshRenderer.shadowCastingMode = rootMeshRenderer.shadowCastingMode;
+        visualMeshRenderer.receiveShadows = rootMeshRenderer.receiveShadows;
+        visualMeshRenderer.lightProbeUsage = rootMeshRenderer.lightProbeUsage;
+        visualMeshRenderer.reflectionProbeUsage = rootMeshRenderer.reflectionProbeUsage;
+
+        rootMeshRenderer.enabled = false;
+        _visualTransform = visualObject.transform;
     }
 
     private Camera ResolveTargetCamera()
     {
+        PlayerController[] playerControllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        for (int i = 0; i < playerControllers.Length; i++)
+        {
+            PlayerController playerController = playerControllers[i];
+            if (playerController == null || !playerController.enabled)
+            {
+                continue;
+            }
+
+            Camera[] playerCameras = playerController.GetComponentsInChildren<Camera>(true);
+            for (int cameraIndex = 0; cameraIndex < playerCameras.Length; cameraIndex++)
+            {
+                Camera playerCamera = playerCameras[cameraIndex];
+                if (playerCamera == null || !playerCamera.isActiveAndEnabled)
+                {
+                    continue;
+                }
+
+                _targetCamera = playerCamera;
+                return _targetCamera;
+            }
+        }
+
         if (_targetCamera != null && _targetCamera.isActiveAndEnabled)
         {
             return _targetCamera;
@@ -319,6 +514,36 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             _targetCamera = camera;
             return _targetCamera;
+        }
+
+        return null;
+    }
+
+    private Transform ResolveServerTargetTransform(string targetSessionId)
+    {
+        if (string.IsNullOrEmpty(targetSessionId))
+        {
+            return null;
+        }
+
+        NetworkPlayer[] networkPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
+        for (int i = 0; i < networkPlayers.Length; i++)
+        {
+            NetworkPlayer networkPlayer = networkPlayers[i];
+            if (networkPlayer == null)
+            {
+                continue;
+            }
+
+            if (!networkPlayer.TryGetSessionId(out string sessionId))
+            {
+                continue;
+            }
+
+            if (sessionId == targetSessionId)
+            {
+                return networkPlayer.transform;
+            }
         }
 
         return null;

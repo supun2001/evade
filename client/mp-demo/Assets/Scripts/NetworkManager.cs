@@ -4,6 +4,13 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Colyseus.Schema;
 using System;
+
+[Serializable]
+public struct NextbotSpawnPointConfig
+{
+    public Vector3 position;
+}
+
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
@@ -18,6 +25,14 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private string productionServerUrl = HostedServerUrl;
     [Tooltip("Use the production URL even while running in the Unity Editor.")]
     [SerializeField] private bool useProductionServerInEditor = false;
+    [Header("Gameplay Configuration")]
+    [Tooltip("Server-authoritative nextbot spawn points used when this client creates the room.")]
+    [SerializeField] private List<NextbotSpawnPointConfig> nextbotSpawnPoints = new()
+    {
+        new NextbotSpawnPointConfig { position = new Vector3(6.45f, 0f, -2.38f) },
+        new NextbotSpawnPointConfig { position = new Vector3(-6.45f, 0f, 2.38f) },
+        new NextbotSpawnPointConfig { position = new Vector3(0f, 0f, 7.5f) },
+    };
 
     public string serverUrl 
     {
@@ -133,7 +148,12 @@ public class NetworkManager : MonoBehaviour
         int wallRunSide,
         Vector2 moveInput,
         float visualYaw,
-        Vector2 camRot)
+        Vector2 camRot,
+        bool hitReacting,
+        float hitReactionTimeRemaining,
+        float hitReactionPitch,
+        float hitReactionRoll,
+        float hitReactionSeed)
     {
         if (room == null) return;
         
@@ -150,7 +170,12 @@ public class NetworkManager : MonoBehaviour
             moveInputX = moveInput.x,
             moveInputY = moveInput.y,
             visualYaw = visualYaw,
-            cameraRotationX = camRot.x, cameraRotationY = camRot.y
+            cameraRotationX = camRot.x, cameraRotationY = camRot.y,
+            isHitReacting = hitReacting,
+            hitReactionTimeRemaining = hitReactionTimeRemaining,
+            hitReactionPitch = hitReactionPitch,
+            hitReactionRoll = hitReactionRoll,
+            hitReactionSeed = hitReactionSeed
         });
     }
 
@@ -163,7 +188,7 @@ public class NetworkManager : MonoBehaviour
     public async Task<string> CreateGame(){
         InitializeClient();
         try{
-            room = await client.Create<MyRoomState>(roomName);
+            room = await client.Create<MyRoomState>(roomName, BuildRoomOptions());
             OnRoomJoined();
             return null; // Success
 
@@ -178,7 +203,7 @@ public class NetworkManager : MonoBehaviour
         InitializeClient();
         try
         {
-            room = await client.JoinOrCreate<MyRoomState>(roomName);
+            room = await client.JoinOrCreate<MyRoomState>(roomName, BuildRoomOptions());
             OnRoomJoined();
             return null;
         }
@@ -208,6 +233,26 @@ public class NetworkManager : MonoBehaviour
     private void InitializeClient()
     {
         if (client == null) client = CreateClient();
+    }
+
+    private Dictionary<string, object> BuildRoomOptions()
+    {
+        List<object> serializedSpawnPoints = new List<object>();
+        for (int i = 0; i < nextbotSpawnPoints.Count; i++)
+        {
+            Vector3 point = nextbotSpawnPoints[i].position;
+            serializedSpawnPoints.Add(new Dictionary<string, object>
+            {
+                ["x"] = point.x,
+                ["y"] = point.y,
+                ["z"] = point.z,
+            });
+        }
+
+        return new Dictionary<string, object>
+        {
+            ["nextbotSpawnPoints"] = serializedSpawnPoints
+        };
     }
 
     private ColyseusClient CreateClient()

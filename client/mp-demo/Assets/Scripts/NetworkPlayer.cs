@@ -18,11 +18,13 @@ public class NetworkPlayer : MonoBehaviour
     private PlayerLocomotionInput input;
     private PlayerAnimation anim; 
     private Animator animator;
+    private float _lastProcessedHitTriggerId = -1f;
 
     public void Initialize(Player state, bool isLocalPlayer)
     {
         playerState = state;
         isLocal = isLocalPlayer;
+        _lastProcessedHitTriggerId = state != null ? state.hitTriggerId : 0f;
         
         controller = GetComponent<PlayerController>();
         input = GetComponent<PlayerLocomotionInput>();
@@ -54,6 +56,12 @@ public class NetworkPlayer : MonoBehaviour
         }
     }
 
+    public bool TryGetSessionId(out string sessionId)
+    {
+        sessionId = playerState != null ? playerState.sessionId : null;
+        return !string.IsNullOrEmpty(sessionId);
+    }
+
     private float nextSendTime = 0f;
     public float sendInterval = 0.05f; // 20 times per second
     
@@ -71,6 +79,8 @@ public class NetworkPlayer : MonoBehaviour
     {
         if (isLocal)
         {
+            HandleServerHitTrigger();
+
             // Latch Jump input so we don't miss it between network ticks
             if (input && input.JumpPressed) 
             {
@@ -91,6 +101,31 @@ public class NetworkPlayer : MonoBehaviour
         }
     }
 
+    private void HandleServerHitTrigger()
+    {
+        if (!isLocal || controller == null || playerState == null)
+        {
+            return;
+        }
+
+        if (playerState.hitTriggerId <= 0f || playerState.hitTriggerId <= _lastProcessedHitTriggerId)
+        {
+            return;
+        }
+
+        Vector3 hitSource = new Vector3(playerState.hitSourceX, playerState.hitSourceY, playerState.hitSourceZ);
+        if (controller.TriggerNextbotHit(hitSource))
+        {
+            _lastProcessedHitTriggerId = playerState.hitTriggerId;
+            return;
+        }
+
+        if (controller.IsInjuredOrHitReacting())
+        {
+            _lastProcessedHitTriggerId = playerState.hitTriggerId;
+        }
+    }
+
     private void SendLocalState()
     {
         if (NetworkManager.Instance == null) return;
@@ -105,6 +140,11 @@ public class NetworkPlayer : MonoBehaviour
         bool isCrouching = controller != null && controller.IsCrouching();
         bool isWallRunning = controller != null && controller.IsWallRunning();
         int wallRunSide = controller != null ? controller.GetWallRunSide() : 0;
+        bool isHitReacting = false;
+        float hitReactionTimeRemaining = 0f;
+        float hitReactionPitch = 0f;
+        float hitReactionRoll = 0f;
+        float hitReactionSeed = 0f;
 
         if (anim != null)
         {
@@ -116,6 +156,15 @@ public class NetworkPlayer : MonoBehaviour
         }
 
         Vector3 velocity = controller != null ? controller.GetVelocity() : Vector3.up * verticalSpeed;
+        if (controller != null)
+        {
+            controller.GetHitReactionSyncState(
+                out isHitReacting,
+                out hitReactionTimeRemaining,
+                out hitReactionPitch,
+                out hitReactionRoll,
+                out hitReactionSeed);
+        }
 
         NetworkManager.Instance.SendPlayerUpdate(
             transform.position,
@@ -131,7 +180,12 @@ public class NetworkPlayer : MonoBehaviour
             wallRunSide,
             input ? input.MovementInput : Vector2.zero,
             controller != null ? controller.GetVisualYaw() : 180f,
-            cameraRotation
+            cameraRotation,
+            isHitReacting,
+            hitReactionTimeRemaining,
+            hitReactionPitch,
+            hitReactionRoll,
+            hitReactionSeed
         );
     }
 
@@ -168,7 +222,17 @@ public class NetworkPlayer : MonoBehaviour
 
             if (controller != null)
             {
-                controller.ApplyRemoteVisualYaw(playerState.visualYaw);
+                controller.ApplyRemoteHitReactionState(
+                    playerState.isHitReacting,
+                    playerState.hitReactionTimeRemaining,
+                    playerState.hitReactionPitch,
+                    playerState.hitReactionRoll,
+                    playerState.hitReactionSeed);
+
+                if (!playerState.isHitReacting)
+                {
+                    controller.ApplyRemoteVisualYaw(playerState.visualYaw);
+                }
             }
         }
     }
