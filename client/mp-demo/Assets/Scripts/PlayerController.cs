@@ -56,6 +56,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _downedVisualPositionBlend = 10f;
     [SerializeField] private float _downedVisualGroundClearance = 0.04f;
     [SerializeField] private float _downedVisualMaxAutoLift = 1.4f;
+    [SerializeField] private string[] _downedGroundReferenceBoneNames = { "Head", "head", "Cube.011" };
     [SerializeField] private float _downedControllerHeight = 1.6f;
     [SerializeField] private float _downedControllerRadius = 0.7f;
     [SerializeField] private Vector3 _downedControllerCenter = new Vector3(0f, 0.82f, 0f);
@@ -202,6 +203,7 @@ public class PlayerController : MonoBehaviour
     private float _defaultCharacterControllerHeight;
     private float _defaultCharacterControllerRadius;
     private Vector3 _defaultCharacterControllerCenter;
+    private Transform[] _downedGroundReferenceTransforms = Array.Empty<Transform>();
     private readonly Collider[] _armWallHitBuffer = new Collider[8];
     private Coroutine _cameraTransitionCoroutine;
     private bool _isPauseMenuOpen;
@@ -233,6 +235,7 @@ public class PlayerController : MonoBehaviour
         CacheArmTransforms();
         CacheFirstPersonWallHideRenderers();
         CacheInjuredVisualRoot();
+        CacheDownedGroundReferenceTransforms();
         CacheHudElements();
 
         if (_characterController != null)
@@ -680,6 +683,43 @@ public class PlayerController : MonoBehaviour
         }
 
         SetPauseMenuDisplay(_isPauseMenuOpen);
+    }
+
+    private void CacheDownedGroundReferenceTransforms()
+    {
+        if (_downedGroundReferenceTransforms.Length > 0)
+        {
+            return;
+        }
+
+        if (_downedGroundReferenceBoneNames == null || _downedGroundReferenceBoneNames.Length == 0)
+        {
+            return;
+        }
+
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+        var matches = new System.Collections.Generic.List<Transform>();
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            for (int nameIndex = 0; nameIndex < _downedGroundReferenceBoneNames.Length; nameIndex++)
+            {
+                string referenceName = _downedGroundReferenceBoneNames[nameIndex];
+                if (!string.IsNullOrWhiteSpace(referenceName)
+                    && string.Equals(candidate.name, referenceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(candidate);
+                    break;
+                }
+            }
+        }
+
+        _downedGroundReferenceTransforms = matches.ToArray();
     }
 
     private void UpdateSpeedHud()
@@ -1501,23 +1541,35 @@ public class PlayerController : MonoBehaviour
             return 0f;
         }
 
-        Renderer[] renderers = _injuredVisualRoot.GetComponentsInChildren<Renderer>(true);
-        if (renderers == null || renderers.Length == 0)
-        {
-            return 0f;
-        }
+        CacheDownedGroundReferenceTransforms();
 
+        Renderer[] renderers = _injuredVisualRoot.GetComponentsInChildren<Renderer>(true);
         bool hasBounds = false;
         float lowestPoint = float.PositiveInfinity;
-        for (int i = 0; i < renderers.Length; i++)
+        if (renderers != null)
         {
-            Renderer renderer = renderers[i];
-            if (renderer == null || !renderer.enabled)
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null || !renderer.enabled)
+                {
+                    continue;
+                }
+
+                lowestPoint = Mathf.Min(lowestPoint, renderer.bounds.min.y);
+                hasBounds = true;
+            }
+        }
+
+        for (int i = 0; i < _downedGroundReferenceTransforms.Length; i++)
+        {
+            Transform reference = _downedGroundReferenceTransforms[i];
+            if (reference == null)
             {
                 continue;
             }
 
-            lowestPoint = Mathf.Min(lowestPoint, renderer.bounds.min.y);
+            lowestPoint = Mathf.Min(lowestPoint, reference.position.y);
             hasBounds = true;
         }
 

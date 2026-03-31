@@ -200,6 +200,27 @@ MonoBehaviour:
   _sidewaysFriction: 16
   _nonForwardSpeedMultiplier: 0.5
   _injuredRotationSharpness: 12
+  _nextbotHitReactionDuration: 0.45
+  _nextbotHitHorizontalImpulse: 8
+  _nextbotHitVerticalImpulse: 4
+  _nextbotHitHorizontalDamping: 10
+  _nextbotHitVisualPitch: 70
+  _nextbotHitVisualRoll: 35
+  _nextbotHitVisualBlend: 14
+  _injuredVisualPositionOffset: {x: 0, y: 0.62, z: 0.06}
+  _hitReactionVisualPositionOffset: {x: 0, y: 0.88, z: 0.12}
+  _downedVisualPositionBlend: 10
+  _downedVisualGroundClearance: 0.04
+  _downedVisualMaxAutoLift: 1.4
+  _downedGroundReferenceBoneNames:
+  - MainBody
+  - Rig1
+  - R_Arm
+  - L_Arm
+  _downedControllerHeight: 1.6
+  _downedControllerRadius: 0.85
+  _downedControllerCenter: {x: 0, y: 1.92, z: 0}
+  _downedControllerBlend: 12
   _enableBunnyHop: 1
   _groundFriction: 10
   _groundControl: 8
