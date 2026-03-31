@@ -100,6 +100,18 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _cameraTransitionDuration = 0.3f;
     [SerializeField] private string[] _firstPersonHiddenBoneNames = { "head", "torso" };
 
+    [Header("Camera Collision")]
+    [SerializeField] private LayerMask _cameraCollisionLayers = ~0;
+    [SerializeField] private float _thirdPersonCameraCollisionRadius = 0.2f;
+    [SerializeField] private float _thirdPersonCameraCollisionPadding = 0.08f;
+    [SerializeField] private float _firstPersonWallCheckDistance = 0.45f;
+    [SerializeField] private float _firstPersonWallRetreatDistance = 0.22f;
+    [SerializeField] private float _firstPersonWallRetreatSmooth = 14f;
+    [SerializeField] private float _firstPersonWallHideDistance = 0.12f;
+    [SerializeField] private float _firstPersonWallMaxSurfaceUp = 0.35f;
+    [SerializeField] private float _armWallHideCheckRadius = 0.16f;
+    [SerializeField] private float _armWallHideDistance = 0.08f;
+
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
     private Transform _cameraTransform;
@@ -143,13 +155,17 @@ public class PlayerController : MonoBehaviour
     private Renderer[] _localRenderers;
     private ShadowCastingMode[] _defaultShadowCastingModes;
     private Renderer[] _firstPersonHiddenRenderers;
+    private Renderer[] _firstPersonWallHideRenderers;
     private bool[] _defaultRendererEnabledStates;
     private bool[] _defaultHiddenRendererEnabledStates;
+    private bool[] _defaultWallHideRendererEnabledStates;
     private Transform _leftArmTransform;
     private Transform _rightArmTransform;
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Quaternion _injuredVisualRootBaseLocalRotation = Quaternion.identity;
+    private float _firstPersonWallRetreat;
+    private readonly Collider[] _armWallHitBuffer = new Collider[8];
     private Coroutine _cameraTransitionCoroutine;
     private bool _isPauseMenuOpen;
     private bool _hudEventsBound;
@@ -178,6 +194,7 @@ public class PlayerController : MonoBehaviour
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
         CacheArmTransforms();
+        CacheFirstPersonWallHideRenderers();
         CacheInjuredVisualRoot();
         CacheHudElements();
     }
@@ -323,7 +340,9 @@ public class PlayerController : MonoBehaviour
 
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
         UpdateSprintCameraBob();
+        ResolveCameraWallCollision();
         UpdateSprintArmPose();
+        UpdateArmWallClipVisibility();
     }
     #endregion
 
@@ -425,6 +444,42 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+    }
+
+    private void CacheFirstPersonWallHideRenderers()
+    {
+        System.Collections.Generic.HashSet<Renderer> wallHideRenderers = new();
+
+        if (_leftArmTransform != null)
+        {
+            foreach (Renderer renderer in _leftArmTransform.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer != null)
+                {
+                    wallHideRenderers.Add(renderer);
+                }
+            }
+        }
+
+        if (_rightArmTransform != null)
+        {
+            foreach (Renderer renderer in _rightArmTransform.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer != null)
+                {
+                    wallHideRenderers.Add(renderer);
+                }
+            }
+        }
+
+        _firstPersonWallHideRenderers = new Renderer[wallHideRenderers.Count];
+        wallHideRenderers.CopyTo(_firstPersonWallHideRenderers);
+        _defaultWallHideRendererEnabledStates = new bool[_firstPersonWallHideRenderers.Length];
+
+        for (int i = 0; i < _firstPersonWallHideRenderers.Length; i++)
+        {
+            _defaultWallHideRendererEnabledStates[i] = _firstPersonWallHideRenderers[i] != null && _firstPersonWallHideRenderers[i].enabled;
+        }
     }
 
     private void CacheInjuredVisualRoot()
@@ -704,7 +759,9 @@ public class PlayerController : MonoBehaviour
             _gameplayCamera.nearClipPlane = firstPerson ? _firstPersonNearClipPlane : _defaultNearClipPlane;
         }
 
+        _firstPersonWallRetreat = 0f;
         SetLocalRenderMode(firstPerson);
+        SetFirstPersonWallClipHidden(false);
     }
 
     private IEnumerator TransitionCameraView(CameraViewMode newViewMode)
@@ -790,6 +847,8 @@ public class PlayerController : MonoBehaviour
         _gameplayCameraTransform.localPosition = targetLocalPosition;
         _gameplayCameraTransform.localRotation = targetLocalRotation;
         SetFirstPersonHeadHidden(firstPerson);
+        _firstPersonWallRetreat = 0f;
+        SetFirstPersonWallClipHidden(false);
 
         if (!firstPerson)
         {
@@ -930,6 +989,181 @@ public class PlayerController : MonoBehaviour
         _gameplayCameraTransform.localPosition = bobbedPosition;
     }
 
+    private void ResolveCameraWallCollision()
+    {
+        if (_gameplayCameraTransform == null || _cameraTransitionCoroutine != null)
+        {
+            return;
+        }
+
+        if (_currentViewMode == CameraViewMode.FirstPerson)
+        {
+            ResolveFirstPersonWallCollision();
+            return;
+        }
+
+        SetFirstPersonWallClipHidden(false);
+
+        if (_useManualThirdPersonCamera)
+        {
+            ResolveThirdPersonCameraCollision();
+        }
+    }
+
+    private void ResolveFirstPersonWallCollision()
+    {
+        float targetRetreat = 0f;
+
+        if (TryGetNearestCameraCollisionHit(
+                _gameplayCameraTransform.position,
+                _gameplayCameraTransform.forward,
+                _firstPersonWallCheckDistance,
+                0f,
+                out RaycastHit hit))
+        {
+            bool isWallLikeSurface = Mathf.Abs(hit.normal.y) <= _firstPersonWallMaxSurfaceUp;
+            if (isWallLikeSurface)
+            {
+                targetRetreat = Mathf.Clamp(
+                    _firstPersonWallCheckDistance - hit.distance + _thirdPersonCameraCollisionPadding,
+                    0f,
+                    _firstPersonWallRetreatDistance);
+            }
+        }
+
+        float retreatBlend = 1f - Mathf.Exp(-_firstPersonWallRetreatSmooth * Time.deltaTime);
+        _firstPersonWallRetreat = Mathf.Lerp(_firstPersonWallRetreat, targetRetreat, retreatBlend);
+
+        Vector3 baseLocalPosition = _gameplayCameraTransform.localPosition;
+        _gameplayCameraTransform.localPosition = baseLocalPosition + Vector3.back * _firstPersonWallRetreat;
+        SetFirstPersonWallClipHidden(_firstPersonWallRetreat > _firstPersonWallHideDistance);
+    }
+
+    private void ResolveThirdPersonCameraCollision()
+    {
+        if (_cameraTransform == null)
+        {
+            return;
+        }
+
+        Vector3 desiredWorldPosition = _cameraTransform.TransformPoint(_thirdPersonCameraOffset);
+        Vector3 rayOrigin = _cameraTransform.position;
+        Vector3 toCamera = desiredWorldPosition - rayOrigin;
+        float distance = toCamera.magnitude;
+
+        if (distance <= 0.001f)
+        {
+            return;
+        }
+
+        Vector3 direction = toCamera / distance;
+
+        if (TryGetNearestCameraCollisionHit(
+                rayOrigin,
+                direction,
+                distance,
+                _thirdPersonCameraCollisionRadius,
+                out RaycastHit hit))
+        {
+            float safeDistance = Mathf.Max(0f, hit.distance - _thirdPersonCameraCollisionPadding);
+            _gameplayCameraTransform.position = rayOrigin + direction * safeDistance;
+        }
+        else
+        {
+            _gameplayCameraTransform.position = desiredWorldPosition;
+        }
+    }
+
+    private bool TryGetNearestCameraCollisionHit(Vector3 origin, Vector3 direction, float distance, float radius, out RaycastHit nearestHit)
+    {
+        nearestHit = default;
+
+        RaycastHit[] hits = radius > 0f
+            ? Physics.SphereCastAll(origin, radius, direction, distance, _cameraCollisionLayers, QueryTriggerInteraction.Ignore)
+            : Physics.RaycastAll(origin, direction, distance, _cameraCollisionLayers, QueryTriggerInteraction.Ignore);
+
+        if (hits == null || hits.Length == 0)
+        {
+            return false;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            if (!IsValidCameraCollisionHit(hits[i]))
+            {
+                continue;
+            }
+
+            nearestHit = hits[i];
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsValidCameraCollisionHit(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return false;
+        }
+
+        Transform hitTransform = hit.collider.transform;
+        if (hitTransform == null)
+        {
+            return false;
+        }
+
+        return !hitTransform.IsChildOf(_transform);
+    }
+
+    private void UpdateArmWallClipVisibility()
+    {
+        bool hideArms = IsWallNearArm(_leftArmTransform) || IsWallNearArm(_rightArmTransform);
+        SetFirstPersonWallClipHidden(hideArms);
+    }
+
+    private bool IsWallNearArm(Transform armTransform)
+    {
+        if (armTransform == null)
+        {
+            return false;
+        }
+
+        int hitCount = Physics.OverlapSphereNonAlloc(
+            armTransform.position,
+            _armWallHideCheckRadius,
+            _armWallHitBuffer,
+            _cameraCollisionLayers,
+            QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider collider = _armWallHitBuffer[i];
+            if (collider == null)
+            {
+                continue;
+            }
+
+            Transform hitTransform = collider.transform;
+            if (hitTransform == null || hitTransform.IsChildOf(_transform))
+            {
+                continue;
+            }
+
+            Vector3 closestPoint = collider.ClosestPoint(armTransform.position);
+            float distance = Vector3.Distance(closestPoint, armTransform.position);
+            if (distance <= _armWallHideDistance)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void UpdateSprintArmPose()
     {
         float sprintProgress = GetSprintProgress();
@@ -996,6 +1230,25 @@ public class PlayerController : MonoBehaviour
             }
 
             renderer.enabled = hidden ? false : _defaultHiddenRendererEnabledStates[i];
+        }
+    }
+
+    private void SetFirstPersonWallClipHidden(bool hidden)
+    {
+        if (_firstPersonWallHideRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _firstPersonWallHideRenderers.Length; i++)
+        {
+            Renderer renderer = _firstPersonWallHideRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.enabled = hidden ? false : _defaultWallHideRendererEnabledStates[i];
         }
     }
     #endregion
@@ -1536,8 +1789,16 @@ public class PlayerController : MonoBehaviour
         int desiredSide = movementInput.x > 0f ? 1 : -1;
         Vector3 rayDirection = desiredSide > 0 ? _transform.right : -_transform.right;
         Vector3 rayOrigin = _transform.position + Vector3.up * (_characterController.height * 0.5f);
+        float effectiveCheckDistance = _wallRunCheckDistance;
 
-        if (!Physics.Raycast(rayOrigin, rayDirection, out RaycastHit hit, _wallRunCheckDistance, _wallRunLayers, QueryTriggerInteraction.Ignore))
+        if (_characterController != null)
+        {
+            effectiveCheckDistance = Mathf.Max(
+                effectiveCheckDistance,
+                _characterController.radius + _characterController.skinWidth + _wallRunCheckDistance);
+        }
+
+        if (!Physics.Raycast(rayOrigin, rayDirection, out RaycastHit hit, effectiveCheckDistance, _wallRunLayers, QueryTriggerInteraction.Ignore))
         {
             return false;
         }

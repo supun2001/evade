@@ -146,6 +146,7 @@ GameObject:
   - component: {fileID: 4370817863378094090}
   - component: {fileID: 1598502036679147204}
   - component: {fileID: 7426455774788748035}
+  - component: {fileID: 285435525388412735}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -208,6 +209,18 @@ MonoBehaviour:
   _airMaxSpeed: 42
   _bunnyHopSpeedGain: 1.08
   _bunnyHopMaxSpeed: 48
+  _wallRunLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  _wallRunCheckDistance: 0.8
+  _wallRunMinSpeed: 5.5
+  _wallRunGravityMultiplier: 0.35
+  _wallRunMaxFallSpeed: 2.5
+  _wallRunSpeed: 8.5
+  _wallRunTurnBlend: 12
+  _wallRunGroundSprintGraceTime: 0.25
+  _wallRunContactLossBuffer: 0.18
+  _wallRunStartIntoWallThreshold: 0.2
   lookSenseH: 0.1
   lookSenseV: 0.1
   lookLimitV: 70
@@ -237,6 +250,18 @@ MonoBehaviour:
   _firstPersonHiddenBoneNames:
   - Cube.011
   - Head
+  _cameraCollisionLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  _thirdPersonCameraCollisionRadius: 0.2
+  _thirdPersonCameraCollisionPadding: 0.08
+  _firstPersonWallCheckDistance: 0.45
+  _firstPersonWallRetreatDistance: 0.22
+  _firstPersonWallRetreatSmooth: 14
+  _firstPersonWallHideDistance: 0.12
+  _firstPersonWallMaxSurfaceUp: 0.35
+  _armWallHideCheckRadius: 0.16
+  _armWallHideDistance: 0.08
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -268,11 +293,11 @@ CharacterController:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Height: 3
-  m_Radius: 0.5
+  m_Height: 3.48
+  m_Radius: 1.02
   m_SlopeLimit: 45
   m_StepOffset: 0.3
-  m_SkinWidth: 0.08
+  m_SkinWidth: 0.1
   m_MinMoveDistance: 0.00001
   m_Center: {x: 0, y: 1.5, z: 0}
 --- !u!114 &1598502036679147204
@@ -297,6 +322,7 @@ MonoBehaviour:
   _landingGroundedBuffer: 0.05
   _injuredReleaseBlendDuration: 0.16
   _crouchReleaseBlendDuration: 0.12
+  _wallRunAnimationExitBuffer: 0.1
 --- !u!114 &7426455774788748035
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -317,6 +343,27 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   - {fileID: 0}
+--- !u!65 &285435525388412735
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4842325826247379024}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 0
+  serializedVersion: 3
+  m_Size: {x: 2.034842, y: 2.772772, z: 1}
+  m_Center: {x: 0.019984007, y: 1.3013145, z: 0}
 --- !u!1 &4978651277537230969
 GameObject:
   m_ObjectHideFlags: 0
