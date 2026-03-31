@@ -557,7 +557,7 @@ public class PlayerAnimation : MonoBehaviour
 
     private void ApplyWallRunState(Animator targetAnimator, bool isGrounded, float verticalSpeed)
     {
-        if (targetAnimator == null || _playerController == null || _useNetworkAnimationState)
+        if (targetAnimator == null)
         {
             return;
         }
@@ -583,12 +583,23 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
-        bool shouldHoldWallRunAnimation =
-            !isGrounded
-            && _playerLocomotionInput != null
-            && _playerLocomotionInput.JumpHeld
-            && _playerLocomotionInput.MovementInput.y > 0.1f
-            && Mathf.Abs(_playerLocomotionInput.MovementInput.x) > 0.1f;
+        bool shouldHoldWallRunAnimation;
+        if (_useNetworkAnimationState)
+        {
+            shouldHoldWallRunAnimation =
+                !isGrounded
+                && _networkAnimationInput.y > 0.1f
+                && Mathf.Abs(_networkAnimationInput.x) > 0.1f;
+        }
+        else
+        {
+            shouldHoldWallRunAnimation =
+                !isGrounded
+                && _playerLocomotionInput != null
+                && _playerLocomotionInput.JumpHeld
+                && _playerLocomotionInput.MovementInput.y > 0.1f
+                && Mathf.Abs(_playerLocomotionInput.MovementInput.x) > 0.1f;
+        }
 
         if (_wallRunAnimationHoldTimer > 0f && shouldHoldWallRunAnimation)
         {

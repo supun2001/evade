@@ -1756,7 +1756,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
   localServerUrl: ws://localhost:2567
   productionServerUrl: wss://evade-6o6d.onrender.com
-  useProductionServerInEditor: 0
+  useProductionServerInEditor: 1
   roomName: my_room
   playerPrefab: {fileID: 4842325826247379024, guid: fa064ee4d0a6048a298a22181dab671b, type: 3}
 --- !u!1 &832575517

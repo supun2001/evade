@@ -95,8 +95,7 @@ public class NetworkPlayer : MonoBehaviour
     {
         if (NetworkManager.Instance == null) return;
 
-        float camRx = Camera.main ? Camera.main.transform.localEulerAngles.x : 0;
-        float camRy = Camera.main ? Camera.main.transform.localEulerAngles.y : 0;
+        Vector2 cameraRotation = controller != null ? controller.GetCameraRotation() : Vector2.zero;
 
         Vector2 animationInput = input ? input.MovementInput : Vector2.zero;
         bool isGrounded = controller != null && controller.IsGrounded();
@@ -132,7 +131,7 @@ public class NetworkPlayer : MonoBehaviour
             wallRunSide,
             input ? input.MovementInput : Vector2.zero,
             controller != null ? controller.GetVisualYaw() : 180f,
-            new Vector2(camRx, camRy)
+            cameraRotation
         );
     }
 

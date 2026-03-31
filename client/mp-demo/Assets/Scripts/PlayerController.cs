@@ -639,6 +639,14 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateAnimationDebugHud()
     {
+#if !UNITY_EDITOR && !DEVELOPMENT_BUILD
+        if (_animationDebugLabel != null)
+        {
+            _animationDebugLabel.style.display = DisplayStyle.None;
+        }
+
+        return;
+#else
         if (_animationDebugLabel == null)
         {
             CacheHudElements();
@@ -655,6 +663,7 @@ public class PlayerController : MonoBehaviour
         }
 
         _animationDebugLabel.text = _playerAnimation.GetAnimatorDebugInfo();
+#endif
     }
 
     private void SetPauseMenuVisible(bool visible)
@@ -1718,6 +1727,11 @@ public class PlayerController : MonoBehaviour
     public float GetVerticalVelocity()
     {
         return _verticalVelocity;
+    }
+
+    public Vector2 GetCameraRotation()
+    {
+        return _cameraRotation;
     }
 
     public bool DidJumpThisFrame()

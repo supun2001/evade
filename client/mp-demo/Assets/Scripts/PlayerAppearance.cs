@@ -7,7 +7,9 @@ public class PlayerAppearance : MonoBehaviour
 {
     public SkinRegistry skinRegistry;
     public Renderer[] targetRenderers;
+    [SerializeField] private float _skinPollInterval = 0.25f;
     private Player _playerSchema;
+    private float _nextSkinPollTime;
 
     public void Initialize(Player playerSchema)
     {
@@ -20,14 +22,18 @@ public class PlayerAppearance : MonoBehaviour
 
     private void Update()
     {
-        if (_playerSchema != null)
+        if (_playerSchema == null || Time.unscaledTime < _nextSkinPollTime)
         {
-            int currentSkinIndex = Mathf.RoundToInt(_playerSchema.skinIndex);
-            if (currentSkinIndex != _lastSkinIndex)
-            {
-                SetSkin(currentSkinIndex);
-                _lastSkinIndex = currentSkinIndex;
-            }
+            return;
+        }
+
+        _nextSkinPollTime = Time.unscaledTime + Mathf.Max(0.05f, _skinPollInterval);
+
+        int currentSkinIndex = Mathf.RoundToInt(_playerSchema.skinIndex);
+        if (currentSkinIndex != _lastSkinIndex)
+        {
+            SetSkin(currentSkinIndex);
+            _lastSkinIndex = currentSkinIndex;
         }
     }
 
