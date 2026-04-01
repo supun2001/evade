@@ -78,7 +78,7 @@
                 bottom: 112px;
                 translate: -50% 0;
                 min-width: 248px;
-                row-gap: 6px;
+                row-gap: 20px;
             "
         >
             <ui:VisualElement

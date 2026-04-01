@@ -33,6 +33,8 @@ const NEXTBOT_INTERCEPT_BONUS_MAX = 20;
 const NEXTBOT_FRONT_ANGLE_THRESHOLD = 85;
 const PLAYER_MIN_SPAWN_DISTANCE_FROM_NEXTBOT = 8;
 const PLAYER_SPAWN_RANGE = 10;
+const PLAYER_REVIVE_DISTANCE = 6;
+const PLAYER_REVIVE_DURATION_MS = 4000;
 
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
@@ -58,6 +60,7 @@ export class MyRoom extends Room<MyRoomState> {
   private currentTargetLostSince = 0;
   private recentReachableUntil = new Map<string, number>();
   private lastKnownTargetPosition?: SpawnPoint;
+  private pendingReviveTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
@@ -132,6 +135,50 @@ export class MyRoom extends Room<MyRoomState> {
       }
     });
 
+    this.onMessage("revivePlayer", (client, message) => {
+      const reviver = this.state.players.get(client.sessionId);
+      const targetSessionId = typeof message?.targetSessionId === "string" ? message.targetSessionId : "";
+      const target = this.state.players.get(targetSessionId);
+
+      if (!reviver || !target || target.sessionId === client.sessionId) {
+        return;
+      }
+
+      if (reviver.isInjured || reviver.isHitReacting || !target.isInjured) {
+        return;
+      }
+
+      const distance = Math.hypot(target.x - reviver.x, target.z - reviver.z);
+      if (distance > PLAYER_REVIVE_DISTANCE) {
+        return;
+      }
+
+      if (this.pendingReviveTimeouts.has(targetSessionId)) {
+        return;
+      }
+
+      const reviveTimeout = setTimeout(() => {
+        this.pendingReviveTimeouts.delete(targetSessionId);
+
+        const pendingTarget = this.state.players.get(targetSessionId);
+        if (!pendingTarget || !pendingTarget.isInjured) {
+          return;
+        }
+
+        pendingTarget.isInjured = false;
+        pendingTarget.isHitReacting = false;
+        pendingTarget.hitReactionTimeRemaining = 0;
+        pendingTarget.hitReactionPitch = 0;
+        pendingTarget.hitReactionRoll = 0;
+        pendingTarget.hitReactionSeed = 0;
+
+        const targetClient = this.clients.find((roomClient) => roomClient.sessionId === targetSessionId);
+        targetClient?.send("playerRevived", "revived");
+      }, PLAYER_REVIVE_DURATION_MS);
+
+      this.pendingReviveTimeouts.set(targetSessionId, reviveTimeout);
+    });
+
     //Set update rate (60 times per second)
     this.setSimulationInterval((deltaTime) =>
       this.update(deltaTime), 1000 / 60
@@ -191,6 +238,7 @@ export class MyRoom extends Room<MyRoomState> {
     //Remove player from state
     this.state.players.delete(client.sessionId);
     this.playerSafeUntil.delete(client.sessionId);
+    this.clearPendingRevive(client.sessionId);
 
     // If no players left, reset game state
     if (this.state.players.size === 0) {
@@ -202,7 +250,17 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   onDispose() {
+    this.pendingReviveTimeouts.forEach((timeout) => clearTimeout(timeout));
+    this.pendingReviveTimeouts.clear();
     console.log("room", this.roomId, "disposing...");
+  }
+
+  private clearPendingRevive(sessionId: string) {
+    const reviveTimeout = this.pendingReviveTimeouts.get(sessionId);
+    if (reviveTimeout != null) {
+      clearTimeout(reviveTimeout);
+      this.pendingReviveTimeouts.delete(sessionId);
+    }
   }
 
   update(deltaTime: number) {

@@ -201,38 +201,11 @@ MonoBehaviour:
   _nonForwardSpeedMultiplier: 0.5
   _injuredRotationSharpness: 12
   _nextbotHitReactionDuration: 0.45
-  _nextbotHitHorizontalImpulse: 8
-  _nextbotHitVerticalImpulse: 4
-  _nextbotHitHorizontalDamping: 10
-  _nextbotHitImpactForce: 30
-  _nextbotHitImpactDuration: 0.18
-  _nextbotHitImpactDamping: 22
-  _nextbotHitDirectionRandomAngle: 40
-  _nextbotHitHorizontalImpulseRandomness: 0.35
-  _nextbotHitVerticalImpulseRandomness: 0.3
-  _nextbotHitImpactForceRandomness: 0.4
-  _nextbotHitVisualPitch: 70
-  _nextbotHitVisualRoll: 35
-  _nextbotHitVisualBlend: 14
-  _nextbotHitAngularDamping: 20
-  _nextbotHitSettlePitch: 62
-  _nextbotHitMaxPitch: 72
-  _nextbotHitMaxRoll: 22
-  _nextbotHitWobblePitch: 8
-  _nextbotHitWobbleRoll: 12
-  _nextbotHitWobbleFrequency: 8
-  _nextbotHitLeftArmBoneName: ArmR_Offset
-  _nextbotHitRightArmBoneName: ArmL_Offset
-  _nextbotHitLeftLegBoneName: LegL1
-  _nextbotHitRightLegBoneName: LegR1
-  _nextbotHitArmPitchRange: {x: -90, y: 90}
-  _nextbotHitArmYawRange: 26
-  _nextbotHitArmRollRange: 38
-  _nextbotHitArmBlend: 12
-  _nextbotHitLegPitchRange: {x: -48, y: 28}
-  _nextbotHitLegYawRange: 16
-  _nextbotHitLegRollRange: 22
-  _nextbotHitLegBlend: 10
+  _nextbotHitShoveForce: 8
+  _nextbotHitUpwardForce: 4
+  _nextbotHitRandomness: 0.55
+  _nextbotHitTumble: 0.65
+  _nextbotHitLimbFlail: 0.45
   _injuredVisualPositionOffset: {x: 0, y: 0.62, z: 0.06}
   _hitReactionVisualPositionOffset: {x: 0, y: 0.88, z: 0.12}
   _downedVisualPositionBlend: 10
@@ -247,6 +220,9 @@ MonoBehaviour:
   _downedControllerRadius: 0.85
   _downedControllerCenter: {x: 0, y: 1.92, z: 0}
   _downedControllerBlend: 12
+  _enableDebugInjureHotkey: 1
+  _injuredInteractionPromptDistance: 5
+  _injuredInteractionPromptHeightTolerance: 1.75
   _enableBunnyHop: 1
   _groundFriction: 10
   _groundControl: 8
@@ -271,7 +247,7 @@ MonoBehaviour:
   lookSenseV: 0.1
   lookLimitV: 70
   _firstPersonLookUpLimit: 80
-  _firstPersonLookDownLimit: 25
+  _firstPersonLookDownLimit: 45
   _zoomFieldOfView: 35
   _zoomSmoothSpeed: 10
   _leftArmBoneName: arm-left

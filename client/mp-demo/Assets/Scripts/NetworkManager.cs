@@ -185,6 +185,19 @@ public class NetworkManager : MonoBehaviour
         room.Send("playerReady", isReady);
     }
 
+    public void SendReviveRequest(string targetSessionId)
+    {
+        if (room == null || string.IsNullOrWhiteSpace(targetSessionId))
+        {
+            return;
+        }
+
+        room.Send("revivePlayer", new
+        {
+            targetSessionId
+        });
+    }
+
     public async Task<string> CreateGame(){
         InitializeClient();
         try{
@@ -335,6 +348,17 @@ public class NetworkManager : MonoBehaviour
             {
                 lobby.OnGameStarted();
             }
+        });
+
+        room.OnMessage<string>("playerRevived", (_) =>
+        {
+            if (!players.TryGetValue(room.SessionId, out GameObject localPlayer) || localPlayer == null)
+            {
+                return;
+            }
+
+            PlayerController controller = localPlayer.GetComponent<PlayerController>();
+            controller?.ApplyNetworkRevive();
         });
 
         var events = Colyseus.Schema.Callbacks.Get(room);

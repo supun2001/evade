@@ -324,6 +324,7 @@ public class PlayerController : MonoBehaviour
         UpdateAnimationDebugHud();
         UpdateCrosshairVisibility();
         UpdateInjuredInteractionPrompt();
+        HandleInjuredInteractionInput();
 
         HandleCursorLock();
         HandleViewToggle();
@@ -401,6 +402,21 @@ public class PlayerController : MonoBehaviour
 
         SetDebugInjuredState(!IsInjured());
 #endif
+    }
+
+    private void HandleInjuredInteractionInput()
+    {
+        if (_isPauseMenuOpen || IsInjuredOrHitReacting() || Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame)
+        {
+            return;
+        }
+
+        if (!TryGetLookedAtInjuredPlayer(out _, out string targetSessionId))
+        {
+            return;
+        }
+
+        NetworkManager.Instance?.SendReviveRequest(targetSessionId);
     }
 
     private void SetDebugInjuredState(bool injured)
@@ -943,7 +959,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (TryGetLookedAtInjuredPlayer(out _))
+        if (TryGetLookedAtInjuredPlayer(out _, out _))
         {
             SetInjuredInteractionPromptVisible(true);
             return;
@@ -977,9 +993,10 @@ public class PlayerController : MonoBehaviour
         _injuredInteractionPromptElement.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
     }
 
-    private bool TryGetLookedAtInjuredPlayer(out PlayerAnimation injuredPlayerAnimation)
+    private bool TryGetLookedAtInjuredPlayer(out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
     {
         injuredPlayerAnimation = null;
+        targetSessionId = null;
 
         Transform rayOriginTransform = _gameplayCameraTransform != null ? _gameplayCameraTransform : _cameraTransform;
         if (rayOriginTransform == null || _transform == null)
@@ -1016,6 +1033,12 @@ public class PlayerController : MonoBehaviour
                 return false;
             }
 
+            NetworkPlayer candidateNetworkPlayer = candidate.GetComponent<NetworkPlayer>();
+            if (candidateNetworkPlayer == null || !candidateNetworkPlayer.TryGetSessionId(out targetSessionId))
+            {
+                return false;
+            }
+
             Transform candidateTransform = candidate.transform;
             Vector3 offset = candidateTransform.position - localPosition;
             if (Mathf.Abs(offset.y) > _injuredInteractionPromptHeightTolerance)
@@ -1028,6 +1051,14 @@ public class PlayerController : MonoBehaviour
         }
 
         return false;
+    }
+
+    public void ApplyNetworkRevive()
+    {
+        SetDebugInjuredState(false);
+        ResetInjuredVisualRootRotation();
+        UpdateDownedCollisionShape();
+        UpdateDownedVisualRootPosition();
     }
 
     private void SetPauseMenuVisible(bool visible)
