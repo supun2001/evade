@@ -63,7 +63,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private bool _enableDebugInjureHotkey = true;
 
     [Header("Injured Interaction Prompt")]
-    [SerializeField] private float _injuredInteractionPromptDistance = 3f;
+    [SerializeField] private float _injuredInteractionPromptDistance = 5f;
     [SerializeField] private float _injuredInteractionPromptHeightTolerance = 1.75f;
 
     [Header("Bhop & Strafing")]
@@ -153,8 +153,8 @@ public class PlayerController : MonoBehaviour
     private UIDocument _playerHudDocument;
     private Label _speedLabel;
     private Label _animationDebugLabel;
+    private VisualElement _crosshairDotElement;
     private VisualElement _injuredInteractionPromptElement;
-    private Label _injuredInteractionPromptLabel;
     private VisualElement _pauseMenuElement;
     private Button _continueButton;
     private Button _mainMenuButton;
@@ -322,6 +322,7 @@ public class PlayerController : MonoBehaviour
         UpdateDownedCollisionShape();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
+        UpdateCrosshairVisibility();
         UpdateInjuredInteractionPrompt();
 
         HandleCursorLock();
@@ -809,8 +810,8 @@ public class PlayerController : MonoBehaviour
 
         _speedLabel = root.Q<Label>("speed-label");
         _animationDebugLabel = root.Q<Label>("animation-debug-label");
+        _crosshairDotElement = root.Q<VisualElement>("crosshair-dot");
         _injuredInteractionPromptElement = root.Q<VisualElement>("injured-interaction-prompt");
-        _injuredInteractionPromptLabel = root.Q<Label>("injured-interaction-prompt-label");
         _pauseMenuElement = root.Q<VisualElement>("pause-menu");
         _continueButton = root.Q<Button>("continue-button");
         _mainMenuButton = root.Q<Button>("main-menu-button");
@@ -942,18 +943,28 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (TryGetNearbyInjuredPlayer(out _, out float distanceToPlayer))
+        if (TryGetLookedAtInjuredPlayer(out _))
         {
-            if (_injuredInteractionPromptLabel != null)
-            {
-                _injuredInteractionPromptLabel.text = $"Press E to Carry   Press Q to Revive\nDistance {distanceToPlayer:0.0}m";
-            }
-
             SetInjuredInteractionPromptVisible(true);
             return;
         }
 
         SetInjuredInteractionPromptVisible(false);
+    }
+
+    private void UpdateCrosshairVisibility()
+    {
+        if (_crosshairDotElement == null)
+        {
+            CacheHudElements();
+            if (_crosshairDotElement == null)
+            {
+                return;
+            }
+        }
+
+        bool shouldShowCrosshair = !_isPauseMenuOpen && !IsInjuredOrHitReacting();
+        _crosshairDotElement.style.display = shouldShowCrosshair ? DisplayStyle.Flex : DisplayStyle.None;
     }
 
     private void SetInjuredInteractionPromptVisible(bool visible)
@@ -966,50 +977,57 @@ public class PlayerController : MonoBehaviour
         _injuredInteractionPromptElement.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
     }
 
-    private bool TryGetNearbyInjuredPlayer(out PlayerAnimation injuredPlayerAnimation, out float distanceToPlayer)
+    private bool TryGetLookedAtInjuredPlayer(out PlayerAnimation injuredPlayerAnimation)
     {
         injuredPlayerAnimation = null;
-        distanceToPlayer = float.PositiveInfinity;
 
-        if (_transform == null)
+        Transform rayOriginTransform = _gameplayCameraTransform != null ? _gameplayCameraTransform : _cameraTransform;
+        if (rayOriginTransform == null || _transform == null)
         {
             return false;
         }
 
-        PlayerAnimation[] playerAnimations = FindObjectsByType<PlayerAnimation>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         Vector3 localPosition = _transform.position;
+        RaycastHit[] hits = Physics.RaycastAll(
+            rayOriginTransform.position,
+            rayOriginTransform.forward,
+            _injuredInteractionPromptDistance,
+            _cameraCollisionLayers,
+            QueryTriggerInteraction.Ignore);
 
-        for (int i = 0; i < playerAnimations.Length; i++)
+        if (hits == null || hits.Length == 0)
         {
-            PlayerAnimation candidate = playerAnimations[i];
-            if (candidate == null || candidate == _playerAnimation || !candidate.IsInjuredActive)
+            return false;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+            if (!IsValidCameraCollisionHit(hit) || hit.collider == null)
             {
                 continue;
+            }
+
+            PlayerAnimation candidate = hit.collider.GetComponentInParent<PlayerAnimation>();
+            if (candidate == null || candidate == _playerAnimation || !candidate.IsInjuredActive)
+            {
+                return false;
             }
 
             Transform candidateTransform = candidate.transform;
-            if (candidateTransform == null || candidateTransform == _transform)
-            {
-                continue;
-            }
-
             Vector3 offset = candidateTransform.position - localPosition;
             if (Mathf.Abs(offset.y) > _injuredInteractionPromptHeightTolerance)
             {
-                continue;
-            }
-
-            float planarDistance = new Vector2(offset.x, offset.z).magnitude;
-            if (planarDistance > _injuredInteractionPromptDistance || planarDistance >= distanceToPlayer)
-            {
-                continue;
+                return false;
             }
 
             injuredPlayerAnimation = candidate;
-            distanceToPlayer = planarDistance;
+            return true;
         }
 
-        return injuredPlayerAnimation != null;
+        return false;
     }
 
     private void SetPauseMenuVisible(bool visible)
