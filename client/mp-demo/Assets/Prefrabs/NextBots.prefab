@@ -110,7 +110,7 @@ MeshCollider:
   m_LayerOverridePriority: 0
   m_IsTrigger: 0
   m_ProvidesContacts: 0
-  m_Enabled: 1
+  m_Enabled: 0
   serializedVersion: 5
   m_Convex: 0
   m_CookingOptions: 30
@@ -155,6 +155,7 @@ MonoBehaviour:
   _hitCooldown: 1.25
   _faceTargetPlayer: 0
   _billboardToCamera: 1
+  _visualLocalOffset: {x: 0, y: 2.1, z: 0}
   _billboardRotationOffsetEuler: {x: 0, y: 90, z: -90}
   _loopAudioSource: {fileID: 0}
   _loopClip: {fileID: 8300000, guid: 49fc7128f4e6147c9a4276d415b0aadc, type: 3}

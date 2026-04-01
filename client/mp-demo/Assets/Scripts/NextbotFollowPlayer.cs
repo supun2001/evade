@@ -43,6 +43,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [Header("Billboard")]
     [SerializeField] private bool _faceTargetPlayer = false;
     [SerializeField] private bool _billboardToCamera = true;
+    [SerializeField] private Vector3 _visualLocalOffset = new Vector3(0f, 2.1f, 0f);
     [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
 
     [Header("Audio")]
@@ -416,10 +417,6 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         Vector3 targetPosition = _target.position;
-        if (_lockToStartingHeight)
-        {
-            targetPosition.y = _lockedHeight;
-        }
 
         if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
         {
@@ -430,7 +427,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 navMeshTargetPosition))
             {
-                _navMeshAgent.SetDestination(navMeshTargetPosition + Vector3.up * _agentVisualOffset);
+                _navMeshAgent.SetDestination(navMeshTargetPosition);
             }
 
             Vector3 velocity = _navMeshAgent.desiredVelocity;
@@ -440,6 +437,11 @@ public class NextbotFollowPlayer : MonoBehaviour
             UpdateBodyRotation(_horizontalVelocity);
             TryHitTarget(Vector3.Distance(new Vector3(targetPosition.x, 0f, targetPosition.z), new Vector3(transform.position.x, 0f, transform.position.z)));
             return;
+        }
+
+        if (_lockToStartingHeight)
+        {
+            targetPosition.y = _lockedHeight;
         }
 
         Vector3 planarOffset = targetPosition - transform.position;
@@ -740,13 +742,14 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (existingVisual != null)
         {
             _visualTransform = existingVisual;
+            _visualTransform.localPosition = _visualLocalOffset;
             rootMeshRenderer.enabled = false;
             return;
         }
 
         GameObject visualObject = new GameObject("NextbotVisual");
         visualObject.transform.SetParent(transform, false);
-        visualObject.transform.localPosition = Vector3.zero;
+        visualObject.transform.localPosition = _visualLocalOffset;
         visualObject.transform.localRotation = Quaternion.identity;
         visualObject.transform.localScale = Vector3.one;
 
@@ -899,15 +902,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        if (TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
-        {
-            _agentVisualOffset = transform.position.y - navMeshPosition.y;
-            _navMeshAgent.baseOffset = _agentVisualOffset;
-        }
-        else
-        {
-            _agentVisualOffset = _navMeshAgent.baseOffset;
-        }
+        _agentVisualOffset = _navMeshAgent.baseOffset;
     }
 
     private void EnsureAgentOnNavMesh()
@@ -922,7 +917,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        _navMeshAgent.Warp(navMeshPosition + Vector3.up * _agentVisualOffset);
+        _navMeshAgent.Warp(navMeshPosition);
     }
 
     private bool TryGetNearestNavMeshPosition(Vector3 worldPosition, out Vector3 navMeshPosition)
