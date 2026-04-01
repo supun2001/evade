@@ -13,6 +13,7 @@ GameObject:
   - component: {fileID: 1801000108074098500}
   - component: {fileID: 2407930312130904060}
   - component: {fileID: 6897905686377683544}
+  - component: {fileID: 3646483840799201321}
   m_Layer: 0
   m_Name: NextBots
   m_TagString: Untagged
@@ -126,12 +127,28 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4f8ac8173af485daa8544c56da89bd5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NextbotFollowPlayer
-  _moveSpeed: 200
-  _acceleration: 100
-  _rotationSpeed: 14
+  _moveSpeed: 10
+  _acceleration: 18
+  _rotationSpeed: 10
   _stoppingDistance: 1.4
-  _targetRefreshInterval: 0.25
+  _targetRefreshInterval: 0.2
   _followNearestPlayer: 1
+  _maxChaseRange: 70
+  _visibleRange: 18
+  _distanceScoreBase: 120
+  _visibleBonus: 15
+  _frontBonus: 10
+  _currentTargetBonus: 30
+  _switchScoreThreshold: 20
+  _targetLockDuration: 1.4
+  _switchConfirmDuration: 0.3
+  _frontAngleThreshold: 85
+  _wallDetectionLayers:
+    serializedVersion: 2
+    m_Bits: 64
+  _eyeHeight: 1.25
+  _targetEyeHeight: 1
+  _navMeshSnapDistance: 8
   _lockToStartingHeight: 1
   _gravity: 20
   _hitDistance: 1.6
@@ -146,3 +163,25 @@ MonoBehaviour:
   _soundMinDistance: 3
   _soundMaxDistance: 24
   _soundRolloffMode: 1
+--- !u!195 &3646483840799201321
+NavMeshAgent:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3816773528204793743}
+  m_Enabled: 1
+  m_AgentTypeID: 0
+  m_Radius: 0.55
+  m_Speed: 10
+  m_Acceleration: 18
+  avoidancePriority: 50
+  m_AngularSpeed: 450
+  m_StoppingDistance: 1.4
+  m_AutoTraverseOffMeshLink: 1
+  m_AutoBraking: 0
+  m_AutoRepath: 1
+  m_Height: 2
+  m_BaseOffset: 0
+  m_WalkableMask: 4294967295
+  m_ObstacleAvoidanceType: 4

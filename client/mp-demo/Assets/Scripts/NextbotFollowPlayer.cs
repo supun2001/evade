@@ -1,15 +1,36 @@
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.AI;
 
 public class NextbotFollowPlayer : MonoBehaviour
 {
     [Header("Follow")]
-    [SerializeField] private float _moveSpeed = 8f;
+    [SerializeField] private float _moveSpeed = 10f;
     [SerializeField] private float _acceleration = 18f;
-    [SerializeField] private float _rotationSpeed = 14f;
+    [SerializeField] private float _rotationSpeed = 10f;
     [SerializeField] private float _stoppingDistance = 1.4f;
-    [SerializeField] private float _targetRefreshInterval = 0.25f;
+    [SerializeField] private float _targetRefreshInterval = 0.2f;
     [SerializeField] private bool _followNearestPlayer = true;
+
+    [Header("Target Score")]
+    [SerializeField] private float _maxChaseRange = 70f;
+    [SerializeField] private float _visibleRange = 18f;
+    [SerializeField] private float _distanceScoreBase = 120f;
+    [SerializeField] private float _visibleBonus = 15f;
+    [SerializeField] private float _frontBonus = 10f;
+    [SerializeField] private float _currentTargetBonus = 30f;
+    [SerializeField] private float _switchScoreThreshold = 20f;
+    [SerializeField] private float _targetLockDuration = 1.4f;
+    [SerializeField] private float _switchConfirmDuration = 0.3f;
+    [SerializeField] private float _frontAngleThreshold = 85f;
+
+    [Header("Detection")]
+    [SerializeField] private LayerMask _wallDetectionLayers = 1 << 6;
+    [SerializeField] private float _eyeHeight = 1.25f;
+    [SerializeField] private float _targetEyeHeight = 1.0f;
+
+    [Header("NavMesh")]
+    [SerializeField] private float _navMeshSnapDistance = 8f;
 
     [Header("Grounding")]
     [SerializeField] private bool _lockToStartingHeight = true;
@@ -33,8 +54,19 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _soundMaxDistance = 24f;
     [SerializeField] private AudioRolloffMode _soundRolloffMode = AudioRolloffMode.Linear;
 
+    private struct ScoredTarget
+    {
+        public Transform Transform;
+        public PlayerController Controller;
+        public float Score;
+        public float PathDistance;
+        public bool HasLineOfSight;
+    }
+
     private CharacterController _characterController;
+    private NavMeshAgent _navMeshAgent;
     private Transform _target;
+    private PlayerController _targetController;
     private Vector3 _horizontalVelocity;
     private float _verticalVelocity;
     private float _lockedHeight;
@@ -46,26 +78,43 @@ public class NextbotFollowPlayer : MonoBehaviour
     private readonly List<CharacterController> _ignoredTargetsToRestore = new List<CharacterController>();
     private Renderer[] _renderers = System.Array.Empty<Renderer>();
     private Collider[] _colliders = System.Array.Empty<Collider>();
-    private bool _hasAppliedServerState;
     private Transform _visualTransform;
     private MeshRenderer _rootMeshRenderer;
+    private NavMeshPath _pathBuffer;
+    private float _targetLockedUntil;
+    private Transform _pendingSwitchTarget;
+    private float _pendingSwitchStartedAt;
+    private float _agentVisualOffset;
 
     private void Awake()
     {
         _characterController = GetComponent<CharacterController>();
+        _navMeshAgent = GetComponent<NavMeshAgent>();
+        _pathBuffer = new NavMeshPath();
         _lockedHeight = transform.position.y;
         EnsureVisualBillboardChild();
         EnsureLoopAudioSource();
         _nextbotColliders = GetComponentsInChildren<Collider>(true);
         _renderers = GetComponentsInChildren<Renderer>(true);
         _colliders = GetComponentsInChildren<Collider>(true);
+
+        if (_navMeshAgent != null)
+        {
+            ConfigureAgentFromCurrentPosition();
+            _navMeshAgent.updateRotation = false;
+            _navMeshAgent.updateUpAxis = true;
+            _navMeshAgent.speed = _moveSpeed;
+            _navMeshAgent.acceleration = _acceleration;
+            _navMeshAgent.stoppingDistance = _stoppingDistance;
+            _navMeshAgent.angularSpeed = Mathf.Max(120f, _rotationSpeed * 45f);
+        }
     }
 
     private void Update()
     {
         SyncIgnoredTargets();
 
-        if (UpdateFromServerState())
+        if (UpdateActivationState())
         {
             return;
         }
@@ -87,6 +136,36 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
     }
 
+    private bool UpdateActivationState()
+    {
+        MyRoomState roomState = GetRoomState();
+        bool isActive = roomState == null || roomState.isGameStarted;
+        SetServerVisualState(isActive);
+
+        if (!isActive)
+        {
+            ClearTarget();
+            StopAgent();
+            _horizontalVelocity = Vector3.zero;
+            return true;
+        }
+
+        EnsureAgentOnNavMesh();
+
+        return false;
+    }
+
+    private MyRoomState GetRoomState()
+    {
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null || networkManager.Room == null || networkManager.Room.State == null)
+        {
+            return null;
+        }
+
+        return networkManager.Room.State;
+    }
+
     private void RefreshTargetIfNeeded()
     {
         if (!_followNearestPlayer)
@@ -94,13 +173,9 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        if (_target != null)
+        if (_target != null && !CanKeepCurrentTarget())
         {
-            PlayerController currentTargetController = ResolvePlayerController(_target);
-            if (currentTargetController == null || currentTargetController.IsInjuredOrHitReacting())
-            {
-                _target = null;
-            }
+            ClearTarget();
         }
 
         if (Time.time < _nextTargetRefreshTime && _target != null)
@@ -109,116 +184,291 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         _nextTargetRefreshTime = Time.time + Mathf.Max(0.05f, _targetRefreshInterval);
-        _target = FindNearestPlayer();
+        EvaluateTargetSelection();
     }
 
-    private bool UpdateFromServerState()
+    private void EvaluateTargetSelection()
     {
-        NextbotState nextbotState = GetNextbotState();
-        if (nextbotState == null)
+        ScoredTarget? bestTarget = FindBestTarget();
+        if (!bestTarget.HasValue)
         {
-            _hasAppliedServerState = false;
-            SetServerVisualState(true);
-            return false;
+            ClearTarget();
+            return;
         }
 
-        bool isActive = nextbotState.isActive;
-        SetServerVisualState(isActive);
-
-        if (!isActive)
+        if (_target == null)
         {
-            _hasAppliedServerState = false;
-            _horizontalVelocity = Vector3.zero;
-            _target = null;
-            return true;
+            AssignTarget(bestTarget.Value.Transform, bestTarget.Value.Controller);
+            return;
         }
 
-        _target = ResolveServerTargetTransform(nextbotState.targetSessionId);
-
-        Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
-        if (_lockToStartingHeight)
+        if (Time.time < _targetLockedUntil && bestTarget.Value.Transform == _target)
         {
-            targetPosition.y = _lockedHeight;
+            return;
         }
 
-        if (!_hasAppliedServerState)
+        ScoredTarget? currentScore = BuildScoredTarget(_target, _targetController, true);
+        if (!currentScore.HasValue)
         {
-            transform.position = targetPosition;
-            _hasAppliedServerState = true;
-        }
-        else
-        {
-            float moveBlend = 1f - Mathf.Exp(-_acceleration * Time.deltaTime);
-            transform.position = Vector3.Lerp(transform.position, targetPosition, moveBlend);
+            AssignTarget(bestTarget.Value.Transform, bestTarget.Value.Controller);
+            return;
         }
 
-        return true;
+        if (bestTarget.Value.Transform == _target)
+        {
+            _pendingSwitchTarget = null;
+            _pendingSwitchStartedAt = 0f;
+            return;
+        }
+
+        if (bestTarget.Value.Score <= currentScore.Value.Score + _switchScoreThreshold)
+        {
+            _pendingSwitchTarget = null;
+            _pendingSwitchStartedAt = 0f;
+            return;
+        }
+
+        if (_pendingSwitchTarget != bestTarget.Value.Transform)
+        {
+            _pendingSwitchTarget = bestTarget.Value.Transform;
+            _pendingSwitchStartedAt = Time.time;
+            return;
+        }
+
+        if (Time.time - _pendingSwitchStartedAt >= _switchConfirmDuration)
+        {
+            AssignTarget(bestTarget.Value.Transform, bestTarget.Value.Controller);
+        }
     }
 
-    private NextbotState GetNextbotState()
+    private ScoredTarget? FindBestTarget()
     {
-        NetworkManager networkManager = NetworkManager.Instance;
-        if (networkManager == null || networkManager.Room == null || networkManager.Room.State == null)
+        Transform bestTransform = null;
+        PlayerController bestController = null;
+        float bestScore = float.NegativeInfinity;
+        float bestDistance = float.PositiveInfinity;
+        bool bestLineOfSight = false;
+
+        PlayerController[] playerControllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        for (int i = 0; i < playerControllers.Length; i++)
+        {
+            PlayerController playerController = playerControllers[i];
+            if (playerController == null || !playerController.enabled || playerController.transform == transform)
+            {
+                continue;
+            }
+
+            ScoredTarget? scoredTarget = BuildScoredTarget(playerController.transform, playerController, playerController.transform == _target);
+            if (!scoredTarget.HasValue)
+            {
+                continue;
+            }
+
+            if (scoredTarget.Value.Score > bestScore)
+            {
+                bestTransform = scoredTarget.Value.Transform;
+                bestController = scoredTarget.Value.Controller;
+                bestScore = scoredTarget.Value.Score;
+                bestDistance = scoredTarget.Value.PathDistance;
+                bestLineOfSight = scoredTarget.Value.HasLineOfSight;
+            }
+        }
+
+        if (bestTransform == null)
         {
             return null;
         }
 
-        return networkManager.Room.State.nextbot;
+        return new ScoredTarget
+        {
+            Transform = bestTransform,
+            Controller = bestController,
+            Score = bestScore,
+            PathDistance = bestDistance,
+            HasLineOfSight = bestLineOfSight,
+        };
     }
 
-    private void SetServerVisualState(bool visible)
+    private ScoredTarget? BuildScoredTarget(Transform candidateTransform, PlayerController candidateController, bool isCurrentTarget)
     {
-        for (int i = 0; i < _renderers.Length; i++)
+        if (candidateTransform == null || candidateController == null || !candidateController.enabled || candidateController.IsInjuredOrHitReacting())
         {
-            if (_renderers[i] != null)
-            {
-                if (_renderers[i] == _rootMeshRenderer)
-                {
-                    _renderers[i].enabled = false;
-                }
-                else
-                {
-                    _renderers[i].enabled = visible;
-                }
-            }
+            return null;
         }
 
-        for (int i = 0; i < _colliders.Length; i++)
+        float pathDistance = GetPathDistance(candidateTransform.position);
+        if (float.IsInfinity(pathDistance) || pathDistance > _maxChaseRange)
         {
-            if (_colliders[i] != null)
-            {
-                _colliders[i].enabled = visible;
-            }
+            return null;
         }
 
-        UpdateLoopAudioState(visible);
+        bool hasLineOfSight = HasLineOfSight(candidateTransform);
+        float distanceScore = Mathf.Max(0f, _distanceScoreBase - pathDistance);
+        float visibleBonus = hasLineOfSight && pathDistance <= _visibleRange ? _visibleBonus : 0f;
+        float frontBonus = IsTargetInFront(candidateTransform.position) ? _frontBonus : 0f;
+        float currentTargetBonus = isCurrentTarget ? _currentTargetBonus : 0f;
+
+        return new ScoredTarget
+        {
+            Transform = candidateTransform,
+            Controller = candidateController,
+            PathDistance = pathDistance,
+            HasLineOfSight = hasLineOfSight,
+            Score = distanceScore + visibleBonus + frontBonus + currentTargetBonus,
+        };
+    }
+
+    private bool CanKeepCurrentTarget()
+    {
+        if (_target == null || _targetController == null || !_targetController.enabled || _targetController.IsInjuredOrHitReacting())
+        {
+            return false;
+        }
+
+        float pathDistance = GetPathDistance(_target.position);
+        return !float.IsInfinity(pathDistance) && pathDistance <= _maxChaseRange;
+    }
+
+    private float GetPathDistance(Vector3 destination)
+    {
+        if (_navMeshAgent == null)
+        {
+            return Vector3.Distance(transform.position, destination);
+        }
+
+        if (!TryGetNearestNavMeshPosition(transform.position, out Vector3 sourcePosition)
+            || !TryGetNearestNavMeshPosition(destination, out Vector3 destinationPosition))
+        {
+            return float.PositiveInfinity;
+        }
+
+        if (!NavMesh.CalculatePath(sourcePosition, destinationPosition, _navMeshAgent.areaMask, _pathBuffer))
+        {
+            return float.PositiveInfinity;
+        }
+
+        if (_pathBuffer.status != NavMeshPathStatus.PathComplete || _pathBuffer.corners.Length < 2)
+        {
+            return float.PositiveInfinity;
+        }
+
+        float totalDistance = 0f;
+        for (int i = 1; i < _pathBuffer.corners.Length; i++)
+        {
+            totalDistance += Vector3.Distance(_pathBuffer.corners[i - 1], _pathBuffer.corners[i]);
+        }
+
+        return totalDistance;
+    }
+
+    private bool HasLineOfSight(Transform candidateTransform)
+    {
+        Vector3 origin = transform.position + Vector3.up * _eyeHeight;
+        Vector3 target = candidateTransform.position + Vector3.up * _targetEyeHeight;
+        Vector3 direction = target - origin;
+        float distance = direction.magnitude;
+        if (distance <= 0.001f)
+        {
+            return true;
+        }
+
+        int mask = _wallDetectionLayers.value != 0 ? _wallDetectionLayers.value : Physics.DefaultRaycastLayers;
+        return !Physics.Raycast(origin, direction / distance, distance, mask, QueryTriggerInteraction.Ignore);
+    }
+
+    private bool IsTargetInFront(Vector3 targetPosition)
+    {
+        Vector3 toTarget = targetPosition - transform.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude <= 0.0001f)
+        {
+            return true;
+        }
+
+        float angle = Vector3.Angle(transform.forward, toTarget.normalized);
+        return angle <= _frontAngleThreshold;
+    }
+
+    private void AssignTarget(Transform targetTransform, PlayerController controller)
+    {
+        _target = targetTransform;
+        _targetController = controller;
+        _targetLockedUntil = Time.time + _targetLockDuration;
+        _pendingSwitchTarget = null;
+        _pendingSwitchStartedAt = 0f;
+    }
+
+    private void ClearTarget()
+    {
+        _target = null;
+        _targetController = null;
+        _targetLockedUntil = 0f;
+        _pendingSwitchTarget = null;
+        _pendingSwitchStartedAt = 0f;
     }
 
     private void UpdateMovement()
     {
         if (_target == null)
         {
-            _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, _acceleration * Time.deltaTime);
-            ApplyMovement(Vector3.zero);
+            StopAgent();
             return;
         }
 
         Vector3 targetPosition = _target.position;
+        if (_lockToStartingHeight)
+        {
+            targetPosition.y = _lockedHeight;
+        }
+
+        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.speed = _moveSpeed;
+            _navMeshAgent.acceleration = _acceleration;
+            _navMeshAgent.stoppingDistance = _stoppingDistance;
+            _navMeshAgent.isStopped = false;
+
+            if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 navMeshTargetPosition))
+            {
+                _navMeshAgent.SetDestination(navMeshTargetPosition + Vector3.up * _agentVisualOffset);
+            }
+
+            Vector3 velocity = _navMeshAgent.desiredVelocity;
+            velocity.y = 0f;
+            _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
+
+            UpdateBodyRotation(_horizontalVelocity);
+            TryHitTarget(Vector3.Distance(new Vector3(targetPosition.x, 0f, targetPosition.z), new Vector3(transform.position.x, 0f, transform.position.z)));
+            return;
+        }
+
         Vector3 planarOffset = targetPosition - transform.position;
         planarOffset.y = 0f;
-
         float distance = planarOffset.magnitude;
         Vector3 moveDirection = distance > 0.001f ? planarOffset / distance : Vector3.zero;
         Vector3 desiredVelocity = distance > _stoppingDistance ? moveDirection * _moveSpeed : Vector3.zero;
-
         _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, _acceleration * Time.deltaTime);
 
-        ApplyMovement(_horizontalVelocity);
+        ApplyFallbackMovement(_horizontalVelocity);
         TryHitTarget(distance);
     }
 
-    private void ApplyMovement(Vector3 horizontalVelocity)
+    private void StopAgent()
     {
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, _acceleration * Time.deltaTime);
+        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.isStopped = true;
+            return;
+        }
+
+        ApplyFallbackMovement(Vector3.zero);
+    }
+
+    private void ApplyFallbackMovement(Vector3 horizontalVelocity)
+    {
+        UpdateBodyRotation(horizontalVelocity);
+
         if (_characterController != null)
         {
             if (_characterController.isGrounded && _verticalVelocity < 0f)
@@ -254,61 +504,19 @@ public class NextbotFollowPlayer : MonoBehaviour
         transform.position = nextPosition;
     }
 
-    private Transform FindNearestPlayer()
+    private void UpdateBodyRotation(Vector3 horizontalVelocity)
     {
-        Transform nearestPlayer = null;
-        float nearestDistanceSqr = float.PositiveInfinity;
+        Vector3 facingDirection = horizontalVelocity;
+        facingDirection.y = 0f;
 
-        NetworkPlayer[] networkPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
-        for (int i = 0; i < networkPlayers.Length; i++)
+        if (facingDirection.sqrMagnitude <= 0.0001f)
         {
-            NetworkPlayer networkPlayer = networkPlayers[i];
-            if (networkPlayer == null || networkPlayer.transform == transform)
-            {
-                continue;
-            }
-
-            PlayerController networkPlayerController = ResolvePlayerController(networkPlayer.transform);
-            if (networkPlayerController != null && (!networkPlayerController.enabled || networkPlayerController.IsInjuredOrHitReacting()))
-            {
-                continue;
-            }
-
-            float distanceSqr = GetPlanarDistanceSqr(networkPlayer.transform.position, transform.position);
-            if (distanceSqr >= nearestDistanceSqr)
-            {
-                continue;
-            }
-
-            nearestDistanceSqr = distanceSqr;
-            nearestPlayer = networkPlayer.transform;
+            return;
         }
 
-        if (nearestPlayer != null)
-        {
-            return nearestPlayer;
-        }
-
-        PlayerController[] playerControllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
-        for (int i = 0; i < playerControllers.Length; i++)
-        {
-            PlayerController playerController = playerControllers[i];
-            if (playerController == null || !playerController.enabled || playerController.transform == transform || playerController.IsInjuredOrHitReacting())
-            {
-                continue;
-            }
-
-            float distanceSqr = GetPlanarDistanceSqr(playerController.transform.position, transform.position);
-            if (distanceSqr >= nearestDistanceSqr)
-            {
-                continue;
-            }
-
-            nearestDistanceSqr = distanceSqr;
-            nearestPlayer = playerController.transform;
-        }
-
-        return nearestPlayer;
+        Quaternion targetRotation = Quaternion.LookRotation(facingDirection.normalized, Vector3.up);
+        float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
     }
 
     private void TryHitTarget(float distanceToTarget)
@@ -318,8 +526,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        PlayerController targetController = ResolvePlayerController(_target);
-
+        PlayerController targetController = _targetController ?? ResolvePlayerController(_target);
         if (targetController == null || !targetController.enabled || targetController.IsInjuredOrHitReacting())
         {
             return;
@@ -328,7 +535,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (targetController.TriggerNextbotHit(transform.position))
         {
             IgnoreCollisionWithPlayer(targetController);
-            _target = null;
+            ClearTarget();
             _horizontalVelocity = Vector3.zero;
             _nextTargetRefreshTime = 0f;
             _nextHitTime = Time.time + Mathf.Max(0.1f, _hitCooldown);
@@ -459,13 +666,6 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             _ignoredInjuredTargets.Remove(_ignoredTargetsToRestore[i]);
         }
-    }
-
-    private static float GetPlanarDistanceSqr(Vector3 a, Vector3 b)
-    {
-        float deltaX = a.x - b.x;
-        float deltaZ = a.z - b.z;
-        return deltaX * deltaX + deltaZ * deltaZ;
     }
 
     private bool UpdateTargetFacingRotation()
@@ -664,33 +864,77 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
     }
 
-    private Transform ResolveServerTargetTransform(string targetSessionId)
+    private void SetServerVisualState(bool visible)
     {
-        if (string.IsNullOrEmpty(targetSessionId))
+        for (int i = 0; i < _renderers.Length; i++)
         {
-            return null;
-        }
-
-        NetworkPlayer[] networkPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsSortMode.None);
-        for (int i = 0; i < networkPlayers.Length; i++)
-        {
-            NetworkPlayer networkPlayer = networkPlayers[i];
-            if (networkPlayer == null)
+            if (_renderers[i] != null)
             {
-                continue;
-            }
-
-            if (!networkPlayer.TryGetSessionId(out string sessionId))
-            {
-                continue;
-            }
-
-            if (sessionId == targetSessionId)
-            {
-                return networkPlayer.transform;
+                if (_renderers[i] == _rootMeshRenderer)
+                {
+                    _renderers[i].enabled = false;
+                }
+                else
+                {
+                    _renderers[i].enabled = visible;
+                }
             }
         }
 
-        return null;
+        for (int i = 0; i < _colliders.Length; i++)
+        {
+            if (_colliders[i] != null)
+            {
+                _colliders[i].enabled = visible;
+            }
+        }
+
+        UpdateLoopAudioState(visible);
+    }
+
+    private void ConfigureAgentFromCurrentPosition()
+    {
+        if (_navMeshAgent == null)
+        {
+            return;
+        }
+
+        if (TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
+        {
+            _agentVisualOffset = transform.position.y - navMeshPosition.y;
+            _navMeshAgent.baseOffset = _agentVisualOffset;
+        }
+        else
+        {
+            _agentVisualOffset = _navMeshAgent.baseOffset;
+        }
+    }
+
+    private void EnsureAgentOnNavMesh()
+    {
+        if (_navMeshAgent == null || !_navMeshAgent.enabled || _navMeshAgent.isOnNavMesh)
+        {
+            return;
+        }
+
+        if (!TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
+        {
+            return;
+        }
+
+        _navMeshAgent.Warp(navMeshPosition + Vector3.up * _agentVisualOffset);
+    }
+
+    private bool TryGetNearestNavMeshPosition(Vector3 worldPosition, out Vector3 navMeshPosition)
+    {
+        int areaMask = _navMeshAgent != null ? _navMeshAgent.areaMask : NavMesh.AllAreas;
+        if (NavMesh.SamplePosition(worldPosition, out NavMeshHit hit, _navMeshSnapDistance, areaMask))
+        {
+            navMeshPosition = hit.position;
+            return true;
+        }
+
+        navMeshPosition = default;
+        return false;
     }
 }
