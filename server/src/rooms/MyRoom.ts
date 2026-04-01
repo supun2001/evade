@@ -57,6 +57,7 @@ export class MyRoom extends Room<MyRoomState> {
   private pendingSwitchStartedAt = 0;
   private currentTargetLostSince = 0;
   private recentReachableUntil = new Map<string, number>();
+  private lastKnownTargetPosition?: SpawnPoint;
 
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
@@ -225,17 +226,40 @@ export class MyRoom extends Room<MyRoomState> {
       this.evaluateNextbotTargetSelection(now);
     }
 
+    const deltaSeconds = deltaTime / 1000;
     const target = this.getCurrentTarget();
     if (!target) {
+      if (this.lastKnownTargetPosition != null) {
+        this.moveNextbotTowardsSearchPosition(deltaSeconds);
+      } else {
+        nextbot.targetSessionId = "";
+      }
+
+      return;
+    }
+
+    this.rememberTargetPosition(target);
+    nextbot.targetSessionId = target.sessionId;
+    const predictedTarget = this.getPredictedTargetPosition(target);
+    this.moveNextbotTowardsPosition(predictedTarget, deltaSeconds);
+    this.tryInjurePlayer(target);
+  }
+
+  private moveNextbotTowardsSearchPosition(deltaSeconds: number) {
+    const nextbot = this.state.nextbot;
+    if (this.lastKnownTargetPosition == null) {
       nextbot.targetSessionId = "";
       return;
     }
 
-    nextbot.targetSessionId = target.sessionId;
-    const predictedTarget = this.getPredictedTargetPosition(target);
-    const deltaSeconds = deltaTime / 1000;
-    this.moveNextbotTowardsPosition(predictedTarget, deltaSeconds);
-    this.tryInjurePlayer(target);
+    this.moveNextbotTowardsPosition({
+      x: this.lastKnownTargetPosition.x,
+      z: this.lastKnownTargetPosition.z,
+      distance: Math.hypot(
+        this.lastKnownTargetPosition.x - this.state.nextbot.x,
+        this.lastKnownTargetPosition.z - this.state.nextbot.z),
+    }, deltaSeconds);
+    nextbot.targetSessionId = "";
   }
 
   private initializeNextbot() {
@@ -310,7 +334,7 @@ export class MyRoom extends Room<MyRoomState> {
       if (bestCandidate != null) {
         this.assignCurrentTarget(bestCandidate.player.sessionId, now);
       } else {
-        this.clearNextbotTargetingState();
+        this.clearCurrentTargetSelection();
       }
       nextbot.targetSessionId = this.currentTargetSessionId;
       return;
@@ -327,7 +351,7 @@ export class MyRoom extends Room<MyRoomState> {
       if (bestCandidate != null) {
         this.assignCurrentTarget(bestCandidate.player.sessionId, now);
       } else {
-        this.clearNextbotTargetingState();
+        this.clearCurrentTargetSelection();
       }
       nextbot.targetSessionId = this.currentTargetSessionId;
       return;
@@ -551,13 +575,26 @@ export class MyRoom extends Room<MyRoomState> {
     return this.state.players.get(this.currentTargetSessionId);
   }
 
-  private clearNextbotTargetingState() {
+  private clearCurrentTargetSelection() {
     this.currentTargetSessionId = "";
     this.targetLockedUntil = 0;
     this.pendingSwitchSessionId = "";
     this.pendingSwitchStartedAt = 0;
     this.currentTargetLostSince = 0;
     this.state.nextbot.targetSessionId = "";
+  }
+
+  private clearNextbotTargetingState() {
+    this.clearCurrentTargetSelection();
+    this.lastKnownTargetPosition = undefined;
+  }
+
+  private rememberTargetPosition(target: Player) {
+    this.lastKnownTargetPosition = {
+      x: target.x,
+      y: this.state.nextbot.y,
+      z: target.z,
+    };
   }
 
   private getSafePlayerSpawnPosition() {
