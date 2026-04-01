@@ -219,20 +219,25 @@ public class NetworkPlayer : MonoBehaviour
                 animator.SetBool(JumpHash, playerState.isJumping);
                 animator.SetFloat(VerticalSpeedHash, playerState.velocityY);
             }
+        }
 
-            if (controller != null)
+        if (controller != null)
+        {
+            controller.ApplyRemoteVisualState(
+                new Vector2(playerState.moveInputX, playerState.moveInputY),
+                playerState.isInjured,
+                playerState.isCrouching);
+
+            controller.ApplyRemoteHitReactionState(
+                playerState.isHitReacting,
+                playerState.hitReactionTimeRemaining,
+                playerState.hitReactionPitch,
+                playerState.hitReactionRoll,
+                playerState.hitReactionSeed);
+
+            if (!playerState.isHitReacting)
             {
-                controller.ApplyRemoteHitReactionState(
-                    playerState.isHitReacting,
-                    playerState.hitReactionTimeRemaining,
-                    playerState.hitReactionPitch,
-                    playerState.hitReactionRoll,
-                    playerState.hitReactionSeed);
-
-                if (!playerState.isHitReacting)
-                {
-                    controller.ApplyRemoteVisualYaw(playerState.visualYaw);
-                }
+                controller.ApplyRemoteVisualYaw(playerState.visualYaw);
             }
         }
     }

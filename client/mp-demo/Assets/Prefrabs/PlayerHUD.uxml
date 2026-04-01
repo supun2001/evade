@@ -53,6 +53,49 @@
             "
         />
         <ui:VisualElement
+            name="injured-interaction-prompt"
+            style="
+                display: none;
+                position: absolute;
+                left: 50%;
+                bottom: 104px;
+                translate: -50% 0;
+                min-width: 340px;
+                max-width: 420px;
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 14px;
+                padding-bottom: 14px;
+                background-color: rgba(10, 12, 18, 0.82);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                border-bottom-left-radius: 14px;
+                border-bottom-right-radius: 14px;
+                align-items: center;
+            "
+        >
+            <ui:Label
+                text="Injured Player Nearby"
+                style="
+                    color: rgb(255, 244, 204);
+                    font-size: 22px;
+                    -unity-font-style: bold;
+                    margin-bottom: 8px;
+                    unity-text-align: middle-center;
+                "
+            />
+            <ui:Label
+                name="injured-interaction-prompt-label"
+                text="Press E to Carry   Press Q to Revive"
+                style="
+                    color: rgb(255, 255, 255);
+                    font-size: 18px;
+                    unity-text-align: middle-center;
+                    white-space: normal;
+                "
+            />
+        </ui:VisualElement>
+        <ui:VisualElement
             name="pause-menu"
             style="
                 display: none;

@@ -60,6 +60,11 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _downedControllerRadius = 0.7f;
     [SerializeField] private Vector3 _downedControllerCenter = new Vector3(0f, 0.82f, 0f);
     [SerializeField] private float _downedControllerBlend = 12f;
+    [SerializeField] private bool _enableDebugInjureHotkey = true;
+
+    [Header("Injured Interaction Prompt")]
+    [SerializeField] private float _injuredInteractionPromptDistance = 3f;
+    [SerializeField] private float _injuredInteractionPromptHeightTolerance = 1.75f;
 
     [Header("Bhop & Strafing")]
     [SerializeField] private bool _enableBunnyHop = true;
@@ -148,6 +153,8 @@ public class PlayerController : MonoBehaviour
     private UIDocument _playerHudDocument;
     private Label _speedLabel;
     private Label _animationDebugLabel;
+    private VisualElement _injuredInteractionPromptElement;
+    private Label _injuredInteractionPromptLabel;
     private VisualElement _pauseMenuElement;
     private Button _continueButton;
     private Button _mainMenuButton;
@@ -309,11 +316,13 @@ public class PlayerController : MonoBehaviour
 
         _jumpedThisFrame = false;
         HandlePauseMenuToggle();
+        HandleDebugInjureHotkey();
         EnforceInjuredCameraView();
         UpdateCrouchState();
         UpdateDownedCollisionShape();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
+        UpdateInjuredInteractionPrompt();
 
         HandleCursorLock();
         HandleViewToggle();
@@ -378,6 +387,51 @@ public class PlayerController : MonoBehaviour
                     : CameraViewMode.FirstPerson;
 
             SetCameraView(nextView);
+        }
+    }
+
+    private void HandleDebugInjureHotkey()
+    {
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        if (!_enableDebugInjureHotkey || _isPauseMenuOpen || Keyboard.current == null || !Keyboard.current.fKey.wasPressedThisFrame)
+        {
+            return;
+        }
+
+        SetDebugInjuredState(!IsInjured());
+#endif
+    }
+
+    private void SetDebugInjuredState(bool injured)
+    {
+        if (_playerAnimation == null)
+        {
+            return;
+        }
+
+        _isHitReacting = false;
+        _nextbotHitReactionTimer = 0f;
+        _nextbotHitReactionPitch = 0f;
+        _nextbotHitReactionRoll = 0f;
+        _nextbotHitAngularVelocityPitch = 0f;
+        _nextbotHitAngularVelocityRoll = 0f;
+        _nextbotHitImpactVelocity = Vector3.zero;
+        _nextbotHitImpactTimer = 0f;
+        _nextbotHitReactionSeed = 0f;
+        _lastAppliedRemoteHitReactionSeed = float.NaN;
+        _runHeldTime = 0f;
+        _isCrouching = false;
+        _isWallRunning = false;
+        _wallRunSide = 0;
+        _wallRunNormal = Vector3.zero;
+        _wallRunContactHoldTimer = 0f;
+        _wallRunSprintGraceTimer = 0f;
+        _playerAnimation.SetInjured(injured);
+        ClearHitReactionTiltPreservingVisualYaw();
+
+        if (injured)
+        {
+            SetCameraView(CameraViewMode.ThirdPerson, true);
         }
     }
 
@@ -755,6 +809,8 @@ public class PlayerController : MonoBehaviour
 
         _speedLabel = root.Q<Label>("speed-label");
         _animationDebugLabel = root.Q<Label>("animation-debug-label");
+        _injuredInteractionPromptElement = root.Q<VisualElement>("injured-interaction-prompt");
+        _injuredInteractionPromptLabel = root.Q<Label>("injured-interaction-prompt-label");
         _pauseMenuElement = root.Q<VisualElement>("pause-menu");
         _continueButton = root.Q<Button>("continue-button");
         _mainMenuButton = root.Q<Button>("main-menu-button");
@@ -867,6 +923,93 @@ public class PlayerController : MonoBehaviour
 
         _animationDebugLabel.text = _playerAnimation.GetAnimatorDebugInfo();
 #endif
+    }
+
+    private void UpdateInjuredInteractionPrompt()
+    {
+        if (_injuredInteractionPromptElement == null)
+        {
+            CacheHudElements();
+            if (_injuredInteractionPromptElement == null)
+            {
+                return;
+            }
+        }
+
+        if (_isPauseMenuOpen || IsInjuredOrHitReacting())
+        {
+            SetInjuredInteractionPromptVisible(false);
+            return;
+        }
+
+        if (TryGetNearbyInjuredPlayer(out _, out float distanceToPlayer))
+        {
+            if (_injuredInteractionPromptLabel != null)
+            {
+                _injuredInteractionPromptLabel.text = $"Press E to Carry   Press Q to Revive\nDistance {distanceToPlayer:0.0}m";
+            }
+
+            SetInjuredInteractionPromptVisible(true);
+            return;
+        }
+
+        SetInjuredInteractionPromptVisible(false);
+    }
+
+    private void SetInjuredInteractionPromptVisible(bool visible)
+    {
+        if (_injuredInteractionPromptElement == null)
+        {
+            return;
+        }
+
+        _injuredInteractionPromptElement.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+    }
+
+    private bool TryGetNearbyInjuredPlayer(out PlayerAnimation injuredPlayerAnimation, out float distanceToPlayer)
+    {
+        injuredPlayerAnimation = null;
+        distanceToPlayer = float.PositiveInfinity;
+
+        if (_transform == null)
+        {
+            return false;
+        }
+
+        PlayerAnimation[] playerAnimations = FindObjectsByType<PlayerAnimation>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        Vector3 localPosition = _transform.position;
+
+        for (int i = 0; i < playerAnimations.Length; i++)
+        {
+            PlayerAnimation candidate = playerAnimations[i];
+            if (candidate == null || candidate == _playerAnimation || !candidate.IsInjuredActive)
+            {
+                continue;
+            }
+
+            Transform candidateTransform = candidate.transform;
+            if (candidateTransform == null || candidateTransform == _transform)
+            {
+                continue;
+            }
+
+            Vector3 offset = candidateTransform.position - localPosition;
+            if (Mathf.Abs(offset.y) > _injuredInteractionPromptHeightTolerance)
+            {
+                continue;
+            }
+
+            float planarDistance = new Vector2(offset.x, offset.z).magnitude;
+            if (planarDistance > _injuredInteractionPromptDistance || planarDistance >= distanceToPlayer)
+            {
+                continue;
+            }
+
+            injuredPlayerAnimation = candidate;
+            distanceToPlayer = planarDistance;
+        }
+
+        return injuredPlayerAnimation != null;
     }
 
     private void SetPauseMenuVisible(bool visible)
@@ -1834,10 +1977,14 @@ public class PlayerController : MonoBehaviour
         {
             UpdateDirectionalVisualFacing(movementInput);
             ResetNextbotHitReactionLimbPose();
-            return;
+        }
+        else
+        {
+            ResetInjuredVisualRootRotation();
         }
 
-        ResetInjuredVisualRootRotation();
+        UpdateDownedCollisionShape();
+        UpdateDownedVisualRootPosition();
     }
 
     public float GetVisualYaw()

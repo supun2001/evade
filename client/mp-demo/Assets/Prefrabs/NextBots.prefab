@@ -149,6 +149,18 @@ MonoBehaviour:
   _eyeHeight: 1.25
   _targetEyeHeight: 1
   _navMeshSnapDistance: 8
+  _useOffMeshLinks: 1
+  _offMeshLinkDuration: 0.35
+  _offMeshLinkArcHeight: 1.2
+  _allowLedgeJump: 1
+  _jumpForwardSpeed: 8
+  _jumpUpwardSpeed: 5
+  _maxJumpDistance: 6
+  _maxJumpUpHeight: 2.5
+  _maxJumpDownHeight: 8
+  _landingSnapDistance: 1.5
+  _edgeJumpMinDrop: 0.75
+  _edgeStuckVelocity: 0.2
   _lockToStartingHeight: 1
   _gravity: 20
   _hitDistance: 1.6
@@ -180,7 +192,7 @@ NavMeshAgent:
   avoidancePriority: 50
   m_AngularSpeed: 450
   m_StoppingDistance: 1.4
-  m_AutoTraverseOffMeshLink: 1
+  m_AutoTraverseOffMeshLink: 0
   m_AutoBraking: 0
   m_AutoRepath: 1
   m_Height: 2

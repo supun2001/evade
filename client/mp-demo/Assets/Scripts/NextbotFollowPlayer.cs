@@ -31,6 +31,20 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     [Header("NavMesh")]
     [SerializeField] private float _navMeshSnapDistance = 8f;
+    [SerializeField] private bool _useOffMeshLinks = true;
+    [SerializeField] private float _offMeshLinkDuration = 0.35f;
+    [SerializeField] private float _offMeshLinkArcHeight = 1.2f;
+
+    [Header("Jump")]
+    [SerializeField] private bool _allowLedgeJump = true;
+    [SerializeField] private float _jumpForwardSpeed = 8f;
+    [SerializeField] private float _jumpUpwardSpeed = 5f;
+    [SerializeField] private float _maxJumpDistance = 6f;
+    [SerializeField] private float _maxJumpUpHeight = 2.5f;
+    [SerializeField] private float _maxJumpDownHeight = 8f;
+    [SerializeField] private float _landingSnapDistance = 1.5f;
+    [SerializeField] private float _edgeJumpMinDrop = 0.75f;
+    [SerializeField] private float _edgeStuckVelocity = 0.2f;
 
     [Header("Grounding")]
     [SerializeField] private bool _lockToStartingHeight = true;
@@ -87,6 +101,12 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Transform _pendingSwitchTarget;
     private float _pendingSwitchStartedAt;
     private float _agentVisualOffset;
+    private bool _isJumping;
+    private Vector3 _jumpVelocity;
+    private bool _isTraversingOffMeshLink;
+    private Vector3 _offMeshLinkStart;
+    private Vector3 _offMeshLinkEnd;
+    private float _offMeshLinkProgress;
 
     private void Awake()
     {
@@ -121,6 +141,18 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        if (_isJumping)
+        {
+            UpdateJumpMovement();
+            return;
+        }
+
+        if (_isTraversingOffMeshLink)
+        {
+            UpdateOffMeshLinkTraversal();
+            return;
+        }
+
         RefreshTargetIfNeeded();
         UpdateMovement();
     }
@@ -149,6 +181,9 @@ public class NextbotFollowPlayer : MonoBehaviour
             ClearTarget();
             StopAgent();
             _horizontalVelocity = Vector3.zero;
+            _isJumping = false;
+            _jumpVelocity = Vector3.zero;
+            _isTraversingOffMeshLink = false;
             return true;
         }
 
@@ -346,12 +381,12 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!NavMesh.CalculatePath(sourcePosition, destinationPosition, _navMeshAgent.areaMask, _pathBuffer))
         {
-            return float.PositiveInfinity;
+            return TryGetJumpDistance(destination, out float jumpDistance) ? jumpDistance : float.PositiveInfinity;
         }
 
         if (_pathBuffer.status != NavMeshPathStatus.PathComplete || _pathBuffer.corners.Length < 2)
         {
-            return float.PositiveInfinity;
+            return TryGetJumpDistance(destination, out float jumpDistance) ? jumpDistance : float.PositiveInfinity;
         }
 
         float totalDistance = 0f;
@@ -426,9 +461,26 @@ public class NextbotFollowPlayer : MonoBehaviour
             _navMeshAgent.stoppingDistance = _stoppingDistance;
             _navMeshAgent.isStopped = false;
 
-            if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 navMeshTargetPosition))
+            Vector3 navMeshTargetPosition = targetPosition;
+            bool hasNavMeshTargetPosition = TryGetNearestNavMeshPosition(targetPosition, out navMeshTargetPosition);
+            if (hasNavMeshTargetPosition)
             {
                 _navMeshAgent.SetDestination(navMeshTargetPosition);
+            }
+
+            bool pathBlocked = !_navMeshAgent.pathPending
+                && (_navMeshAgent.pathStatus == NavMeshPathStatus.PathPartial
+                    || _navMeshAgent.pathStatus == NavMeshPathStatus.PathInvalid);
+            bool edgeJumpNeeded = ShouldJumpFromEdge(targetPosition, hasNavMeshTargetPosition ? navMeshTargetPosition : targetPosition);
+            if ((pathBlocked || edgeJumpNeeded) && TryStartJumpToward(targetPosition))
+            {
+                return;
+            }
+
+            if (_useOffMeshLinks && _navMeshAgent.isOnOffMeshLink)
+            {
+                BeginOffMeshLinkTraversal();
+                return;
             }
 
             Vector3 velocity = _navMeshAgent.desiredVelocity;
@@ -456,6 +508,74 @@ public class NextbotFollowPlayer : MonoBehaviour
         TryHitTarget(distance);
     }
 
+    private bool TryStartJumpToward(Vector3 targetPosition)
+    {
+        if (!_allowLedgeJump || !TryGetJumpDirection(targetPosition, out Vector3 jumpDirection))
+        {
+            return false;
+        }
+
+        _isJumping = true;
+        _jumpVelocity = jumpDirection * _jumpForwardSpeed;
+        _jumpVelocity.y = _jumpUpwardSpeed;
+        _horizontalVelocity = jumpDirection * _jumpForwardSpeed;
+
+        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.isStopped = true;
+            _navMeshAgent.ResetPath();
+        }
+
+        return true;
+    }
+
+    private void UpdateJumpMovement()
+    {
+        _jumpVelocity.y -= _gravity * Time.deltaTime;
+        transform.position += _jumpVelocity * Time.deltaTime;
+
+        Vector3 horizontalVelocity = new Vector3(_jumpVelocity.x, 0f, _jumpVelocity.z);
+        _horizontalVelocity = horizontalVelocity;
+        UpdateBodyRotation(horizontalVelocity);
+
+        if (_target != null)
+        {
+            Vector3 targetPosition = _target.position;
+            TryHitTarget(Vector3.Distance(
+                new Vector3(targetPosition.x, 0f, targetPosition.z),
+                new Vector3(transform.position.x, 0f, transform.position.z)));
+        }
+
+        if (_jumpVelocity.y > 0f)
+        {
+            return;
+        }
+
+        if (!TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
+        {
+            return;
+        }
+
+        if (Mathf.Abs(transform.position.y - navMeshPosition.y) > _landingSnapDistance)
+        {
+            return;
+        }
+
+        if (_navMeshAgent != null && _navMeshAgent.enabled)
+        {
+            _navMeshAgent.Warp(navMeshPosition);
+            _navMeshAgent.isStopped = false;
+        }
+        else
+        {
+            transform.position = navMeshPosition;
+        }
+
+        _isJumping = false;
+        _jumpVelocity = Vector3.zero;
+        _horizontalVelocity = Vector3.zero;
+    }
+
     private void StopAgent()
     {
         _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, Vector3.zero, _acceleration * Time.deltaTime);
@@ -466,6 +586,56 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         ApplyFallbackMovement(Vector3.zero);
+    }
+
+    private void BeginOffMeshLinkTraversal()
+    {
+        if (_navMeshAgent == null || !_navMeshAgent.enabled || !_navMeshAgent.isOnOffMeshLink)
+        {
+            return;
+        }
+
+        OffMeshLinkData linkData = _navMeshAgent.currentOffMeshLinkData;
+        _offMeshLinkStart = transform.position;
+        _offMeshLinkEnd = linkData.endPos;
+        _offMeshLinkProgress = 0f;
+        _isTraversingOffMeshLink = true;
+        _navMeshAgent.isStopped = true;
+        _navMeshAgent.updatePosition = false;
+    }
+
+    private void UpdateOffMeshLinkTraversal()
+    {
+        if (_navMeshAgent == null || !_navMeshAgent.enabled)
+        {
+            _isTraversingOffMeshLink = false;
+            return;
+        }
+
+        float duration = Mathf.Max(0.01f, _offMeshLinkDuration);
+        _offMeshLinkProgress = Mathf.Clamp01(_offMeshLinkProgress + Time.deltaTime / duration);
+
+        Vector3 nextPosition = Vector3.Lerp(_offMeshLinkStart, _offMeshLinkEnd, _offMeshLinkProgress);
+        float arc = Mathf.Sin(_offMeshLinkProgress * Mathf.PI) * _offMeshLinkArcHeight;
+        nextPosition.y += arc;
+        transform.position = nextPosition;
+
+        Vector3 planarVelocity = _offMeshLinkEnd - _offMeshLinkStart;
+        planarVelocity.y = 0f;
+        _horizontalVelocity = planarVelocity.normalized * _jumpForwardSpeed;
+        UpdateBodyRotation(_horizontalVelocity);
+
+        if (_offMeshLinkProgress < 1f)
+        {
+            return;
+        }
+
+        _isTraversingOffMeshLink = false;
+        _horizontalVelocity = Vector3.zero;
+        _navMeshAgent.Warp(_offMeshLinkEnd);
+        _navMeshAgent.CompleteOffMeshLink();
+        _navMeshAgent.updatePosition = true;
+        _navMeshAgent.isStopped = false;
     }
 
     private void ApplyFallbackMovement(Vector3 horizontalVelocity)
@@ -520,6 +690,91 @@ public class NextbotFollowPlayer : MonoBehaviour
         Quaternion targetRotation = Quaternion.LookRotation(facingDirection.normalized, Vector3.up);
         float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
+    }
+
+    private bool TryGetJumpDistance(Vector3 targetPosition, out float jumpDistance)
+    {
+        if (!TryGetJumpDirection(targetPosition, out Vector3 jumpDirection))
+        {
+            jumpDistance = 0f;
+            return false;
+        }
+
+        Vector3 delta = targetPosition - transform.position;
+        delta.y = 0f;
+        jumpDistance = delta.magnitude;
+        return jumpDistance > 0.001f;
+    }
+
+    private bool TryGetJumpDirection(Vector3 targetPosition, out Vector3 jumpDirection)
+    {
+        jumpDirection = Vector3.zero;
+        if (!_allowLedgeJump)
+        {
+            return false;
+        }
+
+        Vector3 delta = targetPosition - transform.position;
+        float verticalDelta = delta.y;
+        delta.y = 0f;
+        float planarDistance = delta.magnitude;
+
+        if (planarDistance <= _stoppingDistance || planarDistance > _maxJumpDistance)
+        {
+            return false;
+        }
+
+        if (verticalDelta > _maxJumpUpHeight || verticalDelta < -_maxJumpDownHeight)
+        {
+            return false;
+        }
+
+        bool isDropJump = verticalDelta <= -_edgeJumpMinDrop;
+        int mask = _wallDetectionLayers.value != 0 ? _wallDetectionLayers.value : Physics.DefaultRaycastLayers;
+        Vector3 origin = transform.position + Vector3.up * _eyeHeight;
+        Vector3 target = targetPosition + Vector3.up * Mathf.Min(_targetEyeHeight, 0.5f);
+        Vector3 rayDirection = target - origin;
+        float rayDistance = rayDirection.magnitude;
+        if (!isDropJump
+            && rayDistance > 0.001f
+            && Physics.Raycast(origin, rayDirection / rayDistance, rayDistance, mask, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        jumpDirection = delta / planarDistance;
+        return true;
+    }
+
+    private bool ShouldJumpFromEdge(Vector3 targetPosition, Vector3 navMeshTargetPosition)
+    {
+        if (!_allowLedgeJump || _navMeshAgent == null || !_navMeshAgent.enabled || !_navMeshAgent.isOnNavMesh)
+        {
+            return false;
+        }
+
+        Vector3 toTarget = targetPosition - transform.position;
+        float verticalDelta = toTarget.y;
+        toTarget.y = 0f;
+        float planarDistanceToTarget = toTarget.magnitude;
+        if (planarDistanceToTarget <= _stoppingDistance || planarDistanceToTarget > _maxJumpDistance)
+        {
+            return false;
+        }
+
+        if (verticalDelta > -_edgeJumpMinDrop || verticalDelta < -_maxJumpDownHeight)
+        {
+            return false;
+        }
+
+        Vector3 toNavMeshTarget = navMeshTargetPosition - transform.position;
+        toNavMeshTarget.y = 0f;
+        float planarDistanceToNavMeshTarget = toNavMeshTarget.magnitude;
+        bool navMeshStopsAtEdge = planarDistanceToNavMeshTarget <= _stoppingDistance + 0.35f;
+        bool agentStalled = _navMeshAgent.desiredVelocity.sqrMagnitude <= _edgeStuckVelocity * _edgeStuckVelocity
+            && _navMeshAgent.velocity.sqrMagnitude <= _edgeStuckVelocity * _edgeStuckVelocity;
+
+        return navMeshStopsAtEdge && agentStalled;
     }
 
     private void TryHitTarget(float distanceToTarget)
