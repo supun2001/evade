@@ -43,7 +43,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     [Header("Billboard")]
     [SerializeField] private bool _faceTargetPlayer = false;
     [SerializeField] private bool _billboardToCamera = true;
-    [SerializeField] private Vector3 _visualLocalOffset = new Vector3(0f, 2.1f, 0f);
+    [SerializeField] private Vector3 _visualLocalOffset = Vector3.zero;
+    [SerializeField] private float _visualGroundPadding = 0.02f;
     [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
 
     [Header("Audio")]
@@ -742,14 +743,14 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (existingVisual != null)
         {
             _visualTransform = existingVisual;
-            _visualTransform.localPosition = _visualLocalOffset;
+            _visualTransform.localPosition = GetVisualLocalPosition(rootMeshFilter.sharedMesh);
             rootMeshRenderer.enabled = false;
             return;
         }
 
         GameObject visualObject = new GameObject("NextbotVisual");
         visualObject.transform.SetParent(transform, false);
-        visualObject.transform.localPosition = _visualLocalOffset;
+        visualObject.transform.localPosition = GetVisualLocalPosition(rootMeshFilter.sharedMesh);
         visualObject.transform.localRotation = Quaternion.identity;
         visualObject.transform.localScale = Vector3.one;
 
@@ -765,6 +766,42 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         rootMeshRenderer.enabled = false;
         _visualTransform = visualObject.transform;
+    }
+
+    private Vector3 GetVisualLocalPosition(Mesh mesh)
+    {
+        if (mesh == null)
+        {
+            return _visualLocalOffset;
+        }
+
+        Bounds bounds = mesh.bounds;
+        Vector3 center = bounds.center;
+        Vector3 extents = bounds.extents;
+        Quaternion baseRotation = Quaternion.Euler(_billboardRotationOffsetEuler);
+        float lowestY = float.PositiveInfinity;
+
+        for (int x = -1; x <= 1; x += 2)
+        {
+            for (int y = -1; y <= 1; y += 2)
+            {
+                for (int z = -1; z <= 1; z += 2)
+                {
+                    Vector3 corner = center + Vector3.Scale(extents, new Vector3(x, y, z));
+                    Vector3 rotatedCorner = baseRotation * corner;
+                    if (rotatedCorner.y < lowestY)
+                    {
+                        lowestY = rotatedCorner.y;
+                    }
+                }
+            }
+        }
+
+        float liftFromPivot = -lowestY + _visualGroundPadding;
+        return new Vector3(
+            _visualLocalOffset.x,
+            liftFromPivot + _visualLocalOffset.y,
+            _visualLocalOffset.z);
     }
 
     private Camera ResolveTargetCamera()

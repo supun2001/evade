@@ -155,7 +155,8 @@ MonoBehaviour:
   _hitCooldown: 1.25
   _faceTargetPlayer: 0
   _billboardToCamera: 1
-  _visualLocalOffset: {x: 0, y: 2.1, z: 0}
+  _visualLocalOffset: {x: 0, y: 0, z: 0}
+  _visualGroundPadding: 0.02
   _billboardRotationOffsetEuler: {x: 0, y: 90, z: -90}
   _loopAudioSource: {fileID: 0}
   _loopClip: {fileID: 8300000, guid: 49fc7128f4e6147c9a4276d415b0aadc, type: 3}
