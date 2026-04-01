@@ -68,7 +68,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  - {fileID: 2100000, guid: d8e2c0b2db1b74327b8c2af38a2284ec, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -126,8 +126,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4f8ac8173af485daa8544c56da89bd5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NextbotFollowPlayer
-  _moveSpeed: 8
-  _acceleration: 18
+  _moveSpeed: 200
+  _acceleration: 100
   _rotationSpeed: 14
   _stoppingDistance: 1.4
   _targetRefreshInterval: 0.25
@@ -139,3 +139,10 @@ MonoBehaviour:
   _faceTargetPlayer: 0
   _billboardToCamera: 1
   _billboardRotationOffsetEuler: {x: 0, y: 90, z: -90}
+  _loopAudioSource: {fileID: 0}
+  _loopClip: {fileID: 8300000, guid: 49fc7128f4e6147c9a4276d415b0aadc, type: 3}
+  _playLoopWhileActive: 1
+  _loopVolume: 1
+  _soundMinDistance: 3
+  _soundMaxDistance: 24
+  _soundRolloffMode: 1

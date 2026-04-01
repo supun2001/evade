@@ -24,6 +24,15 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private bool _billboardToCamera = true;
     [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
 
+    [Header("Audio")]
+    [SerializeField] private AudioSource _loopAudioSource;
+    [SerializeField] private AudioClip _loopClip;
+    [SerializeField] private bool _playLoopWhileActive = true;
+    [SerializeField, Range(0f, 1f)] private float _loopVolume = 1f;
+    [SerializeField] private float _soundMinDistance = 3f;
+    [SerializeField] private float _soundMaxDistance = 24f;
+    [SerializeField] private AudioRolloffMode _soundRolloffMode = AudioRolloffMode.Linear;
+
     private CharacterController _characterController;
     private Transform _target;
     private Vector3 _horizontalVelocity;
@@ -34,6 +43,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Camera _targetCamera;
     private Collider[] _nextbotColliders = System.Array.Empty<Collider>();
     private readonly HashSet<CharacterController> _ignoredInjuredTargets = new HashSet<CharacterController>();
+    private readonly List<CharacterController> _ignoredTargetsToRestore = new List<CharacterController>();
     private Renderer[] _renderers = System.Array.Empty<Renderer>();
     private Collider[] _colliders = System.Array.Empty<Collider>();
     private bool _hasAppliedServerState;
@@ -45,6 +55,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _characterController = GetComponent<CharacterController>();
         _lockedHeight = transform.position.y;
         EnsureVisualBillboardChild();
+        EnsureLoopAudioSource();
         _nextbotColliders = GetComponentsInChildren<Collider>(true);
         _renderers = GetComponentsInChildren<Renderer>(true);
         _colliders = GetComponentsInChildren<Collider>(true);
@@ -52,6 +63,8 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void Update()
     {
+        SyncIgnoredTargets();
+
         if (UpdateFromServerState())
         {
             return;
@@ -177,6 +190,8 @@ public class NextbotFollowPlayer : MonoBehaviour
                 _colliders[i].enabled = visible;
             }
         }
+
+        UpdateLoopAudioState(visible);
     }
 
     private void UpdateMovement()
@@ -363,6 +378,89 @@ public class NextbotFollowPlayer : MonoBehaviour
         _ignoredInjuredTargets.Add(targetCharacterController);
     }
 
+    private void SyncIgnoredTargets()
+    {
+        PlayerController[] playerControllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        for (int i = 0; i < playerControllers.Length; i++)
+        {
+            PlayerController playerController = playerControllers[i];
+            if (playerController == null || !playerController.enabled)
+            {
+                continue;
+            }
+
+            CharacterController targetCharacterController = playerController.GetCharacterController();
+            if (targetCharacterController == null)
+            {
+                continue;
+            }
+
+            bool shouldIgnore = playerController.IsInjuredOrHitReacting();
+            bool isAlreadyIgnored = _ignoredInjuredTargets.Contains(targetCharacterController);
+
+            if (shouldIgnore && !isAlreadyIgnored)
+            {
+                for (int colliderIndex = 0; colliderIndex < _nextbotColliders.Length; colliderIndex++)
+                {
+                    Collider nextbotCollider = _nextbotColliders[colliderIndex];
+                    if (nextbotCollider == null)
+                    {
+                        continue;
+                    }
+
+                    Physics.IgnoreCollision(nextbotCollider, targetCharacterController, true);
+                }
+
+                _ignoredInjuredTargets.Add(targetCharacterController);
+            }
+        }
+
+        if (_ignoredInjuredTargets.Count == 0)
+        {
+            return;
+        }
+
+        _ignoredTargetsToRestore.Clear();
+
+        foreach (CharacterController ignoredController in _ignoredInjuredTargets)
+        {
+            if (ignoredController == null)
+            {
+                _ignoredTargetsToRestore.Add(ignoredController);
+                continue;
+            }
+
+            PlayerController playerController = ignoredController.GetComponent<PlayerController>();
+            if (playerController == null)
+            {
+                playerController = ignoredController.GetComponentInParent<PlayerController>();
+            }
+
+            if (playerController != null && playerController.IsInjuredOrHitReacting())
+            {
+                continue;
+            }
+
+            for (int i = 0; i < _nextbotColliders.Length; i++)
+            {
+                Collider nextbotCollider = _nextbotColliders[i];
+                if (nextbotCollider == null || ignoredController == null)
+                {
+                    continue;
+                }
+
+                Physics.IgnoreCollision(nextbotCollider, ignoredController, false);
+            }
+
+            _ignoredTargetsToRestore.Add(ignoredController);
+        }
+
+        for (int i = 0; i < _ignoredTargetsToRestore.Count; i++)
+        {
+            _ignoredInjuredTargets.Remove(_ignoredTargetsToRestore[i]);
+        }
+    }
+
     private static float GetPlanarDistanceSqr(Vector3 a, Vector3 b)
     {
         float deltaX = a.x - b.x;
@@ -517,6 +615,53 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return null;
+    }
+
+    private void EnsureLoopAudioSource()
+    {
+        if (_loopAudioSource == null)
+        {
+            _loopAudioSource = GetComponent<AudioSource>();
+        }
+
+        if (_loopAudioSource == null)
+        {
+            _loopAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        if (_loopClip != null)
+        {
+            _loopAudioSource.clip = _loopClip;
+        }
+
+        _loopAudioSource.playOnAwake = false;
+        _loopAudioSource.loop = true;
+        _loopAudioSource.spatialBlend = 1f;
+        _loopAudioSource.rolloffMode = _soundRolloffMode;
+        _loopAudioSource.minDistance = _soundMinDistance;
+        _loopAudioSource.maxDistance = _soundMaxDistance;
+        _loopAudioSource.volume = _loopVolume;
+        _loopAudioSource.dopplerLevel = 0f;
+    }
+
+    private void UpdateLoopAudioState(bool isActive)
+    {
+        if (_loopAudioSource == null || !_playLoopWhileActive || _loopAudioSource.clip == null)
+        {
+            return;
+        }
+
+        if (isActive)
+        {
+            if (!_loopAudioSource.isPlaying)
+            {
+                _loopAudioSource.Play();
+            }
+        }
+        else if (_loopAudioSource.isPlaying)
+        {
+            _loopAudioSource.Stop();
+        }
     }
 
     private Transform ResolveServerTargetTransform(string targetSessionId)
