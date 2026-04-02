@@ -586,15 +586,22 @@ public class PlayerController : MonoBehaviour
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, minPitch, maxPitch);
 
-        _playerRotationY += lookSenseH * lookInput.x;
+        bool allowBodyLookRotation = !IsInjured() && !_isBeingCarried;
+        if (allowBodyLookRotation)
+        {
+            _playerRotationY += lookSenseH * lookInput.x;
+            _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
+        }
 
-        _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
-
-        if (IsInjured())
+        if (_isBeingCarried)
+        {
+            ResetInjuredVisualRootRotation();
+        }
+        else if (IsInjured())
         {
             UpdateInjuredFacing();
         }
-        else if (IsCrouching())
+        else if (IsCrouching() || _isCarryingPlayer)
         {
             UpdateCrouchFacing();
         }
@@ -604,7 +611,8 @@ public class PlayerController : MonoBehaviour
         }
 
         UpdateDownedVisualRootPosition();
-        _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
+        float cameraYawOffset = allowBodyLookRotation ? 0f : _cameraRotation.x;
+        _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, cameraYawOffset, 0f);
         UpdateSprintCameraBob();
         UpdateFirstPersonWallRunCameraPose();
         ResolveCameraWallCollision();
@@ -1221,6 +1229,7 @@ public class PlayerController : MonoBehaviour
             _verticalVelocity = 0f;
             _runHeldTime = 0f;
             _isCrouching = false;
+            _jumpedThisFrame = false;
             StopWallRun();
             _wallRunSprintGraceTimer = 0f;
         }
@@ -1252,27 +1261,65 @@ public class PlayerController : MonoBehaviour
             targetPosition = carrierTransform.TransformPoint(_carriedPlayerOffset);
         }
 
-        targetRotation = Quaternion.Euler(0f, carrierTransform.eulerAngles.y, 0f);
+        if (carrierController != null && carrierController.TryGetCarryFacingRotation(out Quaternion carryFacingRotation))
+        {
+            targetRotation = carryFacingRotation;
+        }
+        else
+        {
+            targetRotation = Quaternion.Euler(0f, carrierTransform.eulerAngles.y, 0f);
+        }
         return true;
     }
 
     public bool TryGetCarryAnchorPose(out Vector3 targetPosition)
     {
-        CacheArmTransforms();
+        Transform anchorTransform = _playerAnimation != null && _playerAnimation.VisualRootTransform != null
+            ? _playerAnimation.VisualRootTransform
+            : _transform;
 
-        if (_carryLeftAnchorTransform != null && _carryRightAnchorTransform != null)
+        if (anchorTransform == null)
         {
-            Vector3 anchorMidpoint = (_carryLeftAnchorTransform.position + _carryRightAnchorTransform.position) * 0.5f;
-            targetPosition =
-                anchorMidpoint
-                + _transform.right * _carriedPlayerAnchorOffset.x
-                + _transform.up * _carriedPlayerAnchorOffset.y
-                + _transform.forward * _carriedPlayerAnchorOffset.z;
-            return true;
+            targetPosition = _transform.TransformPoint(_carriedPlayerOffset);
+            return false;
         }
 
-        targetPosition = _transform.TransformPoint(_carriedPlayerOffset);
-        return false;
+        targetPosition =
+            anchorTransform.position
+            + anchorTransform.right * _carriedPlayerAnchorOffset.x
+            + anchorTransform.up * _carriedPlayerAnchorOffset.y
+            + anchorTransform.forward * _carriedPlayerAnchorOffset.z;
+        return true;
+    }
+
+    public bool TryGetCarryFacingRotation(out Quaternion targetRotation)
+    {
+        CacheInjuredVisualRoot();
+
+        Transform facingTransform = _injuredVisualRoot != null
+            ? _injuredVisualRoot
+            : (_playerAnimation != null ? _playerAnimation.VisualRootTransform : _transform);
+
+        if (facingTransform == null)
+        {
+            targetRotation = Quaternion.Euler(0f, _transform.eulerAngles.y, 0f);
+            return false;
+        }
+
+        Vector3 flatForward = Vector3.ProjectOnPlane(facingTransform.forward, Vector3.up);
+        if (flatForward.sqrMagnitude <= 0.0001f)
+        {
+            flatForward = Vector3.ProjectOnPlane(_transform.forward, Vector3.up);
+        }
+
+        if (flatForward.sqrMagnitude <= 0.0001f)
+        {
+            targetRotation = Quaternion.Euler(0f, _transform.eulerAngles.y, 0f);
+            return false;
+        }
+
+        targetRotation = Quaternion.LookRotation(flatForward.normalized, Vector3.up);
+        return true;
     }
 
     private bool TryGetLookedAtInjuredPlayer(out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
@@ -2048,11 +2095,6 @@ public class PlayerController : MonoBehaviour
     #region Movement
     private void HandleHorizontalMovement() {
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
-        if (_isCarryingPlayer)
-        {
-            movementInput.x = 0f;
-        }
-
         bool isGrounded = IsGrounded();
         float deltaTime = Time.deltaTime;
         bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
@@ -2067,6 +2109,12 @@ public class PlayerController : MonoBehaviour
         float inputMagnitude = Mathf.Clamp01(movementInput.magnitude);
         float targetSpeed = GetCurrentMoveSpeed() * GetDirectionalSpeedMultiplier(movementInput) * inputMagnitude;
 
+        if (_isCarryingPlayer)
+        {
+            HandleCarryMovement(movementDirection, inputMagnitude, deltaTime);
+            return;
+        }
+
         if (_isWallRunning)
         {
             HandleWallRunMovement(movementDirection, targetSpeed, deltaTime);
@@ -2080,6 +2128,20 @@ public class PlayerController : MonoBehaviour
         }
 
         HandleGroundMovement(movementDirection, inputMagnitude, targetSpeed, deltaTime);
+    }
+
+    private void HandleCarryMovement(Vector3 movementDirection, float inputMagnitude, float deltaTime)
+    {
+        _ = deltaTime;
+
+        Vector3 desiredVelocity = Vector3.zero;
+        if (movementDirection.sqrMagnitude > 0.001f && inputMagnitude > 0.001f)
+        {
+            desiredVelocity = movementDirection.normalized * (_carryMoveSpeed * inputMagnitude);
+        }
+
+        _horizontalVelocity = desiredVelocity;
+        _horizontalVelocity.y = 0f;
     }
 
     private void UpdateInjuredFacing()
@@ -2351,7 +2413,11 @@ public class PlayerController : MonoBehaviour
 
     public void ApplyRemoteVisualState(Vector2 movementInput, bool injured, bool crouching)
     {
-        if (injured || crouching)
+        if (_isBeingCarried)
+        {
+            ResetInjuredVisualRootRotation();
+        }
+        else if (injured || crouching || _isCarryingPlayer)
         {
             UpdateDirectionalVisualFacing(movementInput);
             ResetNextbotHitReactionLimbPose();
@@ -2375,7 +2441,7 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
-        if ((IsInjured() || IsCrouching()) && movementInput.sqrMagnitude > 0.0001f)
+        if ((IsInjured() || IsCrouching() || _isCarryingPlayer) && !_isBeingCarried && movementInput.sqrMagnitude > 0.0001f)
         {
             return NormalizeSignedAngle(Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f);
         }
@@ -2693,19 +2759,15 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector3 forward = Vector3.ProjectOnPlane(_transform.forward, Vector3.up);
-        if (forward.sqrMagnitude <= 0.0001f)
+        Vector3 horizontalVelocity = Vector3.ProjectOnPlane(_horizontalVelocity, Vector3.up);
+        if (horizontalVelocity.sqrMagnitude <= 0.0001f)
         {
-            forward = Vector3.forward;
+            _horizontalVelocity = Vector3.zero;
         }
         else
         {
-            forward.Normalize();
+            _horizontalVelocity = horizontalVelocity.normalized * Mathf.Min(horizontalVelocity.magnitude, _carryMoveSpeed);
         }
-
-        float forwardSpeed = Vector3.Dot(_horizontalVelocity, forward);
-        float clampedForwardSpeed = Mathf.Clamp(forwardSpeed, -_carryMoveSpeed, _carryMoveSpeed);
-        _horizontalVelocity = forward * clampedForwardSpeed;
         _horizontalVelocity.y = 0f;
     }
 
@@ -2780,6 +2842,11 @@ public class PlayerController : MonoBehaviour
 
     private float GetDirectionalSpeedMultiplier(Vector2 movementInput)
     {
+        if (_isCarryingPlayer)
+        {
+            return 1f;
+        }
+
         if (IsInjured())
         {
             return 1f;

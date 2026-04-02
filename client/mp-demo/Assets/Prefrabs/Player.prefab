@@ -228,7 +228,7 @@ MonoBehaviour:
   _carriedPlayerOffset: {x: 0.45, y: 1.05, z: -0.15}
   _carryLeftAnchorBoneName: L_Arm
   _carryRightAnchorBoneName: R_Arm
-  _carriedPlayerAnchorOffset: {x: 0, y: 1.7, z: 0.08}
+  _carriedPlayerAnchorOffset: {x: 0, y: 1.7, z: -0.5}
   _enableBunnyHop: 1
   _groundFriction: 10
   _groundControl: 8

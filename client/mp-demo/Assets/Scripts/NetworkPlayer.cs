@@ -237,15 +237,16 @@ public class NetworkPlayer : MonoBehaviour
 
         if (controller != null)
         {
-            controller.ApplyRemoteVisualState(
-                new Vector2(playerState.moveInputX, playerState.moveInputY),
-                playerState.isInjured,
-                playerState.isCrouching);
             controller.ApplyNetworkCarryState(
                 playerState.isCarrying,
                 playerState.isBeingCarried,
                 playerState.carriedPlayerSessionId,
                 playerState.carrierSessionId);
+
+            controller.ApplyRemoteVisualState(
+                new Vector2(playerState.moveInputX, playerState.moveInputY),
+                playerState.isInjured,
+                playerState.isCrouching);
 
             controller.ApplyRemoteHitReactionState(
                 playerState.isHitReacting,

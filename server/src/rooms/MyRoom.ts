@@ -117,9 +117,12 @@ export class MyRoom extends Room<MyRoomState> {
         player.velocityX = 0;
         player.velocityY = 0;
         player.velocityZ = 0;
+        player.animInputX = 0;
+        player.animInputY = 0;
         player.moveInputX = 0;
         player.moveInputY = 0;
         player.isJumping = false;
+        player.isCrouching = false;
         player.isWallRunning = false;
         player.wallRunSide = 0;
       }
