@@ -330,7 +330,13 @@ public class PlayerAnimation : MonoBehaviour
 
         if (isCarryingActive)
         {
-            string carryState = Mathf.Abs(inputX) > 0.05f || Mathf.Abs(inputY) > 0.05f
+            bool carryMoving = Mathf.Abs(inputX) > 0.05f || Mathf.Abs(inputY) > 0.05f;
+            if (!_useNetworkAnimationState && _playerController != null)
+            {
+                carryMoving = _playerController.GetHorizontalSpeed() > 0.05f;
+            }
+
+            string carryState = carryMoving
                 ? CARRYING_RUN_STATE
                 : CARRYING_IDLE_STATE;
             CrossFadeIfNeeded(targetAnimator, carryState, 0.08f);
@@ -391,6 +397,9 @@ public class PlayerAnimation : MonoBehaviour
                 ? new Vector2(0f, GetAnimationSpeedFactor(input))
                 : GetDirectionalAnimationInput(input));
 
+        bool carryingActive = IsCarryingActive;
+        bool beingCarriedActive = IsBeingCarriedActive;
+
         if (_useNetworkAnimationState)
         {
             bool releasingToIdle =
@@ -401,6 +410,18 @@ public class PlayerAnimation : MonoBehaviour
             float moveSpeed = releasingToIdle ? _networkAnimationReleaseSpeed : _networkAnimationBlendSpeed;
             _currentInputX = Mathf.MoveTowards(_currentInputX, targetAnimationInput.x, moveSpeed * deltaTime);
             _currentInputY = Mathf.MoveTowards(_currentInputY, targetAnimationInput.y, moveSpeed * deltaTime);
+        }
+        else if (carryingActive || beingCarriedActive)
+        {
+            float carryBlendSpeed = _networkAnimationReleaseSpeed;
+            _currentInputX = Mathf.MoveTowards(_currentInputX, targetAnimationInput.x, carryBlendSpeed * deltaTime);
+            _currentInputY = Mathf.MoveTowards(_currentInputY, targetAnimationInput.y, carryBlendSpeed * deltaTime);
+
+            if (targetAnimationInput.sqrMagnitude <= 0.0001f)
+            {
+                _currentInputX = 0f;
+                _currentInputY = 0f;
+            }
         }
         else
         {

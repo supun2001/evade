@@ -70,7 +70,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Vector3 _carriedPlayerOffset = new Vector3(0.45f, 1.05f, -0.15f);
     [SerializeField] private string _carryLeftAnchorBoneName = "L_Arm";
     [SerializeField] private string _carryRightAnchorBoneName = "R_Arm";
-    [SerializeField] private Vector3 _carriedPlayerAnchorOffset = new Vector3(0f, 0.62f, 0.08f);
+    [SerializeField] private Vector3 _carriedPlayerAnchorOffset = new Vector3(0f, 1.08f, 0.02f);
 
     [Header("Bhop & Strafing")]
     [SerializeField] private bool _enableBunnyHop = true;
@@ -484,16 +484,7 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 nextPosition = targetPosition;
-        Vector3 positionDelta = nextPosition - _transform.position;
-
-        if (_characterController != null && _characterController.enabled)
-        {
-            _characterController.Move(positionDelta);
-        }
-        else
-        {
-            _transform.position = nextPosition;
-        }
+        _transform.position = nextPosition;
         _transform.rotation = targetRotation;
     }
 
@@ -2305,7 +2296,7 @@ public class PlayerController : MonoBehaviour
         {
             targetLocalPosition += _hitReactionVisualPositionOffset;
         }
-        else if (IsInjured())
+        else if (IsInjured() && !_isBeingCarried)
         {
             targetLocalPosition += _injuredVisualPositionOffset;
         }
@@ -2319,7 +2310,7 @@ public class PlayerController : MonoBehaviour
 
     private float GetDownedVisualAutoLift()
     {
-        if ((!_isHitReacting && !IsInjured()) || _injuredVisualRoot == null || _characterController == null)
+        if (_isBeingCarried || (!_isHitReacting && !IsInjured()) || _injuredVisualRoot == null || _characterController == null)
         {
             return 0f;
         }
@@ -2651,7 +2642,7 @@ public class PlayerController : MonoBehaviour
         float targetRadius = _defaultCharacterControllerRadius;
         Vector3 targetCenter = _defaultCharacterControllerCenter;
 
-        if (_isHitReacting || IsInjured())
+        if ((_isHitReacting || IsInjured()) && !_isBeingCarried)
         {
             targetHeight = Mathf.Max(_downedControllerHeight, _downedControllerRadius * 2f);
             targetRadius = Mathf.Min(_downedControllerRadius, targetHeight * 0.5f);

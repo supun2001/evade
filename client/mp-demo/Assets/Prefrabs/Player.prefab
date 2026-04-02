@@ -27,7 +27,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
+  m_LocalRotation: {x: 0.034131944, y: -0.000000079523474, z: -0.000000008707425, w: 0.99941736}
   m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -228,7 +228,7 @@ MonoBehaviour:
   _carriedPlayerOffset: {x: 0.45, y: 1.05, z: -0.15}
   _carryLeftAnchorBoneName: L_Arm
   _carryRightAnchorBoneName: R_Arm
-  _carriedPlayerAnchorOffset: {x: 0, y: 1.7, z: -0.5}
+  _carriedPlayerAnchorOffset: {x: 0, y: 3.2, z: -0.5}
   _enableBunnyHop: 1
   _groundFriction: 10
   _groundControl: 8
@@ -593,7 +593,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
+  m_LocalRotation: {x: 0.034131944, y: -0.000000079523474, z: -0.000000008707425, w: 0.99941736}
   m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
