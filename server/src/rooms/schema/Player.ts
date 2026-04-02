@@ -47,4 +47,8 @@ export class Player extends Schema {
     @type("number") hitSourceX: number = 0;
     @type("number") hitSourceY: number = 0;
     @type("number") hitSourceZ: number = 0;
+    @type("boolean") isCarrying: boolean = false;
+    @type("boolean") isBeingCarried: boolean = false;
+    @type("string") carriedPlayerSessionId: string = "";
+    @type("string") carrierSessionId: string = "";
 }

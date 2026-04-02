@@ -198,6 +198,24 @@ public class NetworkManager : MonoBehaviour
         });
     }
 
+    public void SendCarryRequest(string targetSessionId)
+    {
+        if (room == null || string.IsNullOrWhiteSpace(targetSessionId))
+        {
+            return;
+        }
+
+        room.Send("carryPlayer", new
+        {
+            targetSessionId
+        });
+    }
+
+    public bool TryGetPlayerObject(string sessionId, out GameObject playerObject)
+    {
+        return players.TryGetValue(sessionId, out playerObject);
+    }
+
     public async Task<string> CreateGame(){
         InitializeClient();
         try{

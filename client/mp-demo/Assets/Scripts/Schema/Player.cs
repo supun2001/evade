@@ -113,4 +113,16 @@ public Player() { }
 
 	[Type(32, "number")]
 	public float hitSourceZ = default(float);
+
+	[Type(33, "boolean")]
+	public bool isCarrying = default(bool);
+
+	[Type(34, "boolean")]
+	public bool isBeingCarried = default(bool);
+
+	[Type(35, "string")]
+	public string carriedPlayerSessionId = default(string);
+
+	[Type(36, "string")]
+	public string carrierSessionId = default(string);
 	}

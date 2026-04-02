@@ -34,7 +34,7 @@ const NEXTBOT_FRONT_ANGLE_THRESHOLD = 85;
 const PLAYER_MIN_SPAWN_DISTANCE_FROM_NEXTBOT = 8;
 const PLAYER_SPAWN_RANGE = 10;
 const PLAYER_REVIVE_DISTANCE = 6;
-const PLAYER_REVIVE_DURATION_MS = 4000;
+const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
@@ -60,7 +60,7 @@ export class MyRoom extends Room<MyRoomState> {
   private currentTargetLostSince = 0;
   private recentReachableUntil = new Map<string, number>();
   private lastKnownTargetPosition?: SpawnPoint;
-  private pendingReviveTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private playerRevivedUntil = new Map<string, number>();
 
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
@@ -75,11 +75,14 @@ export class MyRoom extends Room<MyRoomState> {
     this.onMessage("playerUpdate", (client, message) => {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
+      const now = Date.now();
+      const revivedUntil = this.playerRevivedUntil.get(client.sessionId) ?? 0;
+      const ignoreStaleInjuredState = revivedUntil > now;
 
       // Camera is informational, so keep it in sync every tick.
       player.cameraRotationX = message.cameraRotationX;
       player.cameraRotationY = message.cameraRotationY;
-      player.timestamp = Date.now();
+      player.timestamp = now;
 
       // Position & Rotation
       player.x = message.x;
@@ -97,18 +100,29 @@ export class MyRoom extends Room<MyRoomState> {
       player.animInputY = message.animInputY;
       player.isGrounded = message.isGrounded;
       player.isJumping = message.isJumping;
-      player.isInjured = message.isInjured;
+      player.isInjured = ignoreStaleInjuredState ? false : message.isInjured;
       player.isCrouching = message.isCrouching;
       player.isWallRunning = message.isWallRunning;
       player.wallRunSide = message.wallRunSide;
       player.moveInputX = message.moveInputX;
       player.moveInputY = message.moveInputY;
       player.visualYaw = message.visualYaw;
-      player.isHitReacting = message.isHitReacting;
-      player.hitReactionTimeRemaining = message.hitReactionTimeRemaining;
-      player.hitReactionPitch = message.hitReactionPitch;
-      player.hitReactionRoll = message.hitReactionRoll;
-      player.hitReactionSeed = message.hitReactionSeed;
+      player.isHitReacting = ignoreStaleInjuredState ? false : message.isHitReacting;
+      player.hitReactionTimeRemaining = ignoreStaleInjuredState ? 0 : message.hitReactionTimeRemaining;
+      player.hitReactionPitch = ignoreStaleInjuredState ? 0 : message.hitReactionPitch;
+      player.hitReactionRoll = ignoreStaleInjuredState ? 0 : message.hitReactionRoll;
+      player.hitReactionSeed = ignoreStaleInjuredState ? 0 : message.hitReactionSeed;
+
+      if (player.isBeingCarried) {
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.velocityZ = 0;
+        player.moveInputX = 0;
+        player.moveInputY = 0;
+        player.isJumping = false;
+        player.isWallRunning = false;
+        player.wallRunSide = 0;
+      }
     });
 
     this.onMessage("playerReady", (client, isReady) => {
@@ -153,30 +167,55 @@ export class MyRoom extends Room<MyRoomState> {
         return;
       }
 
-      if (this.pendingReviveTimeouts.has(targetSessionId)) {
+      this.clearCarryStateForPlayer(target.sessionId);
+      target.isInjured = false;
+      target.isHitReacting = false;
+      target.hitReactionTimeRemaining = 0;
+      target.hitReactionPitch = 0;
+      target.hitReactionRoll = 0;
+      target.hitReactionSeed = 0;
+      this.playerRevivedUntil.set(targetSessionId, Date.now() + PLAYER_REVIVE_SYNC_GRACE_MS);
+
+      const targetClient = this.clients.find((roomClient) => roomClient.sessionId === targetSessionId);
+      targetClient?.send("playerRevived", "revived");
+    });
+
+    this.onMessage("carryPlayer", (client, message) => {
+      const carrier = this.state.players.get(client.sessionId);
+      const targetSessionId = typeof message?.targetSessionId === "string" ? message.targetSessionId : "";
+      const target = this.state.players.get(targetSessionId);
+
+      if (!carrier || !target || carrier.sessionId === target.sessionId) {
         return;
       }
 
-      const reviveTimeout = setTimeout(() => {
-        this.pendingReviveTimeouts.delete(targetSessionId);
+      if (carrier.isInjured || carrier.isHitReacting || target.isHitReacting || !target.isInjured) {
+        return;
+      }
 
-        const pendingTarget = this.state.players.get(targetSessionId);
-        if (!pendingTarget || !pendingTarget.isInjured) {
-          return;
-        }
+      const distance = Math.hypot(target.x - carrier.x, target.z - carrier.z);
+      if (distance > PLAYER_REVIVE_DISTANCE) {
+        return;
+      }
 
-        pendingTarget.isInjured = false;
-        pendingTarget.isHitReacting = false;
-        pendingTarget.hitReactionTimeRemaining = 0;
-        pendingTarget.hitReactionPitch = 0;
-        pendingTarget.hitReactionRoll = 0;
-        pendingTarget.hitReactionSeed = 0;
+      if (carrier.isCarrying && carrier.carriedPlayerSessionId === targetSessionId) {
+        this.clearCarryStateForPlayer(carrier.sessionId);
+        return;
+      }
 
-        const targetClient = this.clients.find((roomClient) => roomClient.sessionId === targetSessionId);
-        targetClient?.send("playerRevived", "revived");
-      }, PLAYER_REVIVE_DURATION_MS);
+      if (carrier.isCarrying || carrier.isBeingCarried || target.isCarrying || target.isBeingCarried) {
+        return;
+      }
 
-      this.pendingReviveTimeouts.set(targetSessionId, reviveTimeout);
+      carrier.isCarrying = true;
+      carrier.carriedPlayerSessionId = target.sessionId;
+      target.isBeingCarried = true;
+      target.carrierSessionId = carrier.sessionId;
+      target.isHitReacting = false;
+      target.hitReactionTimeRemaining = 0;
+      target.hitReactionPitch = 0;
+      target.hitReactionRoll = 0;
+      target.hitReactionSeed = 0;
     });
 
     //Set update rate (60 times per second)
@@ -226,6 +265,10 @@ export class MyRoom extends Room<MyRoomState> {
     player.hitSourceX = 0;
     player.hitSourceY = 0;
     player.hitSourceZ = 0;
+    player.isCarrying = false;
+    player.isBeingCarried = false;
+    player.carriedPlayerSessionId = "";
+    player.carrierSessionId = "";
 
     //Add player to state
     this.state.players.set(client.sessionId, player);
@@ -236,9 +279,10 @@ export class MyRoom extends Room<MyRoomState> {
     console.log(client.sessionId, "left!");
 
     //Remove player from state
+    this.clearCarryStateForPlayer(client.sessionId);
     this.state.players.delete(client.sessionId);
     this.playerSafeUntil.delete(client.sessionId);
-    this.clearPendingRevive(client.sessionId);
+    this.playerRevivedUntil.delete(client.sessionId);
 
     // If no players left, reset game state
     if (this.state.players.size === 0) {
@@ -250,17 +294,35 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   onDispose() {
-    this.pendingReviveTimeouts.forEach((timeout) => clearTimeout(timeout));
-    this.pendingReviveTimeouts.clear();
     console.log("room", this.roomId, "disposing...");
   }
 
-  private clearPendingRevive(sessionId: string) {
-    const reviveTimeout = this.pendingReviveTimeouts.get(sessionId);
-    if (reviveTimeout != null) {
-      clearTimeout(reviveTimeout);
-      this.pendingReviveTimeouts.delete(sessionId);
+  private clearCarryStateForPlayer(sessionId: string) {
+    const player = this.state.players.get(sessionId);
+    if (!player) {
+      return;
     }
+
+    if (player.isCarrying && player.carriedPlayerSessionId) {
+      const carriedPlayer = this.state.players.get(player.carriedPlayerSessionId);
+      if (carriedPlayer) {
+        carriedPlayer.isBeingCarried = false;
+        carriedPlayer.carrierSessionId = "";
+      }
+    }
+
+    if (player.isBeingCarried && player.carrierSessionId) {
+      const carrier = this.state.players.get(player.carrierSessionId);
+      if (carrier) {
+        carrier.isCarrying = false;
+        carrier.carriedPlayerSessionId = "";
+      }
+    }
+
+    player.isCarrying = false;
+    player.isBeingCarried = false;
+    player.carriedPlayerSessionId = "";
+    player.carrierSessionId = "";
   }
 
   update(deltaTime: number) {

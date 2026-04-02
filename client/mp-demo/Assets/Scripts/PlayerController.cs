@@ -65,6 +65,12 @@ public class PlayerController : MonoBehaviour
     [Header("Injured Interaction Prompt")]
     [SerializeField] private float _injuredInteractionPromptDistance = 5f;
     [SerializeField] private float _injuredInteractionPromptHeightTolerance = 1.75f;
+    [SerializeField] private float _reviveHoldDuration = 2.5f;
+    [SerializeField] private float _carryMoveSpeed = 2.1f;
+    [SerializeField] private Vector3 _carriedPlayerOffset = new Vector3(0.45f, 1.05f, -0.15f);
+    [SerializeField] private string _carryLeftAnchorBoneName = "L_Arm";
+    [SerializeField] private string _carryRightAnchorBoneName = "R_Arm";
+    [SerializeField] private Vector3 _carriedPlayerAnchorOffset = new Vector3(0f, 0.62f, 0.08f);
 
     [Header("Bhop & Strafing")]
     [SerializeField] private bool _enableBunnyHop = true;
@@ -155,6 +161,10 @@ public class PlayerController : MonoBehaviour
     private Label _animationDebugLabel;
     private VisualElement _crosshairDotElement;
     private VisualElement _injuredInteractionPromptElement;
+    private VisualElement _reviveActionRowElement;
+    private VisualElement _carryActionRowElement;
+    private VisualElement _reviveActionFillElement;
+    private VisualElement _carryActionFillElement;
     private VisualElement _pauseMenuElement;
     private Button _continueButton;
     private Button _mainMenuButton;
@@ -167,6 +177,14 @@ public class PlayerController : MonoBehaviour
     private float _verticalVelocity = 0f;
     private Vector3 _horizontalVelocity = Vector3.zero;
     private float _runHeldTime = 0f;
+    private float _reviveHoldTimer;
+    private float _reviveHoldStartedAt = -1f;
+    private string _reviveHoldTargetSessionId;
+    private bool _reviveHoldTriggered;
+    private bool _isCarryingPlayer;
+    private bool _isBeingCarried;
+    private string _carriedPlayerSessionId;
+    private string _carrierSessionId;
     private bool _jumpedThisFrame;
     private bool _isCrouching;
     private bool _isWallRunning;
@@ -206,6 +224,8 @@ public class PlayerController : MonoBehaviour
     private bool[] _defaultWallHideRendererEnabledStates;
     private Transform _leftArmTransform;
     private Transform _rightArmTransform;
+    private Transform _carryLeftAnchorTransform;
+    private Transform _carryRightAnchorTransform;
     private Transform _nextbotHitLeftArmTransform;
     private Transform _nextbotHitRightArmTransform;
     private Transform _nextbotHitLeftLegTransform;
@@ -325,6 +345,7 @@ public class PlayerController : MonoBehaviour
         UpdateCrosshairVisibility();
         UpdateInjuredInteractionPrompt();
         HandleInjuredInteractionInput();
+        UpdateInjuredInteractionPromptPressedState();
 
         HandleCursorLock();
         HandleViewToggle();
@@ -333,6 +354,12 @@ public class PlayerController : MonoBehaviour
         UpdateWallRunState();
         UpdateZoom();
 
+        if (_isBeingCarried)
+        {
+            UpdateCarriedFollow();
+            return;
+        }
+
         if (HandleNextbotHitReaction())
         {
             return;
@@ -340,6 +367,7 @@ public class PlayerController : MonoBehaviour
 
         HandleVerticalMovement();
         HandleHorizontalMovement();
+        ApplyCarryMovementClamp();
 
         Vector3 finalVelocity = _horizontalVelocity;
         finalVelocity.y = _verticalVelocity;
@@ -406,17 +434,67 @@ public class PlayerController : MonoBehaviour
 
     private void HandleInjuredInteractionInput()
     {
-        if (_isPauseMenuOpen || IsInjuredOrHitReacting() || Keyboard.current == null || !Keyboard.current.eKey.wasPressedThisFrame)
+        if (_isPauseMenuOpen || IsInjuredOrHitReacting() || Keyboard.current == null)
         {
+            ResetReviveHoldState();
+            return;
+        }
+
+        if (_isCarryingPlayer)
+        {
+            ResetReviveHoldState();
+
+            if (Keyboard.current.qKey.wasPressedThisFrame && !string.IsNullOrEmpty(_carriedPlayerSessionId))
+            {
+                NetworkManager.Instance?.SendCarryRequest(_carriedPlayerSessionId);
+            }
+
             return;
         }
 
         if (!TryGetLookedAtInjuredPlayer(out _, out string targetSessionId))
         {
+            ResetReviveHoldState();
             return;
         }
 
-        NetworkManager.Instance?.SendReviveRequest(targetSessionId);
+        UpdateReviveHoldState(targetSessionId, Keyboard.current.eKey.isPressed);
+
+        if (Keyboard.current.qKey.wasPressedThisFrame)
+        {
+            NetworkManager.Instance?.SendCarryRequest(targetSessionId);
+        }
+    }
+
+    private void UpdateCarriedFollow()
+    {
+        _horizontalVelocity = Vector3.zero;
+        _verticalVelocity = 0f;
+        _runHeldTime = 0f;
+        _isCrouching = false;
+        _isWallRunning = false;
+        _wallRunSide = 0;
+        _wallRunNormal = Vector3.zero;
+        _wallRunContactHoldTimer = 0f;
+        _wallRunSprintGraceTimer = 0f;
+
+        if (!TryGetCarriedFollowPose(out Vector3 targetPosition, out Quaternion targetRotation))
+        {
+            return;
+        }
+
+        Vector3 nextPosition = targetPosition;
+        Vector3 positionDelta = nextPosition - _transform.position;
+
+        if (_characterController != null && _characterController.enabled)
+        {
+            _characterController.Move(positionDelta);
+        }
+        else
+        {
+            _transform.position = nextPosition;
+        }
+        _transform.rotation = targetRotation;
     }
 
     private void SetDebugInjuredState(bool injured)
@@ -464,7 +542,7 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateAutoSprint()
     {
-        if (IsInjured() || IsCrouching())
+        if (IsInjured() || IsCrouching() || _isCarryingPlayer || _isBeingCarried)
         {
             _runHeldTime = 0f;
             return;
@@ -627,7 +705,20 @@ public class PlayerController : MonoBehaviour
                 _rightArmTransform = child;
             }
 
-            if (_leftArmTransform != null && _rightArmTransform != null)
+            if (_carryLeftAnchorTransform == null && string.Equals(child.name, _carryLeftAnchorBoneName, StringComparison.OrdinalIgnoreCase))
+            {
+                _carryLeftAnchorTransform = child;
+            }
+
+            if (_carryRightAnchorTransform == null && string.Equals(child.name, _carryRightAnchorBoneName, StringComparison.OrdinalIgnoreCase))
+            {
+                _carryRightAnchorTransform = child;
+            }
+
+            if (_leftArmTransform != null
+                && _rightArmTransform != null
+                && _carryLeftAnchorTransform != null
+                && _carryRightAnchorTransform != null)
             {
                 break;
             }
@@ -828,6 +919,10 @@ public class PlayerController : MonoBehaviour
         _animationDebugLabel = root.Q<Label>("animation-debug-label");
         _crosshairDotElement = root.Q<VisualElement>("crosshair-dot");
         _injuredInteractionPromptElement = root.Q<VisualElement>("injured-interaction-prompt");
+        _reviveActionRowElement = root.Q<VisualElement>("revive-action-row");
+        _carryActionRowElement = root.Q<VisualElement>("carry-action-row");
+        _reviveActionFillElement = root.Q<VisualElement>("revive-action-fill");
+        _carryActionFillElement = root.Q<VisualElement>("carry-action-fill");
         _pauseMenuElement = root.Q<VisualElement>("pause-menu");
         _continueButton = root.Q<Button>("continue-button");
         _mainMenuButton = root.Q<Button>("main-menu-button");
@@ -953,7 +1048,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        if (_isPauseMenuOpen || IsInjuredOrHitReacting())
+        if (_isPauseMenuOpen || IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried)
         {
             SetInjuredInteractionPromptVisible(false);
             return;
@@ -991,6 +1086,193 @@ public class PlayerController : MonoBehaviour
         }
 
         _injuredInteractionPromptElement.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+
+        if (!visible)
+        {
+            ResetReviveHoldState();
+            ApplyPromptActionRowStyle(_reviveActionRowElement, _reviveActionFillElement, false, 0f);
+            ApplyPromptActionRowStyle(_carryActionRowElement, _carryActionFillElement, false, 0f);
+        }
+    }
+
+    private void UpdateInjuredInteractionPromptPressedState()
+    {
+        if (_reviveActionRowElement == null || _carryActionRowElement == null)
+        {
+            CacheHudElements();
+            if (_reviveActionRowElement == null || _carryActionRowElement == null)
+            {
+                return;
+            }
+        }
+
+        bool promptVisible = _injuredInteractionPromptElement != null
+            && _injuredInteractionPromptElement.resolvedStyle.display != DisplayStyle.None;
+        bool canHighlight = (promptVisible || _isCarryingPlayer) && Keyboard.current != null;
+
+        float reviveProgress = canHighlight ? Mathf.Clamp01(_reviveHoldTimer / Mathf.Max(_reviveHoldDuration, 0.01f)) : 0f;
+        float carryProgress = 0f;
+
+        ApplyPromptActionRowStyle(_reviveActionRowElement, _reviveActionFillElement, canHighlight && Keyboard.current.eKey.isPressed, reviveProgress);
+        ApplyPromptActionRowStyle(_carryActionRowElement, _carryActionFillElement, canHighlight && Keyboard.current.qKey.isPressed, carryProgress);
+    }
+
+    private void ApplyPromptActionRowStyle(VisualElement rowElement, VisualElement fillElement, bool isPressed, float progress)
+    {
+        if (rowElement == null)
+        {
+            return;
+        }
+
+        StyleColor borderColor = isPressed
+            ? new StyleColor(new Color(1f, 0.95f, 0.84f, 1f))
+            : new StyleColor(new Color(224f / 255f, 173f / 255f, 98f / 255f, 0.95f));
+
+        rowElement.style.backgroundColor = isPressed
+            ? new StyleColor(new Color(1f, 1f, 1f, 0.2f))
+            : new StyleColor(new Color(12f / 255f, 12f / 255f, 12f / 255f, 0.55f));
+        rowElement.style.borderLeftColor = borderColor;
+        rowElement.style.borderRightColor = borderColor;
+        rowElement.style.borderTopColor = borderColor;
+        rowElement.style.borderBottomColor = borderColor;
+        rowElement.style.scale = new StyleScale(new Scale(isPressed ? new Vector3(1.05f, 1.05f, 1f) : Vector3.one));
+
+        if (fillElement != null)
+        {
+            fillElement.style.width = new StyleLength(Length.Percent(Mathf.Clamp01(progress) * 100f));
+        }
+    }
+
+    private void UpdateReviveHoldState(string targetSessionId, bool isHeld)
+    {
+        if (!isHeld)
+        {
+            ResetReviveHoldState();
+            return;
+        }
+
+        if (!string.Equals(_reviveHoldTargetSessionId, targetSessionId, StringComparison.Ordinal))
+        {
+            _reviveHoldTargetSessionId = targetSessionId;
+            _reviveHoldStartedAt = Time.unscaledTime;
+            _reviveHoldTimer = 0f;
+            _reviveHoldTriggered = false;
+        }
+
+        if (_reviveHoldTriggered)
+        {
+            return;
+        }
+
+        if (_reviveHoldStartedAt < 0f)
+        {
+            _reviveHoldStartedAt = Time.unscaledTime;
+        }
+
+        _reviveHoldTimer = Mathf.Min(_reviveHoldDuration, Time.unscaledTime - _reviveHoldStartedAt);
+        if (_reviveHoldTimer >= _reviveHoldDuration)
+        {
+            NetworkManager.Instance?.SendReviveRequest(targetSessionId);
+            _reviveHoldTriggered = true;
+        }
+    }
+
+    private void ResetReviveHoldState()
+    {
+        _reviveHoldTimer = 0f;
+        _reviveHoldStartedAt = -1f;
+        _reviveHoldTargetSessionId = null;
+        _reviveHoldTriggered = false;
+    }
+
+    public void ApplyNetworkCarryState(bool isCarrying, bool isBeingCarried, string carriedPlayerSessionId, string carrierSessionId)
+    {
+        _isCarryingPlayer = isCarrying;
+        _isBeingCarried = isBeingCarried;
+        _carriedPlayerSessionId = carriedPlayerSessionId;
+        _carrierSessionId = carrierSessionId;
+
+        if (!_isBeingCarried)
+        {
+          _carrierSessionId = string.Empty;
+        }
+
+        if (!_isCarryingPlayer)
+        {
+          _carriedPlayerSessionId = string.Empty;
+        }
+
+        if (_isCarryingPlayer)
+        {
+            _runHeldTime = 0f;
+            _isCrouching = false;
+            StopWallRun();
+            _wallRunSprintGraceTimer = 0f;
+            _horizontalVelocity = Vector3.Project(_horizontalVelocity, _transform.forward);
+            if (_horizontalVelocity.magnitude > _carryMoveSpeed)
+            {
+                _horizontalVelocity = _horizontalVelocity.normalized * _carryMoveSpeed;
+            }
+        }
+
+        if (_isBeingCarried)
+        {
+            _horizontalVelocity = Vector3.zero;
+            _verticalVelocity = 0f;
+            _runHeldTime = 0f;
+            _isCrouching = false;
+            StopWallRun();
+            _wallRunSprintGraceTimer = 0f;
+        }
+    }
+
+    public bool TryGetCarriedFollowPose(out Vector3 targetPosition, out Quaternion targetRotation)
+    {
+        targetPosition = _transform.position;
+        targetRotation = _transform.rotation;
+
+        if (string.IsNullOrEmpty(_carrierSessionId) || NetworkManager.Instance == null)
+        {
+            return false;
+        }
+
+        if (!NetworkManager.Instance.TryGetPlayerObject(_carrierSessionId, out GameObject carrierObject) || carrierObject == null)
+        {
+            return false;
+        }
+
+        Transform carrierTransform = carrierObject.transform;
+        PlayerController carrierController = carrierObject.GetComponent<PlayerController>();
+        if (carrierController != null && carrierController.TryGetCarryAnchorPose(out Vector3 carryAnchorPosition))
+        {
+            targetPosition = carryAnchorPosition;
+        }
+        else
+        {
+            targetPosition = carrierTransform.TransformPoint(_carriedPlayerOffset);
+        }
+
+        targetRotation = Quaternion.Euler(0f, carrierTransform.eulerAngles.y, 0f);
+        return true;
+    }
+
+    public bool TryGetCarryAnchorPose(out Vector3 targetPosition)
+    {
+        CacheArmTransforms();
+
+        if (_carryLeftAnchorTransform != null && _carryRightAnchorTransform != null)
+        {
+            Vector3 anchorMidpoint = (_carryLeftAnchorTransform.position + _carryRightAnchorTransform.position) * 0.5f;
+            targetPosition =
+                anchorMidpoint
+                + _transform.right * _carriedPlayerAnchorOffset.x
+                + _transform.up * _carriedPlayerAnchorOffset.y
+                + _transform.forward * _carriedPlayerAnchorOffset.z;
+            return true;
+        }
+
+        targetPosition = _transform.TransformPoint(_carriedPlayerOffset);
+        return false;
     }
 
     private bool TryGetLookedAtInjuredPlayer(out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
@@ -1055,10 +1337,21 @@ public class PlayerController : MonoBehaviour
 
     public void ApplyNetworkRevive()
     {
+        ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         SetDebugInjuredState(false);
         ResetInjuredVisualRootRotation();
         UpdateDownedCollisionShape();
         UpdateDownedVisualRootPosition();
+    }
+
+    public bool IsCarrying()
+    {
+        return _isCarryingPlayer;
+    }
+
+    public bool IsBeingCarried()
+    {
+        return _isBeingCarried;
     }
 
     private void SetPauseMenuVisible(bool visible)
@@ -1584,7 +1877,38 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        return !hitTransform.IsChildOf(_transform);
+        return !hitTransform.IsChildOf(_transform) && !IsCarryLinkedTransform(hitTransform);
+    }
+
+    private bool IsCarryLinkedTransform(Transform candidate)
+    {
+        if (candidate == null || NetworkManager.Instance == null)
+        {
+            return false;
+        }
+
+        if (IsTransformLinkedToSession(candidate, _carriedPlayerSessionId))
+        {
+            return true;
+        }
+
+        return IsTransformLinkedToSession(candidate, _carrierSessionId);
+    }
+
+    private bool IsTransformLinkedToSession(Transform candidate, string sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId) || NetworkManager.Instance == null)
+        {
+            return false;
+        }
+
+        if (!NetworkManager.Instance.TryGetPlayerObject(sessionId, out GameObject playerObject) || playerObject == null)
+        {
+            return false;
+        }
+
+        Transform linkedTransform = playerObject.transform;
+        return candidate == linkedTransform || candidate.IsChildOf(linkedTransform);
     }
 
     private void UpdateArmWallClipVisibility()
@@ -1724,6 +2048,11 @@ public class PlayerController : MonoBehaviour
     #region Movement
     private void HandleHorizontalMovement() {
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
+        if (_isCarryingPlayer)
+        {
+            movementInput.x = 0f;
+        }
+
         bool isGrounded = IsGrounded();
         float deltaTime = Time.deltaTime;
         bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
@@ -2357,6 +2686,29 @@ public class PlayerController : MonoBehaviour
         _horizontalVelocity.y = 0f;
     }
 
+    private void ApplyCarryMovementClamp()
+    {
+        if (!_isCarryingPlayer)
+        {
+            return;
+        }
+
+        Vector3 forward = Vector3.ProjectOnPlane(_transform.forward, Vector3.up);
+        if (forward.sqrMagnitude <= 0.0001f)
+        {
+            forward = Vector3.forward;
+        }
+        else
+        {
+            forward.Normalize();
+        }
+
+        float forwardSpeed = Vector3.Dot(_horizontalVelocity, forward);
+        float clampedForwardSpeed = Mathf.Clamp(forwardSpeed, -_carryMoveSpeed, _carryMoveSpeed);
+        _horizontalVelocity = forward * clampedForwardSpeed;
+        _horizontalVelocity.y = 0f;
+    }
+
     private void HandleWallRunMovement(Vector3 movementDirection, float targetSpeed, float deltaTime)
     {
         if (_wallRunNormal.sqrMagnitude <= 0.0001f)
@@ -2470,7 +2822,7 @@ public class PlayerController : MonoBehaviour
             _verticalVelocity = Mathf.Max(_verticalVelocity, -_wallRunMaxFallSpeed);
         }
 
-        if(!IsInjured() && !IsCrouching() && _playerLocomotionInput.JumpPressed && isGrounded){
+        if(!IsInjured() && !IsCrouching() && !_isCarryingPlayer && _playerLocomotionInput.JumpPressed && isGrounded){
             if (_horizontalVelocity.sqrMagnitude > 0.001f)
             {
                 Vector3 horizontalDirection = _horizontalVelocity.normalized;
@@ -2570,6 +2922,16 @@ public class PlayerController : MonoBehaviour
 
     private float GetCurrentMoveSpeed()
     {
+        if (_isBeingCarried)
+        {
+            return 0f;
+        }
+
+        if (_isCarryingPlayer)
+        {
+            return _carryMoveSpeed;
+        }
+
         if (IsInjured())
         {
             return _injuredMoveSpeed;
@@ -2586,7 +2948,7 @@ public class PlayerController : MonoBehaviour
 
     private float GetSprintProgress()
     {
-        if (IsInjured())
+        if (IsInjured() || _isCarryingPlayer || _isBeingCarried)
         {
             return 0f;
         }
@@ -2623,12 +2985,21 @@ public class PlayerController : MonoBehaviour
     {
         _isCrouching =
             !IsInjured()
+            && !_isCarryingPlayer
+            && !_isBeingCarried
             && Keyboard.current != null
             && Keyboard.current.cKey.isPressed;
     }
 
     private void UpdateWallRunState()
     {
+        if (_isCarryingPlayer || _isBeingCarried)
+        {
+            StopWallRun();
+            _wallRunSprintGraceTimer = 0f;
+            return;
+        }
+
         bool canMaintainWallRun = CanMaintainWallRun();
         bool foundWallContact = TryGetWallRunContact(out int detectedWallSide, out Vector3 detectedWallNormal);
 
@@ -2675,6 +3046,12 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateWallRunEligibility()
     {
+        if (_isCarryingPlayer || _isBeingCarried)
+        {
+            _wallRunSprintGraceTimer = 0f;
+            return;
+        }
+
         if (IsGrounded() && !_isWallRunning)
         {
             _wallRunSprintGraceTimer = 0f;
@@ -2686,7 +3063,7 @@ public class PlayerController : MonoBehaviour
 
     private bool CanMaintainWallRun()
     {
-        if (_playerLocomotionInput == null || IsGrounded() || IsInjured() || IsCrouching())
+        if (_playerLocomotionInput == null || IsGrounded() || IsInjured() || IsCrouching() || _isCarryingPlayer || _isBeingCarried)
         {
             return false;
         }

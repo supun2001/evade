@@ -19,6 +19,7 @@ public class NetworkPlayer : MonoBehaviour
     private PlayerAnimation anim; 
     private Animator animator;
     private float _lastProcessedHitTriggerId = -1f;
+    private bool _isInitialized;
 
     public void Initialize(Player state, bool isLocalPlayer)
     {
@@ -54,6 +55,8 @@ public class NetworkPlayer : MonoBehaviour
                 hudDocument.enabled = false;
             }
         }
+
+        _isInitialized = true;
     }
 
     public bool TryGetSessionId(out string sessionId)
@@ -77,9 +80,15 @@ public class NetworkPlayer : MonoBehaviour
 
     private void Update()
     {
+        if (!_isInitialized || playerState == null)
+        {
+            return;
+        }
+
         if (isLocal)
         {
             HandleServerHitTrigger();
+            ApplyCarryStateFromServer();
 
             // Latch Jump input so we don't miss it between network ticks
             if (input && input.JumpPressed) 
@@ -191,6 +200,11 @@ public class NetworkPlayer : MonoBehaviour
 
     private void UpdateRemoteState()
     {
+        if (playerState == null)
+        {
+            return;
+        }
+
         _remoteVelocity = new Vector3(playerState.velocityX, playerState.velocityY, playerState.velocityZ);
         Vector3 extrapolatedOffset = new Vector3(_remoteVelocity.x, 0f, _remoteVelocity.z) * sendInterval;
         targetPos = new Vector3(playerState.x, playerState.y, playerState.z) + extrapolatedOffset;
@@ -227,6 +241,11 @@ public class NetworkPlayer : MonoBehaviour
                 new Vector2(playerState.moveInputX, playerState.moveInputY),
                 playerState.isInjured,
                 playerState.isCrouching);
+            controller.ApplyNetworkCarryState(
+                playerState.isCarrying,
+                playerState.isBeingCarried,
+                playerState.carriedPlayerSessionId,
+                playerState.carrierSessionId);
 
             controller.ApplyRemoteHitReactionState(
                 playerState.isHitReacting,
@@ -239,15 +258,46 @@ public class NetworkPlayer : MonoBehaviour
             {
                 controller.ApplyRemoteVisualYaw(playerState.visualYaw);
             }
+
+            if (playerState.isBeingCarried && controller.TryGetCarriedFollowPose(out Vector3 carriedTargetPosition, out Quaternion carriedTargetRotation))
+            {
+                targetPos = carriedTargetPosition;
+                targetRot = carriedTargetRotation;
+                _remoteVelocity = Vector3.zero;
+            }
         }
     }
 
     private void InterpolateRemotePlayer()
     {
+        if (playerState != null
+            && playerState.isBeingCarried
+            && controller != null
+            && controller.TryGetCarriedFollowPose(out Vector3 carriedTargetPosition, out Quaternion carriedTargetRotation))
+        {
+            transform.position = carriedTargetPosition;
+            transform.rotation = carriedTargetRotation;
+            return;
+        }
+
         float positionBlend = 1f - Mathf.Exp(-lerpSpeed * Time.deltaTime);
         float rotationBlend = 1f - Mathf.Exp(-(lerpSpeed + 4f) * Time.deltaTime);
 
         transform.position = Vector3.Lerp(transform.position, targetPos, positionBlend);
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationBlend);
+    }
+
+    private void ApplyCarryStateFromServer()
+    {
+        if (!isLocal || controller == null || playerState == null)
+        {
+            return;
+        }
+
+        controller.ApplyNetworkCarryState(
+            playerState.isCarrying,
+            playerState.isBeingCarried,
+            playerState.carriedPlayerSessionId,
+            playerState.carrierSessionId);
     }
 }

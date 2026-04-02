@@ -37,6 +37,9 @@ public class PlayerAnimation : MonoBehaviour
     private const string IN_AIR_STATE = "Base Layer.InAir";
     private const string IDLE_RUN_STATE = "Base Layer.Idle/Run";
     private const string CROUCH_STATE = "Base Layer.Crouch";
+    private const string CARRYING_ME_STATE = "Base Layer.Carrying";
+    private const string CARRYING_IDLE_STATE = "Base Layer.CarryingIdle";
+    private const string CARRYING_RUN_STATE = "Base Layer.CarryingRun";
 
     private float _currentInputX;
     private float _currentInputY;
@@ -147,6 +150,8 @@ public class PlayerAnimation : MonoBehaviour
     }
 
     public bool IsCrouchingActive => _debugForceCrouching || (_useNetworkAnimationState ? _networkIsCrouching : (_playerController != null && _playerController.IsCrouching()));
+    public bool IsCarryingActive => _playerController != null && _playerController.IsCarrying();
+    public bool IsBeingCarriedActive => _playerController != null && _playerController.IsBeingCarried();
 
     public string GetAnimatorDebugInfo()
     {
@@ -310,10 +315,28 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetBool(_groundedHash, isGrounded);
         targetAnimator.SetBool(_jumpHash, isJumping);
         targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
-        bool isInjuredActive = IsInjuredActive;
-        bool isCrouchingActive = IsCrouchingActive;
+        bool isCarryingActive = IsCarryingActive;
+        bool isBeingCarriedActive = IsBeingCarriedActive;
+        bool isInjuredActive = IsInjuredActive && !isCarryingActive && !isBeingCarriedActive;
+        bool isCrouchingActive = IsCrouchingActive && !isCarryingActive && !isBeingCarriedActive;
         targetAnimator.SetBool(_injuredHash, isInjuredActive);
         targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive);
+
+        if (isBeingCarriedActive)
+        {
+            CrossFadeIfNeeded(targetAnimator, CARRYING_ME_STATE, 0.08f);
+            return;
+        }
+
+        if (isCarryingActive)
+        {
+            string carryState = Mathf.Abs(inputX) > 0.05f || Mathf.Abs(inputY) > 0.05f
+                ? CARRYING_RUN_STATE
+                : CARRYING_IDLE_STATE;
+            CrossFadeIfNeeded(targetAnimator, carryState, 0.08f);
+            return;
+        }
+
         ApplyWallRunState(targetAnimator, isGrounded, verticalSpeed);
     }
 
