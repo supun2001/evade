@@ -343,6 +343,11 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
+        if (ApplyCarryRecoveryState(targetAnimator, isGrounded, verticalSpeed, isInjuredActive, isCrouchingActive))
+        {
+            return;
+        }
+
         ApplyWallRunState(targetAnimator, isGrounded, verticalSpeed);
     }
 
@@ -659,6 +664,32 @@ public class PlayerAnimation : MonoBehaviour
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.08f);
+    }
+
+    private bool ApplyCarryRecoveryState(Animator targetAnimator, bool isGrounded, float verticalSpeed, bool isInjuredActive, bool isCrouchingActive)
+    {
+        if (targetAnimator == null)
+        {
+            return false;
+        }
+
+        AnimatorStateInfo currentState = targetAnimator.GetCurrentAnimatorStateInfo(0);
+        bool isCarryState =
+            currentState.IsName(CARRYING_ME_STATE)
+            || currentState.IsName(CARRYING_IDLE_STATE)
+            || currentState.IsName(CARRYING_RUN_STATE);
+
+        if (!isCarryState)
+        {
+            return false;
+        }
+
+        string recoveryState = isGrounded
+            ? IDLE_RUN_STATE
+            : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
+
+        CrossFadeIfNeeded(targetAnimator, recoveryState, 0.06f);
+        return true;
     }
 
     private static void CrossFadeIfNeeded(Animator targetAnimator, string stateName, float duration)
