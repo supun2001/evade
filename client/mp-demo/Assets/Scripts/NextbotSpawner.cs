@@ -20,6 +20,7 @@ public class NextbotSpawner : MonoBehaviour
 
     private void Start()
     {
+        EnsureExistingSceneNextbotsAreActive();
         RemoveExistingNextbots();
 
         if (!NEXTBOTS_ENABLED)
@@ -52,6 +53,30 @@ public class NextbotSpawner : MonoBehaviour
             if (existingNextbots[i] != null)
             {
                 Destroy(existingNextbots[i].gameObject);
+            }
+        }
+    }
+
+    private void EnsureExistingSceneNextbotsAreActive()
+    {
+        NextbotFollowPlayer[] sceneNextbots = Resources.FindObjectsOfTypeAll<NextbotFollowPlayer>();
+        for (int i = 0; i < sceneNextbots.Length; i++)
+        {
+            NextbotFollowPlayer nextbot = sceneNextbots[i];
+            if (nextbot == null)
+            {
+                continue;
+            }
+
+            GameObject nextbotObject = nextbot.gameObject;
+            if (!nextbotObject.scene.IsValid())
+            {
+                continue;
+            }
+
+            if (!nextbotObject.activeSelf)
+            {
+                nextbotObject.SetActive(true);
             }
         }
     }

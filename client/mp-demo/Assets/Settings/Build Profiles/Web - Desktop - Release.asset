@@ -1001,4 +1001,4 @@ MonoBehaviour:
         m_CodeOptimization: 2
         m_WebGLClientBrowserPath: 
         m_WebGLClientBrowserType: 0
-        m_WebGLTextureSubtarget: 1
+        m_WebGLTextureSubtarget: 4

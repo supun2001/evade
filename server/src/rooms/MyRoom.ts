@@ -2,7 +2,7 @@ import { Room, Client } from "@colyseus/core";
 import { MyRoomState } from "./schema/MyRoomState";
 import { Player } from "./schema/Player";
 
-const NEXTBOTS_ENABLED = false;
+const NEXTBOTS_ENABLED = true;
 const DEFAULT_NEXTBOT_SPAWN_POINTS = [
   { x: 6.45, y: 0, z: -2.38 },
   { x: -6.45, y: 0, z: 2.38 },

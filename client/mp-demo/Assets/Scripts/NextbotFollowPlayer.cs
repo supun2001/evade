@@ -4,6 +4,11 @@ using UnityEngine.AI;
 
 public class NextbotFollowPlayer : MonoBehaviour
 {
+    [Header("Networking")]
+    [SerializeField] private bool _useRoomStateAuthority = true;
+    [SerializeField] private float _roomStatePositionLerpSpeed = 12f;
+    [SerializeField] private float _roomStateRotationLerpSpeed = 14f;
+
     [Header("Follow")]
     [SerializeField] private float _moveSpeed = 10f;
     [SerializeField] private float _acceleration = 18f;
@@ -107,6 +112,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Vector3 _offMeshLinkStart;
     private Vector3 _offMeshLinkEnd;
     private float _offMeshLinkProgress;
+    private bool _hasAppliedRoomState;
+    private bool _roomStateAuthorityActive;
 
     private void Awake()
     {
@@ -173,6 +180,15 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool UpdateActivationState()
     {
         MyRoomState roomState = GetRoomState();
+        bool useRoomStateAuthority = _useRoomStateAuthority && roomState != null && roomState.nextbot != null;
+        SetRoomStateAuthorityActive(useRoomStateAuthority);
+
+        if (useRoomStateAuthority)
+        {
+            UpdateFromRoomState(roomState.nextbot);
+            return true;
+        }
+
         bool isActive = roomState == null || roomState.isGameStarted;
         SetServerVisualState(isActive);
 
@@ -190,6 +206,81 @@ public class NextbotFollowPlayer : MonoBehaviour
         EnsureAgentOnNavMesh();
 
         return false;
+    }
+
+    private void SetRoomStateAuthorityActive(bool isActive)
+    {
+        if (_roomStateAuthorityActive == isActive)
+        {
+            if (isActive && _navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+            {
+                _navMeshAgent.nextPosition = transform.position;
+            }
+
+            return;
+        }
+
+        _roomStateAuthorityActive = isActive;
+
+        if (_navMeshAgent == null || !_navMeshAgent.enabled)
+        {
+            return;
+        }
+
+        _navMeshAgent.updatePosition = !isActive;
+        _navMeshAgent.isStopped = isActive;
+
+        if (_navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.ResetPath();
+            _navMeshAgent.nextPosition = transform.position;
+        }
+    }
+
+    private void UpdateFromRoomState(NextbotState nextbotState)
+    {
+        bool isActive = nextbotState != null && nextbotState.isActive;
+        SetServerVisualState(isActive);
+
+        ClearTarget();
+        StopAgent();
+        _isJumping = false;
+        _jumpVelocity = Vector3.zero;
+        _isTraversingOffMeshLink = false;
+
+        if (!isActive || nextbotState == null)
+        {
+            _hasAppliedRoomState = false;
+            return;
+        }
+
+        Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
+        if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 groundedTargetPosition))
+        {
+            targetPosition.y = groundedTargetPosition.y;
+        }
+        Quaternion targetRotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
+
+        if (!_hasAppliedRoomState)
+        {
+            transform.position = targetPosition;
+            transform.rotation = targetRotation;
+            if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+            {
+                _navMeshAgent.nextPosition = targetPosition;
+            }
+            _hasAppliedRoomState = true;
+            return;
+        }
+
+        float positionBlend = 1f - Mathf.Exp(-_roomStatePositionLerpSpeed * Time.deltaTime);
+        float rotationBlend = 1f - Mathf.Exp(-_roomStateRotationLerpSpeed * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, targetPosition, positionBlend);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
+        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.nextPosition = transform.position;
+        }
     }
 
     private MyRoomState GetRoomState()
