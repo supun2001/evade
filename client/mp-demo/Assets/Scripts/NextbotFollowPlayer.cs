@@ -8,6 +8,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private bool _useRoomStateAuthority = true;
     [SerializeField] private float _roomStatePositionLerpSpeed = 12f;
     [SerializeField] private float _roomStateRotationLerpSpeed = 14f;
+    [SerializeField] private float _roomStateSnapDistance = 1.1f;
 
     [Header("Follow")]
     [SerializeField] private float _moveSpeed = 10f;
@@ -270,6 +271,18 @@ public class NextbotFollowPlayer : MonoBehaviour
                 _navMeshAgent.nextPosition = targetPosition;
             }
             _hasAppliedRoomState = true;
+            return;
+        }
+
+        float positionError = Vector3.Distance(transform.position, targetPosition);
+        if (positionError >= _roomStateSnapDistance)
+        {
+            transform.position = targetPosition;
+            transform.rotation = targetRotation;
+            if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+            {
+                _navMeshAgent.nextPosition = targetPosition;
+            }
             return;
         }
 

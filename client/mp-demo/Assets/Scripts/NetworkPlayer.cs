@@ -5,6 +5,8 @@ using UnityEngine.UIElements;
 
 public class NetworkPlayer : MonoBehaviour
 {
+    private const float MaxAcceptedServerHitDistance = 1.85f;
+
     private Player playerState;
     private bool isLocal;
     
@@ -123,6 +125,18 @@ public class NetworkPlayer : MonoBehaviour
         }
 
         Vector3 hitSource = new Vector3(playerState.hitSourceX, playerState.hitSourceY, playerState.hitSourceZ);
+        Vector3 playerPosition = transform.position;
+        float hitDistance = Vector2.Distance(
+            new Vector2(playerPosition.x, playerPosition.z),
+            new Vector2(hitSource.x, hitSource.z));
+
+        if (hitDistance > MaxAcceptedServerHitDistance)
+        {
+            Debug.LogWarning($"Ignoring remote nextbot hit outside accepted range. Distance: {hitDistance:F2}");
+            _lastProcessedHitTriggerId = playerState.hitTriggerId;
+            return;
+        }
+
         if (controller.TriggerNextbotHit(hitSource))
         {
             _lastProcessedHitTriggerId = playerState.hitTriggerId;

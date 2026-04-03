@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Colyseus.Schema;
 using System;
+using System.Collections;
 
 [Serializable]
 public struct NextbotSpawnPointConfig
@@ -14,6 +15,7 @@ public struct NextbotSpawnPointConfig
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
+    private const int PlayerUpdateFieldCount = 25;
 
     public static NetworkManager Instance;
     
@@ -33,6 +35,11 @@ public class NetworkManager : MonoBehaviour
         new NextbotSpawnPointConfig { position = new Vector3(-6.45f, 0f, 2.38f) },
         new NextbotSpawnPointConfig { position = new Vector3(0f, 0f, 7.5f) },
     };
+    [Header("Round Timing")]
+    [Tooltip("How long the intermission lasts before the round starts.")]
+    [SerializeField, Min(1f)] private float intermissionDurationSeconds = 30f;
+    [Tooltip("How long the active survive round lasts.")]
+    [SerializeField, Min(5f)] private float roundDurationSeconds = 180f;
 
     public string serverUrl 
     {
@@ -53,6 +60,23 @@ public class NetworkManager : MonoBehaviour
     private ColyseusRoom<MyRoomState> room;
     public ColyseusRoom<MyRoomState> Room => room;
     private Dictionary<string, GameObject> players = new Dictionary<string, GameObject>();
+    private readonly float[] playerUpdatePayload = new float[PlayerUpdateFieldCount];
+
+    private bool ShouldUseCompactPlayerUpdatePayload
+    {
+        get
+        {
+            try
+            {
+                Uri uri = BuildServerUri(serverUrl);
+                return uri.IsLoopback;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
 
     private void Awake() 
     { 
@@ -77,6 +101,13 @@ public class NetworkManager : MonoBehaviour
 
     public System.Action<string, Player> OnPlayerAddedEvent;
     public System.Action<string, Player> OnPlayerRemovedEvent;
+    public event Action<RoundPhaseMessageData> RoundPhaseChanged;
+    public event Action<RoundAnnouncementMessageData> RoundAnnouncementReceived;
+    public event Action<RoundResultsMessageData> RoundResultsReceived;
+    public event Action RoomLeftEvent;
+    public string LocalSessionId => room != null ? room.SessionId : string.Empty;
+    private bool _hasReceivedRoundPhaseFromServer;
+    private Coroutine _fallbackRoundFlowCoroutine;
 
     private void OnPlayerAdded(string id, Player player)
     {
@@ -156,27 +187,63 @@ public class NetworkManager : MonoBehaviour
         float hitReactionSeed)
     {
         if (room == null) return;
-        
-        room.Send("playerUpdate", new {
-            x = pos.x, y = pos.y, z = pos.z,
-            rotationY = rotY,
-            velocityX = vel.x, velocityY = vel.y, velocityZ = vel.z,
-            animInputX = aX, animInputY = aY,
-            isGrounded = g, isJumping = j,
-            isInjured = injured,
-            isCrouching = crouching,
-            isWallRunning = wallRunning,
-            wallRunSide = wallRunSide,
-            moveInputX = moveInput.x,
-            moveInputY = moveInput.y,
-            visualYaw = visualYaw,
-            cameraRotationX = camRot.x, cameraRotationY = camRot.y,
-            isHitReacting = hitReacting,
-            hitReactionTimeRemaining = hitReactionTimeRemaining,
-            hitReactionPitch = hitReactionPitch,
-            hitReactionRoll = hitReactionRoll,
-            hitReactionSeed = hitReactionSeed
-        });
+
+        if (!ShouldUseCompactPlayerUpdatePayload)
+        {
+            // Keep production / hosted servers on the legacy object payload until the
+            // deployed server is updated to understand the compact array protocol.
+            _ = room.Send("playerUpdate", new {
+                x = pos.x, y = pos.y, z = pos.z,
+                rotationY = rotY,
+                velocityX = vel.x, velocityY = vel.y, velocityZ = vel.z,
+                animInputX = aX, animInputY = aY,
+                isGrounded = g, isJumping = j,
+                isInjured = injured,
+                isCrouching = crouching,
+                isWallRunning = wallRunning,
+                wallRunSide = wallRunSide,
+                moveInputX = moveInput.x,
+                moveInputY = moveInput.y,
+                visualYaw = visualYaw,
+                cameraRotationX = camRot.x, cameraRotationY = camRot.y,
+                isHitReacting = hitReacting,
+                hitReactionTimeRemaining = hitReactionTimeRemaining,
+                hitReactionPitch = hitReactionPitch,
+                hitReactionRoll = hitReactionRoll,
+                hitReactionSeed = hitReactionSeed
+            });
+            return;
+        }
+
+        // Reuse a compact numeric payload to avoid per-send anonymous object allocations
+        // and repeated serialization of property names on every network tick.
+        playerUpdatePayload[0] = pos.x;
+        playerUpdatePayload[1] = pos.y;
+        playerUpdatePayload[2] = pos.z;
+        playerUpdatePayload[3] = rotY;
+        playerUpdatePayload[4] = vel.x;
+        playerUpdatePayload[5] = vel.y;
+        playerUpdatePayload[6] = vel.z;
+        playerUpdatePayload[7] = aX;
+        playerUpdatePayload[8] = aY;
+        playerUpdatePayload[9] = g ? 1f : 0f;
+        playerUpdatePayload[10] = j ? 1f : 0f;
+        playerUpdatePayload[11] = injured ? 1f : 0f;
+        playerUpdatePayload[12] = crouching ? 1f : 0f;
+        playerUpdatePayload[13] = wallRunning ? 1f : 0f;
+        playerUpdatePayload[14] = wallRunSide;
+        playerUpdatePayload[15] = moveInput.x;
+        playerUpdatePayload[16] = moveInput.y;
+        playerUpdatePayload[17] = visualYaw;
+        playerUpdatePayload[18] = camRot.x;
+        playerUpdatePayload[19] = camRot.y;
+        playerUpdatePayload[20] = hitReacting ? 1f : 0f;
+        playerUpdatePayload[21] = hitReactionTimeRemaining;
+        playerUpdatePayload[22] = hitReactionPitch;
+        playerUpdatePayload[23] = hitReactionRoll;
+        playerUpdatePayload[24] = hitReactionSeed;
+
+        _ = room.Send("playerUpdate", playerUpdatePayload);
     }
 
     public void SendReadyState(bool isReady)
@@ -282,9 +349,14 @@ public class NetworkManager : MonoBehaviour
 
         return new Dictionary<string, object>
         {
-            ["nextbotSpawnPoints"] = serializedSpawnPoints
+            ["nextbotSpawnPoints"] = serializedSpawnPoints,
+            ["intermissionDurationMs"] = IntermissionDurationMs,
+            ["roundDurationMs"] = RoundDurationMs,
         };
     }
+
+    private int IntermissionDurationMs => Mathf.Max(1000, Mathf.RoundToInt(intermissionDurationSeconds * 1000f));
+    private int RoundDurationMs => Mathf.Max(5000, Mathf.RoundToInt(roundDurationSeconds * 1000f));
 
     private ColyseusClient CreateClient()
     {
@@ -366,6 +438,19 @@ public class NetworkManager : MonoBehaviour
             {
                 lobby.OnGameStarted();
             }
+
+            if (!_hasReceivedRoundPhaseFromServer)
+            {
+                RestartFallbackRoundFlow();
+                RoundPhaseChanged?.Invoke(new RoundPhaseMessageData
+                {
+                    phase = "intermission",
+                    roundIndex = 0,
+                    timeRemainingMs = IntermissionDurationMs,
+                    roundDurationMs = RoundDurationMs,
+                    intermissionDurationMs = IntermissionDurationMs,
+                });
+            }
         });
 
         room.OnMessage<string>("playerRevived", (_) =>
@@ -379,9 +464,113 @@ public class NetworkManager : MonoBehaviour
             controller?.ApplyNetworkRevive();
         });
 
+        room.OnMessage<string>("roundPlayerReset", (_) =>
+        {
+            if (!players.TryGetValue(room.SessionId, out GameObject localPlayer) || localPlayer == null)
+            {
+                return;
+            }
+
+            PlayerController controller = localPlayer.GetComponent<PlayerController>();
+            controller?.ApplyNetworkRevive();
+        });
+
+        room.OnMessage<string>("roundPhase", (json) =>
+        {
+            RoundPhaseMessageData payload = ParseJsonMessage<RoundPhaseMessageData>(json);
+            if (payload != null)
+            {
+                _hasReceivedRoundPhaseFromServer = true;
+                StopFallbackRoundFlow();
+                RoundPhaseChanged?.Invoke(payload);
+            }
+        });
+
+        room.OnMessage<string>("roundAnnouncement", (json) =>
+        {
+            RoundAnnouncementMessageData payload = ParseJsonMessage<RoundAnnouncementMessageData>(json);
+            if (payload != null)
+            {
+                RoundAnnouncementReceived?.Invoke(payload);
+            }
+        });
+
+        room.OnMessage<string>("roundResults", (json) =>
+        {
+            RoundResultsMessageData payload = ParseJsonMessage<RoundResultsMessageData>(json);
+            if (payload != null)
+            {
+                RoundResultsReceived?.Invoke(payload);
+            }
+        });
+
         var events = Colyseus.Schema.Callbacks.Get(room);
         events.OnAdd(state => state.players, (key, player) => OnPlayerAdded(key, player));
         events.OnRemove(state => state.players, (key, player) => OnPlayerRemoved(key, player));
+    }
+
+    private static T ParseJsonMessage<T>(string json) where T : class
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonUtility.FromJson<T>(json);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning($"Failed to parse room message into {typeof(T).Name}: {exception.Message}");
+            return null;
+        }
+    }
+
+    private void RestartFallbackRoundFlow()
+    {
+        StopFallbackRoundFlow();
+        _fallbackRoundFlowCoroutine = StartCoroutine(RunFallbackRoundFlow());
+    }
+
+    private void StopFallbackRoundFlow()
+    {
+        if (_fallbackRoundFlowCoroutine == null)
+        {
+            return;
+        }
+
+        StopCoroutine(_fallbackRoundFlowCoroutine);
+        _fallbackRoundFlowCoroutine = null;
+    }
+
+    private IEnumerator RunFallbackRoundFlow()
+    {
+        yield return new WaitForSecondsRealtime(IntermissionDurationMs / 1000f);
+
+        if (_hasReceivedRoundPhaseFromServer || room == null)
+        {
+            _fallbackRoundFlowCoroutine = null;
+            yield break;
+        }
+
+        RoundPhaseChanged?.Invoke(new RoundPhaseMessageData
+        {
+            phase = "round",
+            roundIndex = 1,
+            timeRemainingMs = RoundDurationMs,
+            roundDurationMs = RoundDurationMs,
+            intermissionDurationMs = IntermissionDurationMs,
+        });
+
+        RoundAnnouncementReceived?.Invoke(new RoundAnnouncementMessageData
+        {
+            title = "ROUND STARTED",
+            subtitle = "SURVIVE FOR 3 MINUTES",
+            durationSeconds = 3f,
+        });
+
+        _fallbackRoundFlowCoroutine = null;
     }
 
     private async void OnApplicationQuit()
@@ -405,9 +594,12 @@ public class NetworkManager : MonoBehaviour
             {
                 room = null;
                 currentRoomId = "";
+                _hasReceivedRoundPhaseFromServer = false;
+                StopFallbackRoundFlow();
                 // Clear players
                 foreach(var p in players.Values) Destroy(p);
                 players.Clear();
+                RoomLeftEvent?.Invoke();
             }
         }
     }

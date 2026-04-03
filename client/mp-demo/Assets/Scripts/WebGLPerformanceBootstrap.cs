@@ -2,10 +2,48 @@ using UnityEngine;
 
 public class WebGLPerformanceBootstrap : MonoBehaviour
 {
+    public const string LowQualityName = "WebGL Low";
+    public const string MediumQualityName = "WebGL Medium";
+    public const string HighQualityName = "WebGL High";
+    private const string ManualGraphicsQualityPlayerPrefsKey = "WebGLManualGraphicsQuality";
+
+    public static bool TryApplyManualGraphicsQuality(string qualityName)
+    {
+        int qualityIndex = FindQualityIndex(qualityName);
+        if (qualityIndex < 0)
+        {
+            return false;
+        }
+
+        QualitySettings.SetQualityLevel(qualityIndex, true);
+        PlayerPrefs.SetString(ManualGraphicsQualityPlayerPrefsKey, qualityName);
+        PlayerPrefs.Save();
+        return true;
+    }
+
+    public static string GetSavedGraphicsQualityName()
+    {
+        return PlayerPrefs.GetString(ManualGraphicsQualityPlayerPrefsKey, string.Empty);
+    }
+
+    public static string GetActiveGraphicsQualityName()
+    {
+        int qualityIndex = QualitySettings.GetQualityLevel();
+        string[] qualityNames = QualitySettings.names;
+        if (qualityIndex < 0 || qualityIndex >= qualityNames.Length)
+        {
+            return string.Empty;
+        }
+
+        return qualityNames[qualityIndex];
+    }
+
+    public static bool IsManualGraphicsQualitySelected()
+    {
+        return !string.IsNullOrEmpty(GetSavedGraphicsQualityName());
+    }
+
 #if UNITY_WEBGL && !UNITY_EDITOR
-    private const string WebGlHighQualityName = "WebGL High";
-    private const string WebGlMediumQualityName = "WebGL Medium";
-    private const string WebGlLowQualityName = "WebGL Low";
     private const int WebGlTargetFrameRate = 60;
     private const float WarmupDuration = 8f;
     private const float SampleDuration = 4f;
@@ -24,6 +62,7 @@ public class WebGLPerformanceBootstrap : MonoBehaviour
     private int _currentQualityIndex = -1;
     private int _mediumQualityIndex = -1;
     private int _lowQualityIndex = -1;
+    private bool _manualQualityOverrideEnabled;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void Bootstrap()
@@ -44,20 +83,35 @@ public class WebGLPerformanceBootstrap : MonoBehaviour
         Application.targetFrameRate = WebGlTargetFrameRate;
         QualitySettings.vSyncCount = 0;
 
-        _highQualityIndex = FindQualityIndex(WebGlHighQualityName);
-        _mediumQualityIndex = FindQualityIndex(WebGlMediumQualityName);
-        _lowQualityIndex = FindQualityIndex(WebGlLowQualityName);
-        _currentQualityIndex = _mediumQualityIndex >= 0 ? _mediumQualityIndex : _highQualityIndex;
+        _highQualityIndex = FindQualityIndex(HighQualityName);
+        _mediumQualityIndex = FindQualityIndex(MediumQualityName);
+        _lowQualityIndex = FindQualityIndex(LowQualityName);
+        _currentQualityIndex = QualitySettings.GetQualityLevel();
 
-        if (_currentQualityIndex >= 0 && QualitySettings.GetQualityLevel() != _currentQualityIndex)
+        string savedQualityName = GetSavedGraphicsQualityName();
+        int savedQualityIndex = FindQualityIndex(savedQualityName);
+        if (savedQualityIndex >= 0)
         {
-            QualitySettings.SetQualityLevel(_currentQualityIndex, true);
+            _manualQualityOverrideEnabled = true;
+            _currentQualityIndex = savedQualityIndex;
+            if (QualitySettings.GetQualityLevel() != _currentQualityIndex)
+            {
+                QualitySettings.SetQualityLevel(_currentQualityIndex, true);
+            }
+        }
+        else if (_currentQualityIndex < 0)
+        {
+            _currentQualityIndex = _mediumQualityIndex >= 0 ? _mediumQualityIndex : _highQualityIndex;
+            if (_currentQualityIndex >= 0 && QualitySettings.GetQualityLevel() != _currentQualityIndex)
+            {
+                QualitySettings.SetQualityLevel(_currentQualityIndex, true);
+            }
         }
     }
 
     private void Update()
     {
-        if (_currentQualityIndex < 0)
+        if (_currentQualityIndex < 0 || _manualQualityOverrideEnabled)
         {
             return;
         }
@@ -130,9 +184,15 @@ public class WebGLPerformanceBootstrap : MonoBehaviour
         _sampleFrameCount = 0;
         _qualityChangeCooldownTimer = QualityChangeCooldown;
     }
+#endif
 
     private static int FindQualityIndex(string qualityName)
     {
+        if (string.IsNullOrEmpty(qualityName))
+        {
+            return -1;
+        }
+
         string[] qualityNames = QualitySettings.names;
         for (int i = 0; i < qualityNames.Length; i++)
         {
@@ -144,5 +204,4 @@ public class WebGLPerformanceBootstrap : MonoBehaviour
 
         return -1;
     }
-#endif
 }

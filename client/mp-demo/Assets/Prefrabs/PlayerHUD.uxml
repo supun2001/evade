@@ -9,6 +9,82 @@
         name="hud-root"
         style="flex-grow: 1; position: relative;"
     >
+        <ui:VisualElement
+            name="round-phase-container"
+            style="
+                position: absolute;
+                left: 50%;
+                top: 20px;
+                translate: -50% 0;
+                align-items: center;
+                display: none;
+            "
+        >
+            <ui:Label
+                name="round-phase-title-label"
+                text="INTERMISSION"
+                style="
+                    color: rgb(168, 216, 255);
+                    background-color: rgba(8, 14, 22, 0.86);
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    padding-top: 6px;
+                    padding-bottom: 4px;
+                    border-top-left-radius: 10px;
+                    border-top-right-radius: 10px;
+                    border-bottom-left-radius: 10px;
+                    border-bottom-right-radius: 10px;
+                    font-size: 20px;
+                    -unity-font-style: bold;
+                    unity-text-align: middle-center;
+                "
+            />
+            <ui:Label
+                name="round-phase-timer-label"
+                text="0:30"
+                style="
+                    margin-top: 6px;
+                    color: rgb(255, 255, 255);
+                    font-size: 32px;
+                    -unity-font-style: bold;
+                    unity-text-align: middle-center;
+                "
+            />
+        </ui:VisualElement>
+        <ui:VisualElement
+            name="round-announcement-container"
+            style="
+                position: absolute;
+                left: 50%;
+                top: 132px;
+                translate: -50% 0;
+                min-width: 420px;
+                align-items: center;
+                display: none;
+            "
+        >
+            <ui:Label
+                name="round-announcement-title-label"
+                text="ROUND STARTED"
+                style="
+                    color: rgb(255, 118, 118);
+                    font-size: 18px;
+                    -unity-font-style: bold;
+                    unity-text-align: middle-center;
+                "
+            />
+            <ui:Label
+                name="round-announcement-subtitle-label"
+                text="SURVIVE FOR 3 MINUTES"
+                style="
+                    margin-top: 4px;
+                    color: rgb(255, 220, 158);
+                    font-size: 40px;
+                    -unity-font-style: bold;
+                    unity-text-align: middle-center;
+                "
+            />
+        </ui:VisualElement>
         <ui:Label
             name="speed-label"
             text="Speed 0.0"
@@ -303,6 +379,118 @@
                         border-bottom-right-radius: 10px;
                         font-size: 18px;
                         -unity-font-style: bold;
+                    "
+                />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement
+            name="round-results-overlay"
+            style="
+                display: none;
+                position: absolute;
+                left: 0;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                align-items: center;
+                justify-content: center;
+                background-color: rgba(0, 0, 0, 0.36);
+            "
+        >
+            <ui:VisualElement
+                name="round-results-card"
+                style="
+                    width: 620px;
+                    max-width: 92%;
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-top: 22px;
+                    padding-bottom: 22px;
+                    background-color: rgba(12, 16, 22, 0.94);
+                    border-top-left-radius: 16px;
+                    border-top-right-radius: 16px;
+                    border-bottom-left-radius: 16px;
+                    border-bottom-right-radius: 16px;
+                    border-left-width: 1px;
+                    border-right-width: 1px;
+                    border-top-width: 1px;
+                    border-bottom-width: 1px;
+                    border-left-color: rgba(255, 255, 255, 0.08);
+                    border-right-color: rgba(255, 255, 255, 0.08);
+                    border-top-color: rgba(255, 255, 255, 0.08);
+                    border-bottom-color: rgba(255, 255, 255, 0.08);
+                "
+            >
+                <ui:Label
+                    name="round-results-title-label"
+                    text="SURVIVED"
+                    style="
+                        color: rgb(255, 193, 88);
+                        font-size: 44px;
+                        -unity-font-style: bold;
+                    "
+                />
+                <ui:Label
+                    text="OVERVIEW"
+                    style="
+                        margin-top: 12px;
+                        color: rgb(255, 255, 255);
+                        font-size: 18px;
+                        -unity-font-style: bold;
+                    "
+                />
+                <ui:VisualElement
+                    style="
+                        flex-direction: row;
+                        margin-top: 10px;
+                    "
+                >
+                    <ui:VisualElement style="flex-grow: 1;">
+                        <ui:Label text="BEST TIME" style="color: rgb(255, 255, 255); font-size: 16px; -unity-font-style: bold;" />
+                        <ui:Label name="round-results-best-time-value" text="0:00" style="margin-top: 6px; color: rgb(255, 255, 255); font-size: 26px; -unity-font-style: bold;" />
+                    </ui:VisualElement>
+                    <ui:VisualElement style="flex-grow: 1;">
+                        <ui:Label text="REVIVES" style="color: rgb(255, 255, 255); font-size: 16px; -unity-font-style: bold;" />
+                        <ui:Label name="round-results-revives-value" text="0" style="margin-top: 6px; color: rgb(122, 255, 125); font-size: 26px; -unity-font-style: bold;" />
+                    </ui:VisualElement>
+                    <ui:VisualElement style="flex-grow: 1;">
+                        <ui:Label text="DOWNED" style="color: rgb(255, 255, 255); font-size: 16px; -unity-font-style: bold;" />
+                        <ui:Label name="round-results-downed-value" text="0" style="margin-top: 6px; color: rgb(255, 104, 104); font-size: 26px; -unity-font-style: bold;" />
+                    </ui:VisualElement>
+                </ui:VisualElement>
+                <ui:Label
+                    text="LEADERBOARD"
+                    style="
+                        margin-top: 22px;
+                        color: rgb(255, 255, 255);
+                        font-size: 18px;
+                        -unity-font-style: bold;
+                    "
+                />
+                <ui:VisualElement
+                    name="round-results-leaderboard-list"
+                    style="
+                        margin-top: 10px;
+                        padding-top: 10px;
+                        padding-right: 12px;
+                        padding-bottom: 10px;
+                        padding-left: 12px;
+                        min-height: 188px;
+                        background-color: rgba(255, 255, 255, 0.04);
+                        border-top-left-radius: 10px;
+                        border-top-right-radius: 10px;
+                        border-bottom-left-radius: 10px;
+                        border-bottom-right-radius: 10px;
+                    "
+                />
+                <ui:Label
+                    name="round-results-close-hint-label"
+                    text="Press Tab, Enter, or Esc to close"
+                    style="
+                        margin-top: 16px;
+                        color: rgba(255, 255, 255, 0.72);
+                        font-size: 15px;
+                        unity-text-align: middle-right;
                     "
                 />
             </ui:VisualElement>

@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
@@ -27,6 +28,11 @@ public class LobbyUI : MonoBehaviour
     private bool hasAutoReadiedCurrentRoom = false;
     private UIDocument _menuDocument;
     private UIToolkitButton _startButton;
+    private UIToolkitButton _settingsButton;
+    private UIToolkitButton _graphicsLowButton;
+    private UIToolkitButton _graphicsMediumButton;
+    private Label _graphicsCurrentLabel;
+    private VisualElement _graphicsSettingsPanel;
     private bool _menuEventsBound;
     #endregion
 
@@ -42,8 +48,7 @@ public class LobbyUI : MonoBehaviour
             Debug.LogError("LobbyUI: Menu Panel is not assigned in the Inspector!");
         }
 
-        CacheMenuUi();
-        BindMenuEvents();
+        RefreshMenuUiBindings();
 
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
 
@@ -91,6 +96,7 @@ public class LobbyUI : MonoBehaviour
     private void SwitchToMenu()
     {
         menuPanel.SetActive(true);
+        RefreshMenuUiBindings();
         hasAutoReadiedCurrentRoom = false;
         SetLocalPlayerInput(false);
         SetStartButtonEnabled(true);
@@ -242,10 +248,29 @@ public class LobbyUI : MonoBehaviour
         }
 
         _startButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("start-button");
+        _settingsButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("settings-button");
+        _graphicsLowButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-low-button");
+        _graphicsMediumButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-medium-button");
+        _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
+        _graphicsSettingsPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("graphics-settings-panel");
         if (_startButton == null)
         {
             Debug.LogWarning("LobbyUI: Start button was not found in MainMenu.uxml.");
         }
+
+        if (_graphicsSettingsPanel != null)
+        {
+            _graphicsSettingsPanel.style.display = DisplayStyle.None;
+        }
+
+        RefreshGraphicsSettingsUi();
+    }
+
+    private void RefreshMenuUiBindings()
+    {
+        UnbindMenuEvents();
+        CacheMenuUi();
+        BindMenuEvents();
     }
 
     private void BindMenuEvents()
@@ -256,6 +281,18 @@ public class LobbyUI : MonoBehaviour
         }
 
         _startButton.clicked += HandleStartButtonClicked;
+        if (_settingsButton != null)
+        {
+            _settingsButton.clicked += HandleSettingsButtonClicked;
+        }
+        if (_graphicsLowButton != null)
+        {
+            _graphicsLowButton.clicked += HandleGraphicsLowButtonClicked;
+        }
+        if (_graphicsMediumButton != null)
+        {
+            _graphicsMediumButton.clicked += HandleGraphicsMediumButtonClicked;
+        }
         _menuEventsBound = true;
     }
 
@@ -267,6 +304,18 @@ public class LobbyUI : MonoBehaviour
         }
 
         _startButton.clicked -= HandleStartButtonClicked;
+        if (_settingsButton != null)
+        {
+            _settingsButton.clicked -= HandleSettingsButtonClicked;
+        }
+        if (_graphicsLowButton != null)
+        {
+            _graphicsLowButton.clicked -= HandleGraphicsLowButtonClicked;
+        }
+        if (_graphicsMediumButton != null)
+        {
+            _graphicsMediumButton.clicked -= HandleGraphicsMediumButtonClicked;
+        }
         _menuEventsBound = false;
     }
 
@@ -289,6 +338,80 @@ public class LobbyUI : MonoBehaviour
         }
 
         _startButton.SetEnabled(enabled);
+    }
+
+    private void HandleSettingsButtonClicked()
+    {
+        if (_graphicsSettingsPanel == null)
+        {
+            return;
+        }
+
+        bool showSettings = _graphicsSettingsPanel.style.display == DisplayStyle.None;
+        _graphicsSettingsPanel.style.display = showSettings ? DisplayStyle.Flex : DisplayStyle.None;
+        RefreshGraphicsSettingsUi();
+    }
+
+    private void HandleGraphicsLowButtonClicked()
+    {
+        ApplyGraphicsQuality(WebGLPerformanceBootstrap.LowQualityName);
+    }
+
+    private void HandleGraphicsMediumButtonClicked()
+    {
+        ApplyGraphicsQuality(WebGLPerformanceBootstrap.MediumQualityName);
+    }
+
+    private void ApplyGraphicsQuality(string qualityName)
+    {
+        if (!WebGLPerformanceBootstrap.TryApplyManualGraphicsQuality(qualityName))
+        {
+            ShowNotification($"Graphics preset '{qualityName}' is not available.");
+            return;
+        }
+
+        RefreshGraphicsSettingsUi();
+        ShowNotification($"Graphics set to {FormatGraphicsQualityName(qualityName)}");
+    }
+
+    private void RefreshGraphicsSettingsUi()
+    {
+        string activeQualityName = WebGLPerformanceBootstrap.GetActiveGraphicsQualityName();
+        string formattedName = FormatGraphicsQualityName(activeQualityName);
+
+        if (_graphicsCurrentLabel != null)
+        {
+            _graphicsCurrentLabel.text = $"Current: {formattedName}";
+        }
+
+        if (_graphicsLowButton != null)
+        {
+            bool isLowSelected = string.Equals(activeQualityName, WebGLPerformanceBootstrap.LowQualityName, StringComparison.Ordinal);
+            _graphicsLowButton.text = isLowSelected ? "Low Selected" : "Low";
+            _graphicsLowButton.SetEnabled(!isLowSelected);
+        }
+
+        if (_graphicsMediumButton != null)
+        {
+            bool isMediumSelected = string.Equals(activeQualityName, WebGLPerformanceBootstrap.MediumQualityName, StringComparison.Ordinal);
+            _graphicsMediumButton.text = isMediumSelected ? "Medium Selected" : "Medium";
+            _graphicsMediumButton.SetEnabled(!isMediumSelected);
+        }
+    }
+
+    private static string FormatGraphicsQualityName(string qualityName)
+    {
+        if (string.IsNullOrEmpty(qualityName))
+        {
+            return "Unknown";
+        }
+
+        if (qualityName.StartsWith("WebGL ", StringComparison.Ordinal))
+        {
+            return qualityName.Substring("WebGL ".Length);
+        }
+
+        return qualityName;
     }
 
     private void SetLocalPlayerInput(bool enabled)

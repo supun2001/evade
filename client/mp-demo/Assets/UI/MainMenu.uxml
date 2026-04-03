@@ -9,10 +9,50 @@
         name="main-menu-root"
         style="flex-grow: 1; align-items: center; justify-content: center;"
     >
-        <ui:Button
-            name="start-button"
-            text="Start"
-            style="width: 220px; height: 64px; font-size: 24px;"
-        />
+        <ui:VisualElement
+            name="main-menu-card"
+            style="min-width: 280px; padding-top: 22px; padding-right: 24px; padding-bottom: 22px; padding-left: 24px; background-color: rgba(12, 16, 24, 0.82); border-top-left-radius: 18px; border-top-right-radius: 18px; border-bottom-right-radius: 18px; border-bottom-left-radius: 18px; align-items: stretch;"
+        >
+            <ui:Button
+                name="start-button"
+                text="Start"
+                style="height: 64px; font-size: 24px; margin-bottom: 12px;"
+            />
+            <ui:Button
+                name="settings-button"
+                text="Settings"
+                style="height: 46px; font-size: 18px;"
+            />
+            <ui:VisualElement
+                name="graphics-settings-panel"
+                style="display: none; margin-top: 14px; padding-top: 14px; padding-right: 14px; padding-bottom: 14px; padding-left: 14px; background-color: rgba(255, 255, 255, 0.08); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-right-radius: 12px; border-bottom-left-radius: 12px;"
+            >
+                <ui:Label
+                    name="graphics-title-label"
+                    text="Graphics"
+                    style="font-size: 18px; -unity-font-style: bold; margin-bottom: 4px;"
+                />
+                <ui:Label
+                    name="graphics-current-label"
+                    text="Current: Medium"
+                    style="font-size: 13px; color: rgba(255, 255, 255, 0.75); margin-bottom: 10px;"
+                />
+                <ui:VisualElement
+                    name="graphics-buttons-row"
+                    style="flex-direction: row; justify-content: space-between;"
+                >
+                    <ui:Button
+                        name="graphics-low-button"
+                        text="Low"
+                        style="flex-grow: 1; height: 42px; margin-right: 6px;"
+                    />
+                    <ui:Button
+                        name="graphics-medium-button"
+                        text="Medium"
+                        style="flex-grow: 1; height: 42px; margin-left: 6px;"
+                    />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>

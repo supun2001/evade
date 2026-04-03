@@ -35,15 +35,97 @@ const PLAYER_MIN_SPAWN_DISTANCE_FROM_NEXTBOT = 8;
 const PLAYER_SPAWN_RANGE = 10;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
+const DEFAULT_INTERMISSION_DURATION_MS = 30_000;
+const DEFAULT_ROUND_DURATION_MS = 180_000;
+const PLAYER_UPDATE_X = 0;
+const PLAYER_UPDATE_Y = 1;
+const PLAYER_UPDATE_Z = 2;
+const PLAYER_UPDATE_ROTATION_Y = 3;
+const PLAYER_UPDATE_VELOCITY_X = 4;
+const PLAYER_UPDATE_VELOCITY_Y = 5;
+const PLAYER_UPDATE_VELOCITY_Z = 6;
+const PLAYER_UPDATE_ANIM_INPUT_X = 7;
+const PLAYER_UPDATE_ANIM_INPUT_Y = 8;
+const PLAYER_UPDATE_IS_GROUNDED = 9;
+const PLAYER_UPDATE_IS_JUMPING = 10;
+const PLAYER_UPDATE_IS_INJURED = 11;
+const PLAYER_UPDATE_IS_CROUCHING = 12;
+const PLAYER_UPDATE_IS_WALL_RUNNING = 13;
+const PLAYER_UPDATE_WALL_RUN_SIDE = 14;
+const PLAYER_UPDATE_MOVE_INPUT_X = 15;
+const PLAYER_UPDATE_MOVE_INPUT_Y = 16;
+const PLAYER_UPDATE_VISUAL_YAW = 17;
+const PLAYER_UPDATE_CAMERA_ROTATION_X = 18;
+const PLAYER_UPDATE_CAMERA_ROTATION_Y = 19;
+const PLAYER_UPDATE_IS_HIT_REACTING = 20;
+const PLAYER_UPDATE_HIT_REACTION_TIME_REMAINING = 21;
+const PLAYER_UPDATE_HIT_REACTION_PITCH = 22;
+const PLAYER_UPDATE_HIT_REACTION_ROLL = 23;
+const PLAYER_UPDATE_HIT_REACTION_SEED = 24;
 
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
+type RoundPhase = "waiting" | "intermission" | "round";
 type ScoredTarget = {
   player: Player;
   score: number;
   predicted: PredictedTargetPosition;
   eligible: boolean;
 };
+type PlayerUpdateMessage = Record<string, unknown> | number[];
+type PlayerRoundStats = {
+  bestTimeMs: number;
+  currentLifeStartMs: number | null;
+  downedCount: number;
+  revivesDone: number;
+  joinOrder: number;
+  displayName: string;
+};
+type RoundPhaseMessage = {
+  phase: RoundPhase;
+  roundIndex: number;
+  timeRemainingMs: number;
+  roundDurationMs: number;
+  intermissionDurationMs: number;
+};
+type RoundAnnouncementMessage = {
+  title: string;
+  subtitle: string;
+  durationSeconds: number;
+};
+type RoundResultEntry = {
+  sessionId: string;
+  displayName: string;
+  bestTimeMs: number;
+  downedCount: number;
+  revivesDone: number;
+  joinOrder: number;
+  rank: number;
+};
+type RoundResultsMessage = {
+  roundIndex: number;
+  roundDurationMs: number;
+  entries: RoundResultEntry[];
+};
+
+function readPlayerUpdateNumber(message: PlayerUpdateMessage, index: number, key: string): number {
+  if (Array.isArray(message)) {
+    const value = message[index];
+    return typeof value === "number" ? value : 0;
+  }
+
+  const value = message[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function readPlayerUpdateBoolean(message: PlayerUpdateMessage, index: number, key: string): boolean {
+  if (Array.isArray(message)) {
+    return readPlayerUpdateNumber(message, index, key) !== 0;
+  }
+
+  const value = message[key];
+  return value === true || value === 1;
+}
 
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 4;
@@ -61,9 +143,20 @@ export class MyRoom extends Room<MyRoomState> {
   private recentReachableUntil = new Map<string, number>();
   private lastKnownTargetPosition?: SpawnPoint;
   private playerRevivedUntil = new Map<string, number>();
+  private currentPhase: RoundPhase = "waiting";
+  private phaseEndsAt = 0;
+  private roundIndex = 0;
+  private roundStats = new Map<string, PlayerRoundStats>();
+  private nextJoinOrder = 1;
+  private hasStartedMatchFlow = false;
+  private latestRoundResultsJson = "";
+  private intermissionDurationMs = DEFAULT_INTERMISSION_DURATION_MS;
+  private roundDurationMs = DEFAULT_ROUND_DURATION_MS;
 
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
+    this.intermissionDurationMs = this.resolvePositiveDurationMs(options?.intermissionDurationMs, DEFAULT_INTERMISSION_DURATION_MS);
+    this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
     this.activeNextbotSpawnPoint = this.nextbotSpawnPoints[0];
     this.initializeNextbot();
 
@@ -78,40 +171,42 @@ export class MyRoom extends Room<MyRoomState> {
       const now = Date.now();
       const revivedUntil = this.playerRevivedUntil.get(client.sessionId) ?? 0;
       const ignoreStaleInjuredState = revivedUntil > now;
+      const playerUpdate = message as PlayerUpdateMessage;
+      const wasInjured = player.isInjured;
 
       // Camera is informational, so keep it in sync every tick.
-      player.cameraRotationX = message.cameraRotationX;
-      player.cameraRotationY = message.cameraRotationY;
+      player.cameraRotationX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_X, "cameraRotationX");
+      player.cameraRotationY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_Y, "cameraRotationY");
       player.timestamp = now;
 
       // Position & Rotation
-      player.x = message.x;
-      player.y = message.y;
-      player.z = message.z;
-      player.rotationY = message.rotationY;
+      player.x = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_X, "x");
+      player.y = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_Y, "y");
+      player.z = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_Z, "z");
+      player.rotationY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ROTATION_Y, "rotationY");
 
       // Velocity
-      player.velocityX = message.velocityX;
-      player.velocityY = message.velocityY;
-      player.velocityZ = message.velocityZ;
+      player.velocityX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_X, "velocityX");
+      player.velocityY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_Y, "velocityY");
+      player.velocityZ = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_Z, "velocityZ");
 
       // Animation States
-      player.animInputX = message.animInputX;
-      player.animInputY = message.animInputY;
-      player.isGrounded = message.isGrounded;
-      player.isJumping = message.isJumping;
-      player.isInjured = ignoreStaleInjuredState ? false : message.isInjured;
-      player.isCrouching = message.isCrouching;
-      player.isWallRunning = message.isWallRunning;
-      player.wallRunSide = message.wallRunSide;
-      player.moveInputX = message.moveInputX;
-      player.moveInputY = message.moveInputY;
-      player.visualYaw = message.visualYaw;
-      player.isHitReacting = ignoreStaleInjuredState ? false : message.isHitReacting;
-      player.hitReactionTimeRemaining = ignoreStaleInjuredState ? 0 : message.hitReactionTimeRemaining;
-      player.hitReactionPitch = ignoreStaleInjuredState ? 0 : message.hitReactionPitch;
-      player.hitReactionRoll = ignoreStaleInjuredState ? 0 : message.hitReactionRoll;
-      player.hitReactionSeed = ignoreStaleInjuredState ? 0 : message.hitReactionSeed;
+      player.animInputX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_X, "animInputX");
+      player.animInputY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_Y, "animInputY");
+      player.isGrounded = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_GROUNDED, "isGrounded");
+      player.isJumping = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_JUMPING, "isJumping");
+      player.isInjured = ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_INJURED, "isInjured");
+      player.isCrouching = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_CROUCHING, "isCrouching");
+      player.isWallRunning = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_WALL_RUNNING, "isWallRunning");
+      player.wallRunSide = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_WALL_RUN_SIDE, "wallRunSide");
+      player.moveInputX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_X, "moveInputX");
+      player.moveInputY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_Y, "moveInputY");
+      player.visualYaw = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VISUAL_YAW, "visualYaw");
+      player.isHitReacting = ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_HIT_REACTING, "isHitReacting");
+      player.hitReactionTimeRemaining = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_TIME_REMAINING, "hitReactionTimeRemaining");
+      player.hitReactionPitch = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_PITCH, "hitReactionPitch");
+      player.hitReactionRoll = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_ROLL, "hitReactionRoll");
+      player.hitReactionSeed = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_SEED, "hitReactionSeed");
 
       if (player.isBeingCarried) {
         player.velocityX = 0;
@@ -126,6 +221,10 @@ export class MyRoom extends Room<MyRoomState> {
         player.isWallRunning = false;
         player.wallRunSide = 0;
       }
+
+      if (!wasInjured && player.isInjured) {
+        this.recordPlayerDowned(client.sessionId, now);
+      }
     });
 
     this.onMessage("playerReady", (client, isReady) => {
@@ -139,16 +238,7 @@ export class MyRoom extends Room<MyRoomState> {
           if (!p.isReady) allReady = false;
         });
 
-        if (allReady && this.state.players.size > 0) {
-          this.state.isGameStarted = true;
-          this.resetNextbotToSpawnPoint();
-          const safeUntil = Date.now() + NEXTBOT_START_GRACE_MS;
-          this.state.players.forEach((readyPlayer) => {
-            this.playerSafeUntil.set(readyPlayer.sessionId, safeUntil);
-          });
-          this.broadcast("startGame");
-          // this.lock(); // Removed lock to allow late joiners
-        }
+        this.tryStartRoundLoop();
       }
     });
 
@@ -178,6 +268,11 @@ export class MyRoom extends Room<MyRoomState> {
       target.hitReactionRoll = 0;
       target.hitReactionSeed = 0;
       this.playerRevivedUntil.set(targetSessionId, Date.now() + PLAYER_REVIVE_SYNC_GRACE_MS);
+      this.recordPlayerRevived(targetSessionId, Date.now());
+      const reviverStats = this.roundStats.get(client.sessionId);
+      if (reviverStats != null && this.currentPhase === "round") {
+        reviverStats.revivesDone += 1;
+      }
 
       const targetClient = this.clients.find((roomClient) => roomClient.sessionId === targetSessionId);
       targetClient?.send("playerRevived", "revived");
@@ -241,8 +336,8 @@ export class MyRoom extends Room<MyRoomState> {
     const player = new Player();
     player.sessionId = client.sessionId;
 
-    // Late joiners are automatically ready if game already started
-    if (this.state.isGameStarted) {
+    // Late joiners are automatically ready after the room flow has started.
+    if (this.currentPhase !== "waiting" || this.hasStartedMatchFlow) {
       player.isReady = true;
     }
 
@@ -276,6 +371,22 @@ export class MyRoom extends Room<MyRoomState> {
     //Add player to state
     this.state.players.set(client.sessionId, player);
     this.playerSafeUntil.set(client.sessionId, Date.now() + NEXTBOT_START_GRACE_MS);
+    this.roundStats.set(client.sessionId, {
+      bestTimeMs: 0,
+      currentLifeStartMs: this.currentPhase === "round" ? Date.now() : null,
+      downedCount: 0,
+      revivesDone: 0,
+      joinOrder: this.nextJoinOrder,
+      displayName: `Player ${this.nextJoinOrder}`,
+    });
+    this.nextJoinOrder += 1;
+
+    this.sendRoundPhaseToClient(client);
+    if (this.latestRoundResultsJson.length > 0 && this.currentPhase === "intermission") {
+      client.send("roundResults", this.latestRoundResultsJson);
+    }
+
+    this.tryStartRoundLoop();
   }
 
   onLeave(client: Client, consented: boolean) {
@@ -286,10 +397,17 @@ export class MyRoom extends Room<MyRoomState> {
     this.state.players.delete(client.sessionId);
     this.playerSafeUntil.delete(client.sessionId);
     this.playerRevivedUntil.delete(client.sessionId);
+    this.roundStats.delete(client.sessionId);
 
     // If no players left, reset game state
     if (this.state.players.size === 0) {
       this.state.isGameStarted = false;
+      this.currentPhase = "waiting";
+      this.phaseEndsAt = 0;
+      this.roundIndex = 0;
+      this.hasStartedMatchFlow = false;
+      this.latestRoundResultsJson = "";
+      this.clearNextbotTargetingState();
     }
 
     // Unlock the room for late commers 
@@ -331,6 +449,7 @@ export class MyRoom extends Room<MyRoomState> {
   update(deltaTime: number) {
     const nextbot = this.state.nextbot;
     const now = Date.now();
+    this.updateRoundFlow(now);
     if (!NEXTBOTS_ENABLED) {
       nextbot.isActive = false;
       this.clearNextbotTargetingState();
@@ -438,6 +557,7 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     this.nextInjuryAt = Date.now() + NEXTBOT_INJURY_COOLDOWN_MS;
+    this.recordPlayerDowned(target.sessionId, Date.now());
     target.hitTriggerId += 1;
     target.hitSourceX = nextbot.x;
     target.hitSourceY = nextbot.y;
@@ -766,6 +886,248 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     return parsedPoints;
+  }
+
+  private tryStartRoundLoop() {
+    if (this.currentPhase !== "waiting" || this.state.players.size === 0) {
+      return;
+    }
+
+    let allReady = true;
+    this.state.players.forEach((player) => {
+      if (!player.isReady) {
+        allReady = false;
+      }
+    });
+
+    if (!allReady) {
+      return;
+    }
+
+    if (!this.hasStartedMatchFlow) {
+      this.hasStartedMatchFlow = true;
+      this.broadcast("startGame");
+    }
+
+    this.beginIntermission(Date.now());
+  }
+
+  private updateRoundFlow(now: number) {
+    if (this.state.players.size === 0) {
+      return;
+    }
+
+    if (this.currentPhase === "intermission" && now >= this.phaseEndsAt) {
+      this.beginRound(now);
+      return;
+    }
+
+    if (this.currentPhase === "round" && now >= this.phaseEndsAt) {
+      this.endRound(now);
+    }
+  }
+
+  private beginIntermission(now: number) {
+    this.currentPhase = "intermission";
+    this.phaseEndsAt = now + this.intermissionDurationMs;
+    this.state.isGameStarted = false;
+    this.resetNextbotToSpawnPoint();
+    this.resetPlayersForIntermission(now);
+    this.broadcastRoundPhase();
+  }
+
+  private beginRound(now: number) {
+    this.currentPhase = "round";
+    this.roundIndex += 1;
+    this.phaseEndsAt = now + this.roundDurationMs;
+    this.state.isGameStarted = true;
+    this.latestRoundResultsJson = "";
+    this.resetNextbotToSpawnPoint();
+    this.resetPlayersForRoundStart(now);
+    this.broadcastRoundPhase();
+    this.broadcastRoundAnnouncement({
+      title: "ROUND STARTED",
+      subtitle: "SURVIVE FOR 3 MINUTES",
+      durationSeconds: 3,
+    });
+  }
+
+  private endRound(now: number) {
+    const results = this.buildRoundResults(now);
+    this.beginIntermission(now);
+    this.latestRoundResultsJson = JSON.stringify(results);
+    this.broadcast("roundResults", this.latestRoundResultsJson);
+  }
+
+  private resetPlayersForIntermission(now: number) {
+    this.state.players.forEach((player) => {
+      this.clearCarryStateForPlayer(player.sessionId);
+      player.isInjured = false;
+      player.isHitReacting = false;
+      player.hitReactionTimeRemaining = 0;
+      player.hitReactionPitch = 0;
+      player.hitReactionRoll = 0;
+      player.hitReactionSeed = 0;
+      player.hitTriggerId = 0;
+      player.hitSourceX = 0;
+      player.hitSourceY = 0;
+      player.hitSourceZ = 0;
+      this.playerSafeUntil.set(player.sessionId, now + this.intermissionDurationMs + NEXTBOT_START_GRACE_MS);
+      this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
+    });
+
+    this.broadcast("roundPlayerReset", "reset");
+  }
+
+  private resetPlayersForRoundStart(now: number) {
+    const safeUntil = now + NEXTBOT_START_GRACE_MS;
+    this.state.players.forEach((player) => {
+      const stats = this.roundStats.get(player.sessionId);
+      if (stats != null) {
+        stats.bestTimeMs = 0;
+        stats.currentLifeStartMs = now;
+        stats.downedCount = 0;
+        stats.revivesDone = 0;
+      }
+
+      this.clearCarryStateForPlayer(player.sessionId);
+      player.isInjured = false;
+      player.isHitReacting = false;
+      player.hitReactionTimeRemaining = 0;
+      player.hitReactionPitch = 0;
+      player.hitReactionRoll = 0;
+      player.hitReactionSeed = 0;
+      player.hitTriggerId = 0;
+      player.hitSourceX = 0;
+      player.hitSourceY = 0;
+      player.hitSourceZ = 0;
+      player.timestamp = now;
+      this.playerSafeUntil.set(player.sessionId, safeUntil);
+      this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
+    });
+
+    this.broadcast("roundPlayerReset", "reset");
+  }
+
+  private recordPlayerDowned(sessionId: string, now: number) {
+    if (this.currentPhase !== "round") {
+      return;
+    }
+
+    const stats = this.roundStats.get(sessionId);
+    if (stats == null || stats.currentLifeStartMs == null) {
+      return;
+    }
+
+    const runTime = Math.max(0, now - stats.currentLifeStartMs);
+    stats.bestTimeMs = Math.max(stats.bestTimeMs, runTime);
+    stats.downedCount += 1;
+    stats.currentLifeStartMs = null;
+  }
+
+  private recordPlayerRevived(sessionId: string, now: number) {
+    if (this.currentPhase !== "round") {
+      return;
+    }
+
+    const stats = this.roundStats.get(sessionId);
+    if (stats == null) {
+      return;
+    }
+
+    stats.currentLifeStartMs = now;
+  }
+
+  private buildRoundResults(now: number): RoundResultsMessage {
+    const entries: RoundResultEntry[] = [];
+
+    this.state.players.forEach((player) => {
+      const stats = this.roundStats.get(player.sessionId);
+      if (stats == null) {
+        return;
+      }
+
+      if (stats.currentLifeStartMs != null) {
+        const runTime = Math.max(0, now - stats.currentLifeStartMs);
+        stats.bestTimeMs = Math.max(stats.bestTimeMs, runTime);
+      }
+
+      entries.push({
+        sessionId: player.sessionId,
+        displayName: stats.displayName,
+        bestTimeMs: stats.bestTimeMs,
+        downedCount: stats.downedCount,
+        revivesDone: stats.revivesDone,
+        joinOrder: stats.joinOrder,
+        rank: 0,
+      });
+    });
+
+    entries.sort((a, b) => {
+      if (a.bestTimeMs !== b.bestTimeMs) {
+        return b.bestTimeMs - a.bestTimeMs;
+      }
+
+      if (a.downedCount !== b.downedCount) {
+        return a.downedCount - b.downedCount;
+      }
+
+      if (a.revivesDone !== b.revivesDone) {
+        return b.revivesDone - a.revivesDone;
+      }
+
+      return a.joinOrder - b.joinOrder;
+    });
+
+    for (let i = 0; i < entries.length; i++) {
+      const previous = i > 0 ? entries[i - 1] : undefined;
+      const current = entries[i];
+      if (previous != null
+        && previous.bestTimeMs === current.bestTimeMs
+        && previous.downedCount === current.downedCount
+        && previous.revivesDone === current.revivesDone) {
+        current.rank = previous.rank;
+      } else {
+        current.rank = i + 1;
+      }
+    }
+
+    return {
+      roundIndex: this.roundIndex,
+      roundDurationMs: this.roundDurationMs,
+      entries,
+    };
+  }
+
+  private createRoundPhaseMessage(now: number): RoundPhaseMessage {
+    return {
+      phase: this.currentPhase,
+      roundIndex: this.roundIndex,
+      timeRemainingMs: this.phaseEndsAt > 0 ? Math.max(0, this.phaseEndsAt - now) : 0,
+      roundDurationMs: this.roundDurationMs,
+      intermissionDurationMs: this.intermissionDurationMs,
+    };
+  }
+
+  private broadcastRoundPhase() {
+    this.broadcast("roundPhase", JSON.stringify(this.createRoundPhaseMessage(Date.now())));
+  }
+
+  private sendRoundPhaseToClient(client: Client) {
+    client.send("roundPhase", JSON.stringify(this.createRoundPhaseMessage(Date.now())));
+  }
+
+  private broadcastRoundAnnouncement(message: RoundAnnouncementMessage) {
+    this.broadcast("roundAnnouncement", JSON.stringify(message));
+  }
+
+  private resolvePositiveDurationMs(candidate: unknown, fallback: number) {
+    const value = Number(candidate);
+    if (!Number.isFinite(value)) {
+      return fallback;
+    }
+
+    return Math.max(1000, Math.round(value));
   }
 
 }

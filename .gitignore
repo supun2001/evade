@@ -23,6 +23,9 @@ node_modules/
 # They also could contain extremely sensitive data
 [Mm]emoryCaptures/
 
+# Unity Profiler captures can be hundreds of MB and should not be committed.
+[Pp]rofilerCaptures/
+
 # Recordings can get excessive in size
 [Rr]ecordings/
 
