@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
@@ -31,9 +32,18 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _settingsButton;
     private UIToolkitButton _graphicsLowButton;
     private UIToolkitButton _graphicsMediumButton;
+    private UIToolkitButton _shopButton;
+    private UIToolkitButton _inventoryButton;
+    private UIToolkitButton _spectateButton;
     private Label _graphicsCurrentLabel;
+    private Label _menuHoverLabel;
     private VisualElement _graphicsSettingsPanel;
     private bool _menuEventsBound;
+    private readonly List<UIToolkitButton> _hoverButtons = new();
+    private const string DefaultMenuHoverText = "Pick what you want to do next";
+    private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.08f, 1.08f, 1f));
+    private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
+    private static readonly Scale DefaultButtonScale = new Scale(Vector3.one);
     #endregion
 
     #region Class Methods
@@ -251,7 +261,11 @@ public class LobbyUI : MonoBehaviour
         _settingsButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("settings-button");
         _graphicsLowButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-low-button");
         _graphicsMediumButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-medium-button");
+        _shopButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-button");
+        _inventoryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("inventory-button");
+        _spectateButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("spectate-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
+        _menuHoverLabel = _menuDocument.rootVisualElement?.Q<Label>("menu-hover-label");
         _graphicsSettingsPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("graphics-settings-panel");
         if (_startButton == null)
         {
@@ -263,6 +277,7 @@ public class LobbyUI : MonoBehaviour
             _graphicsSettingsPanel.style.display = DisplayStyle.None;
         }
 
+        ConfigureMenuButtonDescriptions();
         RefreshGraphicsSettingsUi();
     }
 
@@ -293,6 +308,8 @@ public class LobbyUI : MonoBehaviour
         {
             _graphicsMediumButton.clicked += HandleGraphicsMediumButtonClicked;
         }
+        BindHoverEffects();
+        BindPlaceholderActions();
         _menuEventsBound = true;
     }
 
@@ -316,6 +333,8 @@ public class LobbyUI : MonoBehaviour
         {
             _graphicsMediumButton.clicked -= HandleGraphicsMediumButtonClicked;
         }
+        UnbindPlaceholderActions();
+        UnbindHoverEffects();
         _menuEventsBound = false;
     }
 
@@ -360,6 +379,161 @@ public class LobbyUI : MonoBehaviour
     private void HandleGraphicsMediumButtonClicked()
     {
         ApplyGraphicsQuality(WebGLPerformanceBootstrap.MediumQualityName);
+    }
+
+    private void HandlePlaceholderButtonClicked()
+    {
+        ShowNotification("This menu item is not wired yet.");
+    }
+
+    private void BindPlaceholderActions()
+    {
+        BindPlaceholderAction(_shopButton);
+        BindPlaceholderAction(_inventoryButton);
+        BindPlaceholderAction(_spectateButton);
+    }
+
+    private void UnbindPlaceholderActions()
+    {
+        UnbindPlaceholderAction(_shopButton);
+        UnbindPlaceholderAction(_inventoryButton);
+        UnbindPlaceholderAction(_spectateButton);
+    }
+
+    private void BindPlaceholderAction(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.clicked += HandlePlaceholderButtonClicked;
+    }
+
+    private void UnbindPlaceholderAction(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.clicked -= HandlePlaceholderButtonClicked;
+    }
+
+    private void ConfigureMenuButtonDescriptions()
+    {
+        SetMenuButtonDescription(_startButton, "Join the current game");
+        SetMenuButtonDescription(_shopButton, "Browse the shop");
+        SetMenuButtonDescription(_inventoryButton, "Open your inventory");
+        SetMenuButtonDescription(_spectateButton, "Watch the current match");
+        SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
+
+        if (_menuHoverLabel != null)
+        {
+            _menuHoverLabel.text = DefaultMenuHoverText;
+        }
+    }
+
+    private static void SetMenuButtonDescription(UIToolkitButton button, string description)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.userData = description;
+    }
+
+    private void BindHoverEffects()
+    {
+        _hoverButtons.Clear();
+        RegisterHoverButton(_startButton);
+        RegisterHoverButton(_settingsButton);
+        RegisterHoverButton(_graphicsLowButton);
+        RegisterHoverButton(_graphicsMediumButton);
+        RegisterHoverButton(_shopButton);
+        RegisterHoverButton(_inventoryButton);
+        RegisterHoverButton(_spectateButton);
+    }
+
+    private void UnbindHoverEffects()
+    {
+        for (int i = 0; i < _hoverButtons.Count; i++)
+        {
+            UIToolkitButton button = _hoverButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            button.UnregisterCallback<PointerEnterEvent>(HandleMenuButtonPointerEnter);
+            button.UnregisterCallback<PointerLeaveEvent>(HandleMenuButtonPointerLeave);
+            button.style.scale = new StyleScale(DefaultButtonScale);
+        }
+
+        _hoverButtons.Clear();
+
+        if (_menuHoverLabel != null)
+        {
+            _menuHoverLabel.text = DefaultMenuHoverText;
+        }
+    }
+
+    private void RegisterHoverButton(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.style.scale = new StyleScale(DefaultButtonScale);
+        button.RegisterCallback<PointerEnterEvent>(HandleMenuButtonPointerEnter);
+        button.RegisterCallback<PointerLeaveEvent>(HandleMenuButtonPointerLeave);
+        _hoverButtons.Add(button);
+    }
+
+    private void HandleMenuButtonPointerEnter(PointerEnterEvent evt)
+    {
+        UIToolkitButton button = evt.currentTarget as UIToolkitButton;
+        if (button == null)
+        {
+            return;
+        }
+
+        button.style.scale = new StyleScale(GetHoverScale(button));
+
+        if (_menuHoverLabel != null)
+        {
+            _menuHoverLabel.text = button.userData as string ?? DefaultMenuHoverText;
+        }
+    }
+
+    private void HandleMenuButtonPointerLeave(PointerLeaveEvent evt)
+    {
+        UIToolkitButton button = evt.currentTarget as UIToolkitButton;
+        if (button == null)
+        {
+            return;
+        }
+
+        button.style.scale = new StyleScale(DefaultButtonScale);
+
+        if (_menuHoverLabel != null)
+        {
+            _menuHoverLabel.text = DefaultMenuHoverText;
+        }
+    }
+
+    private static Scale GetHoverScale(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return HoverButtonScale;
+        }
+
+        return string.Equals(button.name, "start-button", StringComparison.Ordinal)
+            ? LargeHoverButtonScale
+            : HoverButtonScale;
     }
 
     private void ApplyGraphicsQuality(string qualityName)

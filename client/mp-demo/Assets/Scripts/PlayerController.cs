@@ -149,6 +149,19 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _armWallHideCheckRadius = 0.16f;
     [SerializeField] private float _armWallHideDistance = 0.08f;
 
+    [Header("Nextbot Warning Indicator")]
+    [SerializeField] private float _nextbotWarningRange = 24f;
+    [SerializeField] private float _nextbotWarningRingRadius = 260f;
+    [SerializeField] private float _nextbotWarningRingVerticalOffset = 48f;
+    [SerializeField] private float _nextbotWarningMinOpacity = 0.42f;
+    [SerializeField] private float _nextbotWarningMaxOpacity = 0.95f;
+    [SerializeField] private float _nextbotWarningMinScale = 0.86f;
+    [SerializeField] private float _nextbotWarningMaxScale = 1.08f;
+    [SerializeField] private float _nextbotWarningArrowLeftOffset = 18f;
+    [SerializeField] private float _nextbotWarningArrowVerticalOffset = 14f;
+    [SerializeField] private Texture2D _nextbotWarningArrowTexture;
+    [SerializeField] private Texture2D _nextbotWarningSkullTexture;
+
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
     private Transform _cameraTransform;
@@ -160,6 +173,9 @@ public class PlayerController : MonoBehaviour
     private Label _speedLabel;
     private Label _animationDebugLabel;
     private VisualElement _crosshairDotElement;
+    private VisualElement _nextbotWarningIndicatorElement;
+    private VisualElement _nextbotWarningArrowElement;
+    private VisualElement _nextbotWarningSkullElement;
     private VisualElement _injuredInteractionPromptElement;
     private VisualElement _reviveActionRowElement;
     private VisualElement _carryActionRowElement;
@@ -203,6 +219,7 @@ public class PlayerController : MonoBehaviour
     private float _nextbotHitReactionSeed;
 
     private CameraViewMode _currentViewMode;
+    private CameraViewMode _preferredViewMode;
     private float _defaultNearClipPlane;
     private float _defaultFieldOfView;
     private float _sprintArmWeight;
@@ -252,6 +269,7 @@ public class PlayerController : MonoBehaviour
     private Coroutine _cameraTransitionCoroutine;
     private bool _isPauseMenuOpen;
     private bool _hudEventsBound;
+    private bool _isTemporaryThirdPersonForced;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
     private const string INJURED_VISUAL_ROOT_NAME = "player";
@@ -326,6 +344,7 @@ public class PlayerController : MonoBehaviour
         // UnityEngine.Cursor.lockState = CursorLockMode.Locked;
         // UnityEngine.Cursor.visible = false;
 
+        _preferredViewMode = _startingViewMode;
         SetCameraView(_startingViewMode, true);
     }
     #endregion
@@ -337,12 +356,13 @@ public class PlayerController : MonoBehaviour
         _jumpedThisFrame = false;
         HandlePauseMenuToggle();
         HandleDebugInjureHotkey();
-        EnforceInjuredCameraView();
+        UpdateForcedCameraViewState();
         UpdateCrouchState();
         UpdateDownedCollisionShape();
         UpdateSpeedHud();
         UpdateAnimationDebugHud();
         UpdateCrosshairVisibility();
+        UpdateNextbotWarningIndicator();
         UpdateInjuredInteractionPrompt();
         HandleInjuredInteractionInput();
         UpdateInjuredInteractionPromptPressedState();
@@ -407,7 +427,7 @@ public class PlayerController : MonoBehaviour
     private void HandleViewToggle()
     {
         if (!_playerLocomotionInput.InputEnabled) return;
-        if (IsInjured()) return;
+        if (ShouldForceThirdPersonView()) return;
 
         if (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
         {
@@ -416,6 +436,7 @@ public class PlayerController : MonoBehaviour
                     ? CameraViewMode.ThirdPerson
                     : CameraViewMode.FirstPerson;
 
+            _preferredViewMode = nextView;
             SetCameraView(nextView);
         }
     }
@@ -517,18 +538,46 @@ public class PlayerController : MonoBehaviour
 
         if (injured)
         {
-            SetCameraView(CameraViewMode.ThirdPerson, true);
+            UpdateForcedCameraViewState(forceImmediate: true);
+        }
+        else
+        {
+            UpdateForcedCameraViewState(forceImmediate: true);
         }
     }
 
-    private void EnforceInjuredCameraView()
+    private void UpdateForcedCameraViewState(bool forceImmediate = false)
     {
-        if (!IsInjured() || _currentViewMode == CameraViewMode.ThirdPerson)
+        bool shouldForceThirdPerson = ShouldForceThirdPersonView();
+
+        if (shouldForceThirdPerson)
+        {
+            if (!_isTemporaryThirdPersonForced)
+            {
+                _preferredViewMode = _currentViewMode;
+                _isTemporaryThirdPersonForced = true;
+            }
+
+            if (_currentViewMode != CameraViewMode.ThirdPerson)
+            {
+                SetCameraView(CameraViewMode.ThirdPerson, forceImmediate);
+            }
+
+            return;
+        }
+
+        if (!_isTemporaryThirdPersonForced)
         {
             return;
         }
 
-        SetCameraView(CameraViewMode.ThirdPerson);
+        _isTemporaryThirdPersonForced = false;
+        SetCameraView(_preferredViewMode, forceImmediate);
+    }
+
+    private bool ShouldForceThirdPersonView()
+    {
+        return IsInjuredOrHitReacting() || _isBeingCarried;
     }
 
     private void UpdateAutoSprint()
@@ -917,6 +966,9 @@ public class PlayerController : MonoBehaviour
         _speedLabel = root.Q<Label>("speed-label");
         _animationDebugLabel = root.Q<Label>("animation-debug-label");
         _crosshairDotElement = root.Q<VisualElement>("crosshair-dot");
+        _nextbotWarningIndicatorElement = root.Q<VisualElement>("nextbot-warning-indicator");
+        _nextbotWarningArrowElement = root.Q<VisualElement>("nextbot-warning-arrow");
+        _nextbotWarningSkullElement = root.Q<VisualElement>("nextbot-warning-skull");
         _injuredInteractionPromptElement = root.Q<VisualElement>("injured-interaction-prompt");
         _reviveActionRowElement = root.Q<VisualElement>("revive-action-row");
         _carryActionRowElement = root.Q<VisualElement>("carry-action-row");
@@ -942,6 +994,7 @@ public class PlayerController : MonoBehaviour
         }
 
         SetPauseMenuDisplay(_isPauseMenuOpen);
+        ConfigureNextbotWarningVisuals();
     }
 
     private void CacheDownedGroundReferenceTransforms()
@@ -1075,6 +1128,139 @@ public class PlayerController : MonoBehaviour
 
         bool shouldShowCrosshair = !_isPauseMenuOpen && !IsInjuredOrHitReacting();
         _crosshairDotElement.style.display = shouldShowCrosshair ? DisplayStyle.Flex : DisplayStyle.None;
+    }
+
+    private void UpdateNextbotWarningIndicator()
+    {
+        if (_nextbotWarningIndicatorElement == null)
+        {
+            CacheHudElements();
+            if (_nextbotWarningIndicatorElement == null)
+            {
+                return;
+            }
+        }
+
+        if (_isPauseMenuOpen
+            || _gameplayCamera == null
+            || _playerHudDocument == null
+            || !TryGetActiveNextbotPosition(out Vector3 nextbotPosition))
+        {
+            SetNextbotWarningIndicatorVisible(false);
+            return;
+        }
+
+        Vector3 flattenedOffset = nextbotPosition - _transform.position;
+        flattenedOffset.y = 0f;
+        float distance = flattenedOffset.magnitude;
+        if (distance > _nextbotWarningRange)
+        {
+            SetNextbotWarningIndicatorVisible(false);
+            return;
+        }
+
+        VisualElement root = _playerHudDocument.rootVisualElement;
+        if (root == null)
+        {
+            SetNextbotWarningIndicatorVisible(false);
+            return;
+        }
+
+        float rootWidth = root.resolvedStyle.width;
+        float rootHeight = root.resolvedStyle.height;
+        if (rootWidth <= 1f || rootHeight <= 1f)
+        {
+            SetNextbotWarningIndicatorVisible(false);
+            return;
+        }
+
+        Vector3 viewportPoint = _gameplayCamera.WorldToViewportPoint(nextbotPosition + Vector3.up * 0.8f);
+        bool isBehindCamera = viewportPoint.z < 0f;
+
+        Vector2 centeredViewport = new Vector2(viewportPoint.x * 2f - 1f, viewportPoint.y * 2f - 1f);
+        if (isBehindCamera)
+        {
+            centeredViewport = -centeredViewport;
+        }
+
+        if (centeredViewport.sqrMagnitude <= 0.0001f)
+        {
+            centeredViewport = Vector2.right;
+        }
+
+        Vector2 ringDirection = centeredViewport.normalized;
+        Vector2 ringCenter = new Vector2(rootWidth * 0.5f, rootHeight * 0.5f + _nextbotWarningRingVerticalOffset);
+        float ringRadius = Mathf.Min(_nextbotWarningRingRadius, Mathf.Min(rootWidth, rootHeight) * 0.42f);
+        Vector2 ringPosition = ringCenter + ringDirection * ringRadius;
+
+        float indicatorWidth = Mathf.Max(1f, _nextbotWarningIndicatorElement.resolvedStyle.width);
+        float indicatorHeight = Mathf.Max(1f, _nextbotWarningIndicatorElement.resolvedStyle.height);
+        _nextbotWarningIndicatorElement.style.left = ringPosition.x - indicatorWidth * 0.5f;
+        _nextbotWarningIndicatorElement.style.top = ringPosition.y - indicatorHeight * 0.5f;
+
+        float proximity = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, _nextbotWarningRange));
+        float opacity = Mathf.Lerp(_nextbotWarningMinOpacity, _nextbotWarningMaxOpacity, proximity);
+        float scaleValue = Mathf.Lerp(_nextbotWarningMinScale, _nextbotWarningMaxScale, proximity);
+        _nextbotWarningIndicatorElement.style.opacity = opacity;
+        _nextbotWarningIndicatorElement.style.scale = new StyleScale(new Scale(new Vector3(scaleValue, scaleValue, 1f)));
+
+        if (_nextbotWarningArrowElement != null)
+        {
+            float arrowAngle = Mathf.Atan2(ringDirection.y, ringDirection.x) * Mathf.Rad2Deg;
+            float indicatorCenterX = indicatorWidth * 0.5f;
+            float indicatorCenterY = indicatorHeight * 0.5f;
+            Vector2 arrowDirection = new Vector2(ringDirection.x, -ringDirection.y).normalized;
+            float arrowOffsetDistance = Mathf.Max(Mathf.Abs(_nextbotWarningArrowLeftOffset), Mathf.Abs(_nextbotWarningArrowVerticalOffset));
+            _nextbotWarningArrowElement.style.left = indicatorCenterX + arrowDirection.x * arrowOffsetDistance;
+            _nextbotWarningArrowElement.style.top = indicatorCenterY + arrowDirection.y * arrowOffsetDistance;
+            _nextbotWarningArrowElement.style.rotate = new StyleRotate(new Rotate(Angle.Degrees(arrowAngle)));
+        }
+
+        SetNextbotWarningIndicatorVisible(true);
+    }
+
+    private void ConfigureNextbotWarningVisuals()
+    {
+        if (_nextbotWarningArrowElement != null && _nextbotWarningArrowTexture != null)
+        {
+            _nextbotWarningArrowElement.style.backgroundImage = new StyleBackground(_nextbotWarningArrowTexture);
+            _nextbotWarningArrowElement.style.unityBackgroundScaleMode = ScaleMode.ScaleToFit;
+        }
+
+        if (_nextbotWarningSkullElement != null)
+        {
+            _nextbotWarningSkullElement.style.display = DisplayStyle.None;
+        }
+    }
+
+    private bool TryGetActiveNextbotPosition(out Vector3 nextbotPosition)
+    {
+        nextbotPosition = Vector3.zero;
+
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null || networkManager.Room == null || networkManager.Room.State == null)
+        {
+            return false;
+        }
+
+        NextbotState nextbotState = networkManager.Room.State.nextbot;
+        if (nextbotState == null || !nextbotState.isActive)
+        {
+            return false;
+        }
+
+        nextbotPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
+        return true;
+    }
+
+    private void SetNextbotWarningIndicatorVisible(bool visible)
+    {
+        if (_nextbotWarningIndicatorElement == null)
+        {
+            return;
+        }
+
+        _nextbotWarningIndicatorElement.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
     }
 
     private void SetInjuredInteractionPromptVisible(bool visible)
@@ -1224,6 +1410,8 @@ public class PlayerController : MonoBehaviour
             StopWallRun();
             _wallRunSprintGraceTimer = 0f;
         }
+
+        UpdateForcedCameraViewState(forceImmediate: true);
     }
 
     public bool TryGetCarriedFollowPose(out Vector3 targetPosition, out Quaternion targetRotation)
@@ -1380,6 +1568,7 @@ public class PlayerController : MonoBehaviour
         ResetInjuredVisualRootRotation();
         UpdateDownedCollisionShape();
         UpdateDownedVisualRootPosition();
+        UpdateForcedCameraViewState(forceImmediate: true);
     }
 
     public bool IsCarrying()
@@ -2704,7 +2893,7 @@ public class PlayerController : MonoBehaviour
         _wallRunContactHoldTimer = 0f;
         _wallRunSprintGraceTimer = 0f;
         _playerAnimation.SetInjured(false);
-        SetCameraView(CameraViewMode.ThirdPerson, true);
+        UpdateForcedCameraViewState(forceImmediate: true);
 
         return true;
     }

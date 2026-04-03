@@ -146,6 +146,38 @@
             "
         />
         <ui:VisualElement
+            name="nextbot-warning-indicator"
+            picking-mode="Ignore"
+            style="
+                display: none;
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 96px;
+                height: 96px;
+                translate: -50% -50%;
+                opacity: 0.9;
+            "
+        >
+            <ui:VisualElement
+                name="nextbot-warning-skull"
+                style="
+                    display: none;
+                "
+            />
+            <ui:VisualElement
+                name="nextbot-warning-arrow"
+                style="
+                    position: absolute;
+                    left: 50%;
+                    top: 50%;
+                    width: 34px;
+                    height: 34px;
+                    translate: -50% -50%;
+                "
+            />
+        </ui:VisualElement>
+        <ui:VisualElement
             name="injured-interaction-prompt"
             style="
                 display: none;

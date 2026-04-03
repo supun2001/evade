@@ -128,7 +128,7 @@ function readPlayerUpdateBoolean(message: PlayerUpdateMessage, index: number, ke
 }
 
 export class MyRoom extends Room<MyRoomState> {
-  maxClients = 4;
+  maxClients = 15;
   state = new MyRoomState();
   private nextInjuryAt = 0;
   private playerSafeUntil = new Map<string, number>();
@@ -858,8 +858,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private pickNextbotSpawnPoint(): SpawnPoint {
-    const index = Math.floor(Math.random() * this.nextbotSpawnPoints.length);
-    return this.nextbotSpawnPoints[index];
+    return this.nextbotSpawnPoints[0] ?? DEFAULT_NEXTBOT_SPAWN_POINTS[0];
   }
 
   private resolveNextbotSpawnPoints(options: any): SpawnPoint[] {

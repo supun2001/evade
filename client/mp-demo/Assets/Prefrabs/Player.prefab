@@ -27,7 +27,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034131944, y: -0.000000079523474, z: -0.000000008707425, w: 0.99941736}
+  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
   m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -296,6 +296,17 @@ MonoBehaviour:
   _firstPersonWallMaxSurfaceUp: 0.35
   _armWallHideCheckRadius: 0.16
   _armWallHideDistance: 0.08
+  _nextbotWarningRange: 24
+  _nextbotWarningRingRadius: 260
+  _nextbotWarningRingVerticalOffset: 48
+  _nextbotWarningMinOpacity: 0.7
+  _nextbotWarningMaxOpacity: 1
+  _nextbotWarningMinScale: 2
+  _nextbotWarningMaxScale: 4
+  _nextbotWarningArrowLeftOffset: 22
+  _nextbotWarningArrowVerticalOffset: 22
+  _nextbotWarningArrowTexture: {fileID: 2800000, guid: dbb4e54ef009049a2b41b12955e582ab, type: 3}
+  _nextbotWarningSkullTexture: {fileID: 2800000, guid: 89056f0c66fdf4283a0c17977b47ce63, type: 3}
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -593,7 +604,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034131944, y: -0.000000079523474, z: -0.000000008707425, w: 0.99941736}
+  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
   m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
