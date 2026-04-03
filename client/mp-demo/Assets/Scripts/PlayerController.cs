@@ -1144,7 +1144,7 @@ public class PlayerController : MonoBehaviour
         if (_isPauseMenuOpen
             || _gameplayCamera == null
             || _playerHudDocument == null
-            || !TryGetActiveNextbotPosition(out Vector3 nextbotPosition))
+            || !TryGetNearestActiveNextbotPosition(out Vector3 nextbotPosition))
         {
             SetNextbotWarningIndicatorVisible(false);
             return;
@@ -1233,24 +1233,42 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private bool TryGetActiveNextbotPosition(out Vector3 nextbotPosition)
+    private bool TryGetNearestActiveNextbotPosition(out Vector3 nextbotPosition)
     {
         nextbotPosition = Vector3.zero;
 
         NetworkManager networkManager = NetworkManager.Instance;
-        if (networkManager == null || networkManager.Room == null || networkManager.Room.State == null)
+        if (networkManager == null
+            || networkManager.Room == null
+            || networkManager.Room.State == null
+            || networkManager.Room.State.nextbots == null)
         {
             return false;
         }
 
-        NextbotState nextbotState = networkManager.Room.State.nextbot;
-        if (nextbotState == null || !nextbotState.isActive)
+        bool foundNextbot = false;
+        float bestDistanceSqr = float.PositiveInfinity;
+        foreach (string key in networkManager.Room.State.nextbots.Keys)
         {
-            return false;
+            NextbotState nextbotState = networkManager.Room.State.nextbots[key];
+            if (nextbotState == null || !nextbotState.isActive)
+            {
+                continue;
+            }
+
+            Vector3 candidatePosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
+            float distanceSqr = (candidatePosition - _transform.position).sqrMagnitude;
+            if (distanceSqr >= bestDistanceSqr)
+            {
+                continue;
+            }
+
+            bestDistanceSqr = distanceSqr;
+            nextbotPosition = candidatePosition;
+            foundNextbot = true;
         }
 
-        nextbotPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
-        return true;
+        return foundNextbot;
     }
 
     private void SetNextbotWarningIndicatorVisible(bool visible)
@@ -1568,6 +1586,40 @@ public class PlayerController : MonoBehaviour
         ResetInjuredVisualRootRotation();
         UpdateDownedCollisionShape();
         UpdateDownedVisualRootPosition();
+        UpdateForcedCameraViewState(forceImmediate: true);
+    }
+
+    public void ApplyNetworkRoundReset(Vector3 worldPosition, float rotationY)
+    {
+        ApplyNetworkRevive();
+
+        _horizontalVelocity = Vector3.zero;
+        _verticalVelocity = 0f;
+        _jumpedThisFrame = false;
+        _isWallRunning = false;
+        _wallRunSide = 0;
+        _wallRunNormal = Vector3.zero;
+        _wallRunSprintGraceTimer = 0f;
+        _wallRunContactHoldTimer = 0f;
+        _nextbotHitImpactVelocity = Vector3.zero;
+        _nextbotHitImpactTimer = 0f;
+
+        Transform targetTransform = _transform != null ? _transform : transform;
+        Quaternion targetRotation = Quaternion.Euler(0f, rotationY, 0f);
+
+        if (_characterController != null)
+        {
+            bool wasEnabled = _characterController.enabled;
+            _characterController.enabled = false;
+            targetTransform.SetPositionAndRotation(worldPosition, targetRotation);
+            _characterController.enabled = wasEnabled;
+        }
+        else
+        {
+            targetTransform.SetPositionAndRotation(worldPosition, targetRotation);
+        }
+
+        _playerRotationY = rotationY;
         UpdateForcedCameraViewState(forceImmediate: true);
     }
 

@@ -26,8 +26,9 @@ describe("testing your Colyseus app", () => {
     // wait for state sync
     await room.waitForNextPatch();
 
-    const player = client1.state.players.get(client1.sessionId);
+    const player = room.state.players.get(client1.sessionId);
     assert.ok(player);
     assert.strictEqual(player.sessionId, client1.sessionId);
+    assert.strictEqual(room.state.nextbots.size, 5);
   });
 });

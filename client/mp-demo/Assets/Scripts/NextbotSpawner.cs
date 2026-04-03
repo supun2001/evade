@@ -1,10 +1,10 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class NextbotSpawner : MonoBehaviour
 {
-    private const bool NEXTBOTS_ENABLED = false;
-    [SerializeField] private string spawnPointName = "SpawnPoint";
-    [SerializeField] private Vector3 fallbackSpawnPosition = new Vector3(6.45f, 0f, -2.38f);
+    private const int DesiredNextbotCount = 5;
+    private NextbotRegistry _nextbotRegistry;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
@@ -20,49 +20,72 @@ public class NextbotSpawner : MonoBehaviour
 
     private void Start()
     {
-        EnsureExistingSceneNextbotsAreActive();
-        RemoveExistingNextbots();
+        _nextbotRegistry = Resources.Load<NextbotRegistry>("NextbotRegistry");
+        EnsureNetworkedNextbotInstances();
+    }
 
-        if (!NEXTBOTS_ENABLED)
+    private void EnsureNetworkedNextbotInstances()
+    {
+        List<NextbotFollowPlayer> sceneNextbots = GetSceneNextbots();
+        if (sceneNextbots.Count == 0)
         {
             return;
         }
 
-        SpawnNextbots();
-    }
-
-    private void SpawnNextbots()
-    {
-        NextbotAgent[] existingNextbots = FindObjectsByType<NextbotAgent>(FindObjectsSortMode.None);
-        if (existingNextbots.Length > 0)
+        NextbotFollowPlayer template = sceneNextbots[0];
+        for (int index = sceneNextbots.Count; index < DesiredNextbotCount; index++)
         {
-            return;
-        }
-
-        Vector3 spawnOrigin = ResolveSpawnOrigin();
-        GameObject nextbotObject = new GameObject("Nextbot_1");
-        nextbotObject.transform.position = spawnOrigin;
-        nextbotObject.AddComponent<NextbotAgent>();
-    }
-
-    private void RemoveExistingNextbots()
-    {
-        NextbotAgent[] existingNextbots = FindObjectsByType<NextbotAgent>(FindObjectsSortMode.None);
-        for (int i = 0; i < existingNextbots.Length; i++)
-        {
-            if (existingNextbots[i] != null)
+            GameObject clone = Instantiate(template.gameObject, template.transform.position, template.transform.rotation);
+            clone.name = $"NextBots_{index + 1}";
+            NextbotFollowPlayer nextbot = clone.GetComponent<NextbotFollowPlayer>();
+            if (nextbot != null)
             {
-                Destroy(existingNextbots[i].gameObject);
+                sceneNextbots.Add(nextbot);
             }
         }
+
+        for (int index = 0; index < sceneNextbots.Count; index++)
+        {
+            NextbotFollowPlayer nextbot = sceneNextbots[index];
+            if (nextbot == null)
+            {
+                continue;
+            }
+
+            bool shouldKeep = index < DesiredNextbotCount;
+            if (!shouldKeep)
+            {
+                Destroy(nextbot.gameObject);
+                continue;
+            }
+
+            nextbot.gameObject.name = $"NextBots_{index + 1}";
+            string nextbotId = $"nextbot_{index}";
+            nextbot.AssignNetworkNextbotId(nextbotId);
+            if (_nextbotRegistry != null && _nextbotRegistry.TryGetEntry(nextbotId, out NextbotRegistryEntry entry))
+            {
+                nextbot.ApplyRegistryEntry(entry);
+            }
+            else
+            {
+                nextbot.ApplyRegistryEntry(null);
+            }
+            if (!nextbot.gameObject.activeSelf)
+            {
+                nextbot.gameObject.SetActive(true);
+            }
+        }
+
+        RemoveExistingNextbotAgents();
     }
 
-    private void EnsureExistingSceneNextbotsAreActive()
+    private static List<NextbotFollowPlayer> GetSceneNextbots()
     {
-        NextbotFollowPlayer[] sceneNextbots = Resources.FindObjectsOfTypeAll<NextbotFollowPlayer>();
-        for (int i = 0; i < sceneNextbots.Length; i++)
+        List<NextbotFollowPlayer> sceneNextbots = new List<NextbotFollowPlayer>();
+        NextbotFollowPlayer[] allNextbots = Resources.FindObjectsOfTypeAll<NextbotFollowPlayer>();
+        for (int i = 0; i < allNextbots.Length; i++)
         {
-            NextbotFollowPlayer nextbot = sceneNextbots[i];
+            NextbotFollowPlayer nextbot = allNextbots[i];
             if (nextbot == null)
             {
                 continue;
@@ -74,21 +97,21 @@ public class NextbotSpawner : MonoBehaviour
                 continue;
             }
 
-            if (!nextbotObject.activeSelf)
-            {
-                nextbotObject.SetActive(true);
-            }
+            sceneNextbots.Add(nextbot);
         }
+
+        return sceneNextbots;
     }
 
-    private Vector3 ResolveSpawnOrigin()
+    private static void RemoveExistingNextbotAgents()
     {
-        GameObject spawnPoint = GameObject.Find(spawnPointName);
-        if (spawnPoint != null)
+        NextbotAgent[] existingNextbots = FindObjectsByType<NextbotAgent>(FindObjectsSortMode.None);
+        for (int i = 0; i < existingNextbots.Length; i++)
         {
-            return spawnPoint.transform.position;
+            if (existingNextbots[i] != null)
+            {
+                Destroy(existingNextbots[i].gameObject);
+            }
         }
-
-        return fallbackSpawnPosition;
     }
 }

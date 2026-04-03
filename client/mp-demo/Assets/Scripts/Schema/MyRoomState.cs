@@ -21,6 +21,6 @@ public MyRoomState() { }
 		[Type(1, "boolean")]
 		public bool isGameStarted = false;
 
-		[Type(2, "ref", typeof(NextbotState))]
-		public NextbotState nextbot = null;
+		[Type(2, "map", typeof(MapSchema<NextbotState>))]
+		public MapSchema<NextbotState> nextbots = null;
 	}

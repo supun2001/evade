@@ -315,4 +315,32 @@ public class NetworkPlayer : MonoBehaviour
             playerState.carriedPlayerSessionId,
             playerState.carrierSessionId);
     }
+
+    public bool ApplyAuthoritativeRoundReset()
+    {
+        if (!isLocal || controller == null || playerState == null)
+        {
+            return false;
+        }
+
+        Vector3 authoritativePosition = new Vector3(playerState.x, playerState.y, playerState.z);
+        controller.ApplyNetworkRoundReset(authoritativePosition, playerState.rotationY);
+        transform.SetPositionAndRotation(authoritativePosition, Quaternion.Euler(0f, playerState.rotationY, 0f));
+        _jumpQueued = false;
+        nextSendTime = Time.time + sendInterval;
+        return true;
+    }
+
+    public void ApplyImmediateRoundReset(Vector3 worldPosition, float rotationY)
+    {
+        if (!isLocal || controller == null)
+        {
+            return;
+        }
+
+        controller.ApplyNetworkRoundReset(worldPosition, rotationY);
+        transform.SetPositionAndRotation(worldPosition, Quaternion.Euler(0f, rotationY, 0f));
+        _jumpQueued = false;
+        nextSendTime = Time.time + sendInterval;
+    }
 }

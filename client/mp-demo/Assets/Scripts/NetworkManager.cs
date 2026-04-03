@@ -40,6 +40,8 @@ public class NetworkManager : MonoBehaviour
         new NextbotSpawnPointConfig { position = new Vector3(6.45f, 0f, -2.38f) },
         new NextbotSpawnPointConfig { position = new Vector3(-6.45f, 0f, 2.38f) },
         new NextbotSpawnPointConfig { position = new Vector3(0f, 0f, 7.5f) },
+        new NextbotSpawnPointConfig { position = new Vector3(7.5f, 0f, 5.5f) },
+        new NextbotSpawnPointConfig { position = new Vector3(-7.5f, 0f, -5.5f) },
     };
     [Tooltip("Server-authoritative player spawn points used for joins and round resets.")]
     [SerializeField] private List<PlayerSpawnPointConfig> playerSpawnPoints = new()
@@ -121,6 +123,7 @@ public class NetworkManager : MonoBehaviour
     public string LocalSessionId => room != null ? room.SessionId : string.Empty;
     private bool _hasReceivedRoundPhaseFromServer;
     private Coroutine _fallbackRoundFlowCoroutine;
+    private Coroutine _localRoundResetCoroutine;
 
     private void OnPlayerAdded(string id, Player player)
     {
@@ -384,6 +387,36 @@ public class NetworkManager : MonoBehaviour
     private int IntermissionDurationMs => Mathf.Max(1000, Mathf.RoundToInt(intermissionDurationSeconds * 1000f));
     private int RoundDurationMs => Mathf.Max(5000, Mathf.RoundToInt(roundDurationSeconds * 1000f));
 
+    public bool TryGetLocalPlayerSpawnPoint(out Vector3 spawnPosition)
+    {
+        spawnPosition = Vector3.zero;
+        if (playerSpawnPoints == null || playerSpawnPoints.Count == 0 || string.IsNullOrEmpty(LocalSessionId))
+        {
+            return false;
+        }
+
+        int spawnIndex = GetStableSpawnIndex(LocalSessionId, playerSpawnPoints.Count);
+        spawnPosition = playerSpawnPoints[spawnIndex].position;
+        return true;
+    }
+
+    private static int GetStableSpawnIndex(string sessionId, int spawnPointCount)
+    {
+        if (spawnPointCount <= 0)
+        {
+            return 0;
+        }
+
+        int hash = 0;
+        for (int i = 0; i < sessionId.Length; i++)
+        {
+            hash = unchecked((hash * 31) + sessionId[i]);
+        }
+
+        int normalizedIndex = hash % spawnPointCount;
+        return normalizedIndex < 0 ? normalizedIndex + spawnPointCount : normalizedIndex;
+    }
+
     private ColyseusClient CreateClient()
     {
         Uri uri = BuildServerUri(serverUrl);
@@ -490,15 +523,23 @@ public class NetworkManager : MonoBehaviour
             controller?.ApplyNetworkRevive();
         });
 
-        room.OnMessage<string>("roundPlayerReset", (_) =>
+        room.OnMessage<string>("roundPlayerReset", (json) =>
         {
-            if (!players.TryGetValue(room.SessionId, out GameObject localPlayer) || localPlayer == null)
+            RoundPlayerResetMessageData payload = ParseJsonMessage<RoundPlayerResetMessageData>(json);
+            if (payload != null
+                && players.TryGetValue(room.SessionId, out GameObject localPlayer)
+                && localPlayer != null)
             {
-                return;
+                NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+                if (networkPlayer != null)
+                {
+                    networkPlayer.ApplyImmediateRoundReset(
+                        new Vector3(payload.x, payload.y, payload.z),
+                        payload.rotationY);
+                }
             }
 
-            PlayerController controller = localPlayer.GetComponent<PlayerController>();
-            controller?.ApplyNetworkRevive();
+            RestartLocalRoundResetCoroutine();
         });
 
         room.OnMessage<string>("roundPhase", (json) =>
@@ -508,6 +549,10 @@ public class NetworkManager : MonoBehaviour
             {
                 _hasReceivedRoundPhaseFromServer = true;
                 StopFallbackRoundFlow();
+                if (string.Equals(payload.phase, "intermission", StringComparison.Ordinal))
+                {
+                    RestartLocalRoundResetCoroutine();
+                }
                 RoundPhaseChanged?.Invoke(payload);
             }
         });
@@ -526,6 +571,7 @@ public class NetworkManager : MonoBehaviour
             RoundResultsMessageData payload = ParseJsonMessage<RoundResultsMessageData>(json);
             if (payload != null)
             {
+                RestartLocalRoundResetCoroutine();
                 RoundResultsReceived?.Invoke(payload);
             }
         });
@@ -533,6 +579,51 @@ public class NetworkManager : MonoBehaviour
         var events = Colyseus.Schema.Callbacks.Get(room);
         events.OnAdd(state => state.players, (key, player) => OnPlayerAdded(key, player));
         events.OnRemove(state => state.players, (key, player) => OnPlayerRemoved(key, player));
+    }
+
+    private IEnumerator ApplyLocalRoundResetFromState()
+    {
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            if (room != null
+                && players.TryGetValue(room.SessionId, out GameObject localPlayer)
+                && localPlayer != null)
+            {
+                NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+                if (networkPlayer != null && networkPlayer.ApplyAuthoritativeRoundReset())
+                {
+                    _localRoundResetCoroutine = null;
+                    yield break;
+                }
+            }
+
+            yield return null;
+        }
+
+        if (TryGetLocalPlayerSpawnPoint(out Vector3 fallbackSpawnPosition)
+            && players.TryGetValue(room.SessionId, out GameObject fallbackLocalPlayer)
+            && fallbackLocalPlayer != null)
+        {
+            NetworkPlayer networkPlayer = fallbackLocalPlayer.GetComponent<NetworkPlayer>();
+            if (networkPlayer != null)
+            {
+                networkPlayer.ApplyImmediateRoundReset(
+                    fallbackSpawnPosition,
+                    fallbackLocalPlayer.transform.eulerAngles.y);
+            }
+        }
+
+        _localRoundResetCoroutine = null;
+    }
+
+    private void RestartLocalRoundResetCoroutine()
+    {
+        if (_localRoundResetCoroutine != null)
+        {
+            StopCoroutine(_localRoundResetCoroutine);
+        }
+
+        _localRoundResetCoroutine = StartCoroutine(ApplyLocalRoundResetFromState());
     }
 
     private static T ParseJsonMessage<T>(string json) where T : class

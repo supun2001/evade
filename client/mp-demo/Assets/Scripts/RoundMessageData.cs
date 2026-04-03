@@ -37,3 +37,12 @@ public class RoundResultsMessageData
     public int roundDurationMs;
     public RoundResultEntryMessageData[] entries;
 }
+
+[Serializable]
+public class RoundPlayerResetMessageData
+{
+    public float x;
+    public float y;
+    public float z;
+    public float rotationY;
+}

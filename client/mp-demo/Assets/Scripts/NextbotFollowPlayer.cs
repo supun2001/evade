@@ -6,6 +6,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 {
     [Header("Networking")]
     [SerializeField] private bool _useRoomStateAuthority = true;
+    [SerializeField] private string _networkNextbotId = "nextbot_0";
     [SerializeField] private float _roomStatePositionLerpSpeed = 12f;
     [SerializeField] private float _roomStateRotationLerpSpeed = 14f;
     [SerializeField] private float _roomStateSnapDistance = 1.1f;
@@ -102,6 +103,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Collider[] _colliders = System.Array.Empty<Collider>();
     private Transform _visualTransform;
     private MeshRenderer _rootMeshRenderer;
+    private MeshRenderer _visualMeshRenderer;
     private NavMeshPath _pathBuffer;
     private float _targetLockedUntil;
     private Transform _pendingSwitchTarget;
@@ -115,9 +117,14 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _offMeshLinkProgress;
     private bool _hasAppliedRoomState;
     private bool _roomStateAuthorityActive;
+    private Texture _defaultBaseMap;
+    private Color _defaultBaseColor = Color.white;
+    private AudioClip _defaultLoopClip;
+    private float _defaultLoopPitch = 1f;
 
     private void Awake()
     {
+        _defaultLoopClip = _loopClip;
         _characterController = GetComponent<CharacterController>();
         _navMeshAgent = GetComponent<NavMeshAgent>();
         _pathBuffer = new NavMeshPath();
@@ -181,12 +188,28 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool UpdateActivationState()
     {
         MyRoomState roomState = GetRoomState();
-        bool useRoomStateAuthority = _useRoomStateAuthority && roomState != null && roomState.nextbot != null;
+        NextbotState assignedNextbotState = null;
+        bool useRoomStateAuthority = _useRoomStateAuthority
+            && roomState != null
+            && TryGetAssignedNextbotState(roomState, out assignedNextbotState);
         SetRoomStateAuthorityActive(useRoomStateAuthority);
 
         if (useRoomStateAuthority)
         {
-            UpdateFromRoomState(roomState.nextbot);
+            UpdateFromRoomState(assignedNextbotState);
+            return true;
+        }
+
+        if (_useRoomStateAuthority && roomState != null)
+        {
+            SetServerVisualState(false);
+            ClearTarget();
+            StopAgent();
+            _horizontalVelocity = Vector3.zero;
+            _isJumping = false;
+            _jumpVelocity = Vector3.zero;
+            _isTraversingOffMeshLink = false;
+            _hasAppliedRoomState = false;
             return true;
         }
 
@@ -207,6 +230,64 @@ public class NextbotFollowPlayer : MonoBehaviour
         EnsureAgentOnNavMesh();
 
         return false;
+    }
+
+    public void AssignNetworkNextbotId(string nextbotId)
+    {
+        _networkNextbotId = nextbotId;
+        _hasAppliedRoomState = false;
+    }
+
+    public void ApplyRegistryEntry(NextbotRegistryEntry entry)
+    {
+        EnsureVisualBillboardChild();
+
+        _loopClip = entry != null && entry.loopClip != null ? entry.loopClip : _defaultLoopClip;
+        float loopPitch = entry != null ? entry.loopPitch : _defaultLoopPitch;
+        if (_loopAudioSource != null)
+        {
+            _loopAudioSource.clip = _loopClip;
+            _loopAudioSource.pitch = loopPitch;
+        }
+
+        MeshRenderer targetRenderer = _visualMeshRenderer != null ? _visualMeshRenderer : _rootMeshRenderer;
+        if (targetRenderer == null)
+        {
+            return;
+        }
+
+        Material[] materials = targetRenderer.materials;
+        Texture iconTexture = entry != null && entry.iconTexture != null ? entry.iconTexture : _defaultBaseMap;
+        Color tint = entry != null ? entry.tint : _defaultBaseColor;
+
+        for (int i = 0; i < materials.Length; i++)
+        {
+            Material material = materials[i];
+            if (material == null)
+            {
+                continue;
+            }
+
+            if (material.HasProperty("_BaseMap"))
+            {
+                material.SetTexture("_BaseMap", iconTexture);
+            }
+
+            if (material.HasProperty("_MainTex"))
+            {
+                material.SetTexture("_MainTex", iconTexture);
+            }
+
+            if (material.HasProperty("_BaseColor"))
+            {
+                material.SetColor("_BaseColor", tint);
+            }
+
+            if (material.HasProperty("_Color"))
+            {
+                material.SetColor("_Color", tint);
+            }
+        }
     }
 
     private void SetRoomStateAuthorityActive(bool isActive)
@@ -305,6 +386,17 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return networkManager.Room.State;
+    }
+
+    private bool TryGetAssignedNextbotState(MyRoomState roomState, out NextbotState nextbotState)
+    {
+        nextbotState = null;
+        if (roomState == null || roomState.nextbots == null || string.IsNullOrEmpty(_networkNextbotId))
+        {
+            return false;
+        }
+
+        return roomState.nextbots.TryGetValue(_networkNextbotId, out nextbotState) && nextbotState != null;
     }
 
     private void RefreshTargetIfNeeded()
@@ -1103,6 +1195,18 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             _visualTransform = existingVisual;
             _visualTransform.localPosition = GetVisualLocalPosition(rootMeshFilter.sharedMesh);
+            _visualMeshRenderer = existingVisual.GetComponent<MeshRenderer>();
+            if (_defaultBaseMap == null && _visualMeshRenderer != null && _visualMeshRenderer.sharedMaterial != null)
+            {
+                _defaultBaseMap = _visualMeshRenderer.sharedMaterial.HasProperty("_BaseMap")
+                    ? _visualMeshRenderer.sharedMaterial.GetTexture("_BaseMap")
+                    : _visualMeshRenderer.sharedMaterial.mainTexture;
+                _defaultBaseColor = _visualMeshRenderer.sharedMaterial.HasProperty("_BaseColor")
+                    ? _visualMeshRenderer.sharedMaterial.GetColor("_BaseColor")
+                    : (_visualMeshRenderer.sharedMaterial.HasProperty("_Color")
+                        ? _visualMeshRenderer.sharedMaterial.GetColor("_Color")
+                        : Color.white);
+            }
             rootMeshRenderer.enabled = false;
             return;
         }
@@ -1122,6 +1226,19 @@ public class NextbotFollowPlayer : MonoBehaviour
         visualMeshRenderer.receiveShadows = rootMeshRenderer.receiveShadows;
         visualMeshRenderer.lightProbeUsage = rootMeshRenderer.lightProbeUsage;
         visualMeshRenderer.reflectionProbeUsage = rootMeshRenderer.reflectionProbeUsage;
+        _visualMeshRenderer = visualMeshRenderer;
+
+        if (_defaultBaseMap == null && visualMeshRenderer.sharedMaterial != null)
+        {
+            _defaultBaseMap = visualMeshRenderer.sharedMaterial.HasProperty("_BaseMap")
+                ? visualMeshRenderer.sharedMaterial.GetTexture("_BaseMap")
+                : visualMeshRenderer.sharedMaterial.mainTexture;
+            _defaultBaseColor = visualMeshRenderer.sharedMaterial.HasProperty("_BaseColor")
+                ? visualMeshRenderer.sharedMaterial.GetColor("_BaseColor")
+                : (visualMeshRenderer.sharedMaterial.HasProperty("_Color")
+                    ? visualMeshRenderer.sharedMaterial.GetColor("_Color")
+                    : Color.white);
+        }
 
         rootMeshRenderer.enabled = false;
         _visualTransform = visualObject.transform;
@@ -1240,6 +1357,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _loopAudioSource.minDistance = _soundMinDistance;
         _loopAudioSource.maxDistance = _soundMaxDistance;
         _loopAudioSource.volume = _loopVolume;
+        _loopAudioSource.pitch = _defaultLoopPitch;
         _loopAudioSource.dopplerLevel = 0f;
     }
 

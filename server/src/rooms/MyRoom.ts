@@ -1,6 +1,7 @@
 import { Room, Client } from "@colyseus/core";
 import { MyRoomState } from "./schema/MyRoomState";
 import { Player } from "./schema/Player";
+import { NextbotState } from "./schema/NextbotState";
 
 const NEXTBOTS_ENABLED = true;
 const DEFAULT_NEXTBOT_SPAWN_POINTS = [
@@ -8,6 +9,7 @@ const DEFAULT_NEXTBOT_SPAWN_POINTS = [
   { x: -6.45, y: 0, z: 2.38 },
   { x: 0, y: 0, z: 7.5 },
 ];
+const NEXTBOT_COUNT = 5;
 const DEFAULT_PLAYER_SPAWN_POINTS = [
   { x: 0, y: 0, z: -6 },
   { x: 2, y: 0, z: -6 },
@@ -36,8 +38,7 @@ const NEXTBOT_RECENT_REACHABLE_BONUS = 15;
 const NEXTBOT_RECENT_REACHABLE_MS = 1500;
 const NEXTBOT_INTERCEPT_BONUS_MAX = 20;
 const NEXTBOT_FRONT_ANGLE_THRESHOLD = 85;
-const PLAYER_MIN_SPAWN_DISTANCE_FROM_NEXTBOT = 8;
-const PLAYER_SPAWN_RANGE = 10;
+const NEXTBOT_PATROL_REACHED_DISTANCE = 1.1;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 const DEFAULT_INTERMISSION_DURATION_MS = 30_000;
@@ -76,6 +77,13 @@ type ScoredTarget = {
   score: number;
   predicted: PredictedTargetPosition;
   eligible: boolean;
+};
+type NextbotControllerState = {
+  id: string;
+  spawnIndex: number;
+  patrolPointIndex: number;
+  nextInjuryAt: number;
+  currentTargetSessionId: string;
 };
 type PlayerUpdateMessage = Record<string, unknown> | number[];
 type PlayerRoundStats = {
@@ -135,19 +143,11 @@ function readPlayerUpdateBoolean(message: PlayerUpdateMessage, index: number, ke
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 15;
   state = new MyRoomState();
-  private nextInjuryAt = 0;
   private playerSafeUntil = new Map<string, number>();
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
-  private activeNextbotSpawnPoint = DEFAULT_NEXTBOT_SPAWN_POINTS[0];
+  private nextbotControllers: NextbotControllerState[] = [];
   private playerSpawnPoints = DEFAULT_PLAYER_SPAWN_POINTS;
   private nextTargetScanAt = 0;
-  private currentTargetSessionId = "";
-  private targetLockedUntil = 0;
-  private pendingSwitchSessionId = "";
-  private pendingSwitchStartedAt = 0;
-  private currentTargetLostSince = 0;
-  private recentReachableUntil = new Map<string, number>();
-  private lastKnownTargetPosition?: SpawnPoint;
   private playerRevivedUntil = new Map<string, number>();
   private currentPhase: RoundPhase = "waiting";
   private phaseEndsAt = 0;
@@ -164,8 +164,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.playerSpawnPoints = this.resolvePlayerSpawnPoints(options);
     this.intermissionDurationMs = this.resolvePositiveDurationMs(options?.intermissionDurationMs, DEFAULT_INTERMISSION_DURATION_MS);
     this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
-    this.activeNextbotSpawnPoint = this.nextbotSpawnPoints[0];
-    this.initializeNextbot();
+    this.initializeNextbots();
 
     //Room ID
     this.roomId = Math.floor(1000 + Math.random() * 9000).toString();
@@ -349,7 +348,7 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     const joinOrder = this.nextJoinOrder;
-    const spawnPosition = this.getPlayerSpawnPosition(joinOrder - 1);
+    const spawnPosition = this.getPlayerSpawnPosition(client.sessionId);
     player.x = spawnPosition.x;
     player.y = 0;
     player.z = spawnPosition.z;
@@ -415,7 +414,7 @@ export class MyRoom extends Room<MyRoomState> {
       this.roundIndex = 0;
       this.hasStartedMatchFlow = false;
       this.latestRoundResultsJson = "";
-      this.clearNextbotTargetingState();
+      this.clearAllNextbotTargetingState();
     }
 
     // Unlock the room for late commers 
@@ -455,86 +454,191 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   update(deltaTime: number) {
-    const nextbot = this.state.nextbot;
     const now = Date.now();
     this.updateRoundFlow(now);
     if (!NEXTBOTS_ENABLED) {
-      nextbot.isActive = false;
-      this.clearNextbotTargetingState();
+      this.setAllNextbotsActive(false);
+      this.clearAllNextbotTargetingState();
       return;
     }
 
-    nextbot.isActive = this.state.isGameStarted && this.state.players.size > 0;
+    const shouldActivateNextbots = this.state.isGameStarted && this.state.players.size > 0;
+    this.setAllNextbotsActive(shouldActivateNextbots);
 
-    if (!nextbot.isActive) {
-      this.clearNextbotTargetingState();
+    if (!shouldActivateNextbots) {
+      this.clearAllNextbotTargetingState();
       return;
     }
 
-    if (now >= this.nextTargetScanAt || !this.canKeepCurrentTarget(now)) {
+    if (now >= this.nextTargetScanAt) {
       this.nextTargetScanAt = now + NEXTBOT_SCAN_INTERVAL_MS;
-      this.evaluateNextbotTargetSelection(now);
+      this.assignNextbotTargets(now);
     }
 
     const deltaSeconds = deltaTime / 1000;
-    const target = this.getCurrentTarget();
-    if (!target) {
-      if (this.lastKnownTargetPosition != null) {
-        this.moveNextbotTowardsSearchPosition(deltaSeconds);
-      } else {
-        nextbot.targetSessionId = "";
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      const nextbot = this.getNextbotState(index);
+      if (nextbot == null) {
+        continue;
       }
 
-      return;
-    }
+      const target = controller.currentTargetSessionId
+        ? this.state.players.get(controller.currentTargetSessionId)
+        : undefined;
 
-    this.rememberTargetPosition(target);
-    nextbot.targetSessionId = target.sessionId;
-    const predictedTarget = this.getPredictedTargetPosition(target);
-    this.moveNextbotTowardsPosition(predictedTarget, deltaSeconds);
-    this.tryInjurePlayer(target);
-  }
+      if (target != null && this.isScoreEligibleTarget(target, now, nextbot)) {
+        nextbot.targetSessionId = target.sessionId;
+        const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
+        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds);
+        this.tryInjurePlayer(controller, nextbot, target, now);
+        continue;
+      }
 
-  private moveNextbotTowardsSearchPosition(deltaSeconds: number) {
-    const nextbot = this.state.nextbot;
-    if (this.lastKnownTargetPosition == null) {
+      controller.currentTargetSessionId = "";
       nextbot.targetSessionId = "";
-      return;
+      this.moveNextbotOnPatrol(controller, nextbot, deltaSeconds);
+    }
+  }
+
+  private initializeNextbots() {
+    this.state.nextbots.clear();
+    this.nextbotControllers = [];
+
+    for (let index = 0; index < NEXTBOT_COUNT; index++) {
+      const botId = this.getNextbotId(index);
+      const spawnPoint = this.getNextbotSpawnPoint(index);
+      const nextbotState = new NextbotState();
+      nextbotState.x = spawnPoint.x;
+      nextbotState.y = spawnPoint.y;
+      nextbotState.z = spawnPoint.z;
+      nextbotState.rotationY = 0;
+      nextbotState.targetSessionId = "";
+      nextbotState.isActive = false;
+      this.state.nextbots.set(botId, nextbotState);
+      this.nextbotControllers.push({
+        id: botId,
+        spawnIndex: index,
+        patrolPointIndex: (index + 1) % Math.max(1, this.nextbotSpawnPoints.length),
+        nextInjuryAt: 0,
+        currentTargetSessionId: "",
+      });
+    }
+  }
+
+  private resetNextbotsToSpawnPoints() {
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      const nextbot = this.getNextbotState(index);
+      if (nextbot == null) {
+        continue;
+      }
+
+      const spawnPoint = this.getNextbotSpawnPoint(controller.spawnIndex);
+      nextbot.x = spawnPoint.x;
+      nextbot.y = spawnPoint.y;
+      nextbot.z = spawnPoint.z;
+      nextbot.rotationY = 0;
+      nextbot.targetSessionId = "";
+      nextbot.isActive = false;
+      controller.currentTargetSessionId = "";
+      controller.nextInjuryAt = 0;
+      controller.patrolPointIndex = (controller.spawnIndex + 1) % Math.max(1, this.nextbotSpawnPoints.length);
+    }
+  }
+
+  private setAllNextbotsActive(isActive: boolean) {
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const nextbot = this.getNextbotState(index);
+      if (nextbot != null) {
+        nextbot.isActive = isActive;
+        if (!isActive) {
+          nextbot.targetSessionId = "";
+        }
+      }
+    }
+  }
+
+  private assignNextbotTargets(now: number) {
+    const claimedTargets = new Set<string>();
+
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      const nextbot = this.getNextbotState(index);
+      const currentTarget = controller.currentTargetSessionId
+        ? this.state.players.get(controller.currentTargetSessionId)
+        : undefined;
+
+      if (nextbot != null
+        && currentTarget != null
+        && !claimedTargets.has(currentTarget.sessionId)
+        && this.isScoreEligibleTarget(currentTarget, now, nextbot)) {
+        claimedTargets.add(currentTarget.sessionId);
+        nextbot.targetSessionId = currentTarget.sessionId;
+        continue;
+      }
+
+      controller.currentTargetSessionId = "";
+      if (nextbot != null) {
+        nextbot.targetSessionId = "";
+      }
     }
 
-    this.moveNextbotTowardsPosition({
-      x: this.lastKnownTargetPosition.x,
-      z: this.lastKnownTargetPosition.z,
-      distance: Math.hypot(
-        this.lastKnownTargetPosition.x - this.state.nextbot.x,
-        this.lastKnownTargetPosition.z - this.state.nextbot.z),
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      const nextbot = this.getNextbotState(index);
+      if (nextbot == null || controller.currentTargetSessionId) {
+        continue;
+      }
+
+      const bestCandidate = this.findBestTargetForNextbot(nextbot, now, claimedTargets);
+      if (bestCandidate == null) {
+        continue;
+      }
+
+      controller.currentTargetSessionId = bestCandidate.player.sessionId;
+      nextbot.targetSessionId = bestCandidate.player.sessionId;
+      claimedTargets.add(bestCandidate.player.sessionId);
+    }
+  }
+
+  private findBestTargetForNextbot(nextbot: NextbotState, now: number, claimedTargets: Set<string>) {
+    let bestTarget: ScoredTarget | undefined;
+
+    this.state.players.forEach((player) => {
+      if (claimedTargets.has(player.sessionId)) {
+        return;
+      }
+
+      const scoredTarget = this.buildScoredTarget(player, now, nextbot, false);
+      if (scoredTarget == null || !scoredTarget.eligible) {
+        return;
+      }
+
+      if (bestTarget == null || scoredTarget.score > bestTarget.score) {
+        bestTarget = scoredTarget;
+      }
+    });
+
+    return bestTarget;
+  }
+
+  private moveNextbotOnPatrol(controller: NextbotControllerState, nextbot: NextbotState, deltaSeconds: number) {
+    const patrolTarget = this.getNextbotSpawnPoint(controller.patrolPointIndex);
+    const distance = Math.hypot(patrolTarget.x - nextbot.x, patrolTarget.z - nextbot.z);
+    if (distance <= NEXTBOT_PATROL_REACHED_DISTANCE) {
+      controller.patrolPointIndex = (controller.patrolPointIndex + 1) % Math.max(1, this.nextbotSpawnPoints.length);
+    }
+
+    const nextPatrolTarget = this.getNextbotSpawnPoint(controller.patrolPointIndex);
+    this.moveNextbotTowardsPosition(nextbot, {
+      x: nextPatrolTarget.x,
+      z: nextPatrolTarget.z,
+      distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
     }, deltaSeconds);
-    nextbot.targetSessionId = "";
   }
 
-  private initializeNextbot() {
-    this.activeNextbotSpawnPoint = this.pickNextbotSpawnPoint();
-    this.state.nextbot.x = this.activeNextbotSpawnPoint.x;
-    this.state.nextbot.y = this.activeNextbotSpawnPoint.y;
-    this.state.nextbot.z = this.activeNextbotSpawnPoint.z;
-    this.state.nextbot.rotationY = 0;
-    this.state.nextbot.targetSessionId = "";
-    this.state.nextbot.isActive = false;
-    this.clearNextbotTargetingState();
-  }
-
-  private resetNextbotToSpawnPoint() {
-    this.activeNextbotSpawnPoint = this.pickNextbotSpawnPoint();
-    this.state.nextbot.x = this.activeNextbotSpawnPoint.x;
-    this.state.nextbot.y = this.activeNextbotSpawnPoint.y;
-    this.state.nextbot.z = this.activeNextbotSpawnPoint.z;
-    this.state.nextbot.rotationY = 0;
-    this.state.nextbot.targetSessionId = "";
-    this.clearNextbotTargetingState();
-  }
-
-  private moveNextbotTowardsPosition(target: PredictedTargetPosition, deltaSeconds: number) {
-    const nextbot = this.state.nextbot;
+  private moveNextbotTowardsPosition(nextbot: NextbotState, target: PredictedTargetPosition, deltaSeconds: number) {
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
@@ -554,127 +658,34 @@ export class MyRoom extends Room<MyRoomState> {
     nextbot.z += (dz / distance) * moveDistance;
   }
 
-  private tryInjurePlayer(target: Player) {
-    const nextbot = this.state.nextbot;
+  private tryInjurePlayer(controller: NextbotControllerState, nextbot: NextbotState, target: Player, now: number) {
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
 
-    if (distance > NEXTBOT_INJURY_DISTANCE || Date.now() < this.nextInjuryAt || target.isInjured || target.isHitReacting) {
+    if (distance > NEXTBOT_INJURY_DISTANCE || now < controller.nextInjuryAt || target.isInjured || target.isHitReacting) {
       return;
     }
 
-    this.nextInjuryAt = Date.now() + NEXTBOT_INJURY_COOLDOWN_MS;
-    this.recordPlayerDowned(target.sessionId, Date.now());
+    controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
+    this.recordPlayerDowned(target.sessionId, now);
     target.hitTriggerId += 1;
     target.hitSourceX = nextbot.x;
     target.hitSourceY = nextbot.y;
     target.hitSourceZ = nextbot.z;
   }
 
-  private evaluateNextbotTargetSelection(now: number) {
-    const nextbot = this.state.nextbot;
-    const currentTarget = this.getCurrentTarget();
-    const currentCanContinue = this.canKeepCurrentTarget(now);
-    const currentScoredTarget = currentTarget != null
-      ? this.buildScoredTarget(currentTarget, now, true)
-      : undefined;
-    const bestCandidate = this.findBestScoredTarget(now, currentTarget?.sessionId ?? "");
-
-    if (currentTarget == null) {
-      if (bestCandidate != null) {
-        this.assignCurrentTarget(bestCandidate.player.sessionId, now);
-      } else {
-        this.clearCurrentTargetSelection();
-      }
-      nextbot.targetSessionId = this.currentTargetSessionId;
-      return;
-    }
-
-    if (currentCanContinue && now < this.targetLockedUntil) {
-      nextbot.targetSessionId = currentTarget.sessionId;
-      this.pendingSwitchSessionId = "";
-      this.pendingSwitchStartedAt = 0;
-      return;
-    }
-
-    if (!currentCanContinue) {
-      if (bestCandidate != null) {
-        this.assignCurrentTarget(bestCandidate.player.sessionId, now);
-      } else {
-        this.clearCurrentTargetSelection();
-      }
-      nextbot.targetSessionId = this.currentTargetSessionId;
-      return;
-    }
-
-    if (bestCandidate == null || currentScoredTarget == null) {
-      nextbot.targetSessionId = currentTarget.sessionId;
-      return;
-    }
-
-    if (bestCandidate.player.sessionId === currentTarget.sessionId) {
-      this.pendingSwitchSessionId = "";
-      this.pendingSwitchStartedAt = 0;
-      nextbot.targetSessionId = currentTarget.sessionId;
-      return;
-    }
-
-    const currentScore = currentScoredTarget.score;
-    const newScore = bestCandidate.score;
-    if (newScore <= currentScore + NEXTBOT_SWITCH_SCORE_THRESHOLD) {
-      this.pendingSwitchSessionId = "";
-      this.pendingSwitchStartedAt = 0;
-      nextbot.targetSessionId = currentTarget.sessionId;
-      return;
-    }
-
-    if (this.pendingSwitchSessionId !== bestCandidate.player.sessionId) {
-      this.pendingSwitchSessionId = bestCandidate.player.sessionId;
-      this.pendingSwitchStartedAt = now;
-      nextbot.targetSessionId = currentTarget.sessionId;
-      return;
-    }
-
-    if (now - this.pendingSwitchStartedAt >= NEXTBOT_SWITCH_CONFIRM_MS) {
-      this.assignCurrentTarget(bestCandidate.player.sessionId, now);
-    }
-
-    nextbot.targetSessionId = this.currentTargetSessionId;
-  }
-
-  private findBestScoredTarget(now: number, currentTargetSessionId: string): ScoredTarget | undefined {
-    let bestTarget: ScoredTarget | undefined;
-
-    this.state.players.forEach((player) => {
-      const scoredTarget = this.buildScoredTarget(player, now, player.sessionId === currentTargetSessionId);
-      if (scoredTarget == null || !scoredTarget.eligible) {
-        return;
-      }
-
-      if (bestTarget == null || scoredTarget.score > bestTarget.score) {
-        bestTarget = scoredTarget;
-      }
-    });
-
-    return bestTarget;
-  }
-
-  private buildScoredTarget(player: Player, now: number, isCurrentTarget: boolean): ScoredTarget | undefined {
-    if (!this.isScoreEligibleTarget(player, now)) {
+  private buildScoredTarget(player: Player, now: number, nextbot: NextbotState, isCurrentTarget: boolean): ScoredTarget | undefined {
+    if (!this.isScoreEligibleTarget(player, now, nextbot)) {
       return undefined;
     }
 
-    const predicted = this.getPredictedTargetPosition(player);
-    const nextbot = this.state.nextbot;
+    const predicted = this.getPredictedTargetPosition(player, nextbot);
     const distanceScore = Math.max(0, NEXTBOT_DISTANCE_SCORE_BASE - predicted.distance);
     const visibilityProxyBonus = predicted.distance <= NEXTBOT_VISIBLE_PROXY_RANGE ? NEXTBOT_VISIBLE_PROXY_BONUS : 0;
-    const facingBonus = this.isTargetInFront(predicted) ? NEXTBOT_FRONT_BONUS : 0;
+    const facingBonus = this.isTargetInFront(predicted, nextbot) ? NEXTBOT_FRONT_BONUS : 0;
     const currentTargetBonus = isCurrentTarget ? NEXTBOT_CURRENT_TARGET_BONUS : 0;
-    const reachableBonus = (this.recentReachableUntil.get(player.sessionId) ?? 0) > now ? NEXTBOT_RECENT_REACHABLE_BONUS : 0;
-    const interceptBonus = this.getInterceptBonus(player, predicted);
-
-    this.recentReachableUntil.set(player.sessionId, now + NEXTBOT_RECENT_REACHABLE_MS);
+    const interceptBonus = this.getInterceptBonus(player, predicted, nextbot);
 
     return {
       player,
@@ -684,13 +695,11 @@ export class MyRoom extends Room<MyRoomState> {
         + visibilityProxyBonus
         + facingBonus
         + currentTargetBonus
-        + reachableBonus
         + interceptBonus,
     };
   }
 
-  private getPredictedTargetPosition(player: Player): PredictedTargetPosition {
-    const nextbot = this.state.nextbot;
+  private getPredictedTargetPosition(player: Player, nextbot: NextbotState): PredictedTargetPosition {
     const predictedX = player.x + player.velocityX * NEXTBOT_PREDICTION_TIME;
     const predictedZ = player.z + player.velocityZ * NEXTBOT_PREDICTION_TIME;
     const dx = predictedX - nextbot.x;
@@ -703,7 +712,7 @@ export class MyRoom extends Room<MyRoomState> {
     };
   }
 
-  private isScoreEligibleTarget(player: Player, now: number) {
+  private isScoreEligibleTarget(player: Player, now: number, nextbot: NextbotState) {
     const safeUntil = this.playerSafeUntil.get(player.sessionId) ?? 0;
     if (safeUntil > now) {
       return false;
@@ -713,7 +722,7 @@ export class MyRoom extends Room<MyRoomState> {
       return false;
     }
 
-    if (Math.abs(player.y - this.state.nextbot.y) > NEXTBOT_MAX_VERTICAL_DELTA) {
+    if (Math.abs(player.y - nextbot.y) > NEXTBOT_MAX_VERTICAL_DELTA) {
       return false;
     }
 
@@ -721,7 +730,7 @@ export class MyRoom extends Room<MyRoomState> {
       return false;
     }
 
-    const predicted = this.getPredictedTargetPosition(player);
+    const predicted = this.getPredictedTargetPosition(player, nextbot);
     if (predicted.distance > NEXTBOT_MAX_CHASE_RANGE) {
       return false;
     }
@@ -729,43 +738,7 @@ export class MyRoom extends Room<MyRoomState> {
     return true;
   }
 
-  private canKeepCurrentTarget(now: number) {
-    const currentTarget = this.getCurrentTarget();
-    if (!currentTarget) {
-      this.currentTargetLostSince = 0;
-      return false;
-    }
-
-    const safeUntil = this.playerSafeUntil.get(currentTarget.sessionId) ?? 0;
-    if (safeUntil > now || currentTarget.isInjured || currentTarget.isHitReacting) {
-      this.currentTargetLostSince = 0;
-      return false;
-    }
-
-    const verticalOkay = Math.abs(currentTarget.y - this.state.nextbot.y) <= NEXTBOT_MAX_VERTICAL_DELTA * 1.5;
-    const predicted = this.getPredictedTargetPosition(currentTarget);
-    const withinExtendedRange = predicted.distance <= NEXTBOT_MAX_CHASE_RANGE * 1.2;
-    const freshEnough = now - currentTarget.timestamp <= NEXTBOT_STALE_TARGET_TIMEOUT_MS + NEXTBOT_UNREACHABLE_TIMEOUT_MS;
-
-    if (verticalOkay && withinExtendedRange && freshEnough && this.isScoreEligibleTarget(currentTarget, now)) {
-      this.currentTargetLostSince = 0;
-      return true;
-    }
-
-    if (verticalOkay && withinExtendedRange && freshEnough) {
-      if (this.currentTargetLostSince <= 0) {
-        this.currentTargetLostSince = now;
-      }
-
-      return now - this.currentTargetLostSince <= NEXTBOT_UNREACHABLE_TIMEOUT_MS;
-    }
-
-    this.currentTargetLostSince = 0;
-    return false;
-  }
-
-  private isTargetInFront(predicted: PredictedTargetPosition) {
-    const nextbot = this.state.nextbot;
+  private isTargetInFront(predicted: PredictedTargetPosition, nextbot: NextbotState) {
     const dx = predicted.x - nextbot.x;
     const dz = predicted.z - nextbot.z;
     const targetYaw = Math.atan2(dx, dz) * (180 / Math.PI);
@@ -773,14 +746,14 @@ export class MyRoom extends Room<MyRoomState> {
     return yawDelta <= NEXTBOT_FRONT_ANGLE_THRESHOLD;
   }
 
-  private getInterceptBonus(player: Player, predicted: PredictedTargetPosition) {
+  private getInterceptBonus(player: Player, predicted: PredictedTargetPosition, nextbot: NextbotState) {
     const speed = Math.hypot(player.velocityX, player.velocityZ);
     if (speed <= 0.1) {
       return 0;
     }
 
-    const toPredictedX = predicted.x - this.state.nextbot.x;
-    const toPredictedZ = predicted.z - this.state.nextbot.z;
+    const toPredictedX = predicted.x - nextbot.x;
+    const toPredictedZ = predicted.z - nextbot.z;
     const toPredictedDistance = Math.hypot(toPredictedX, toPredictedZ);
     if (toPredictedDistance <= 0.0001) {
       return 0;
@@ -809,48 +782,20 @@ export class MyRoom extends Room<MyRoomState> {
     return delta;
   }
 
-  private assignCurrentTarget(sessionId: string, now: number) {
-    this.currentTargetSessionId = sessionId;
-    this.targetLockedUntil = now + NEXTBOT_TARGET_LOCK_MS;
-    this.pendingSwitchSessionId = "";
-    this.pendingSwitchStartedAt = 0;
-    this.currentTargetLostSince = 0;
-    this.state.nextbot.targetSessionId = sessionId;
-  }
-
-  private getCurrentTarget() {
-    if (!this.currentTargetSessionId) {
-      return undefined;
+  private clearAllNextbotTargetingState() {
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      controller.currentTargetSessionId = "";
+      const nextbot = this.getNextbotState(index);
+      if (nextbot != null) {
+        nextbot.targetSessionId = "";
+      }
     }
-
-    return this.state.players.get(this.currentTargetSessionId);
   }
 
-  private clearCurrentTargetSelection() {
-    this.currentTargetSessionId = "";
-    this.targetLockedUntil = 0;
-    this.pendingSwitchSessionId = "";
-    this.pendingSwitchStartedAt = 0;
-    this.currentTargetLostSince = 0;
-    this.state.nextbot.targetSessionId = "";
-  }
-
-  private clearNextbotTargetingState() {
-    this.clearCurrentTargetSelection();
-    this.lastKnownTargetPosition = undefined;
-  }
-
-  private rememberTargetPosition(target: Player) {
-    this.lastKnownTargetPosition = {
-      x: target.x,
-      y: this.state.nextbot.y,
-      z: target.z,
-    };
-  }
-
-  private getPlayerSpawnPosition(spawnIndex = 0) {
+  private getPlayerSpawnPosition(sessionId: string) {
     const spawnPoints = this.playerSpawnPoints.length > 0 ? this.playerSpawnPoints : DEFAULT_PLAYER_SPAWN_POINTS;
-    const normalizedIndex = ((spawnIndex % spawnPoints.length) + spawnPoints.length) % spawnPoints.length;
+    const normalizedIndex = this.getStableSpawnIndex(sessionId, spawnPoints.length);
     const spawnPoint = spawnPoints[normalizedIndex];
     return {
       x: spawnPoint.x,
@@ -859,8 +804,18 @@ export class MyRoom extends Room<MyRoomState> {
     };
   }
 
-  private pickNextbotSpawnPoint(): SpawnPoint {
-    return this.nextbotSpawnPoints[0] ?? DEFAULT_NEXTBOT_SPAWN_POINTS[0];
+  private getNextbotId(index: number) {
+    return `nextbot_${index}`;
+  }
+
+  private getNextbotState(index: number) {
+    return this.state.nextbots.get(this.getNextbotId(index));
+  }
+
+  private getNextbotSpawnPoint(spawnIndex: number): SpawnPoint {
+    const spawnPoints = this.nextbotSpawnPoints.length > 0 ? this.nextbotSpawnPoints : DEFAULT_NEXTBOT_SPAWN_POINTS;
+    const normalizedIndex = ((spawnIndex % spawnPoints.length) + spawnPoints.length) % spawnPoints.length;
+    return spawnPoints[normalizedIndex];
   }
 
   private resolveNextbotSpawnPoints(options: any): SpawnPoint[] {
@@ -958,7 +913,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.currentPhase = "intermission";
     this.phaseEndsAt = now + this.intermissionDurationMs;
     this.state.isGameStarted = false;
-    this.resetNextbotToSpawnPoint();
+    this.resetNextbotsToSpawnPoints();
     this.resetPlayersForIntermission(now);
     this.broadcastRoundPhase();
   }
@@ -969,7 +924,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.phaseEndsAt = now + this.roundDurationMs;
     this.state.isGameStarted = true;
     this.latestRoundResultsJson = "";
-    this.resetNextbotToSpawnPoint();
+    this.resetNextbotsToSpawnPoints();
     this.resetPlayersForRoundStart(now);
     this.broadcastRoundPhase();
     this.broadcastRoundAnnouncement({
@@ -987,12 +942,9 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private resetPlayersForIntermission(now: number) {
-    let fallbackSpawnIndex = 0;
     this.state.players.forEach((player) => {
       this.clearCarryStateForPlayer(player.sessionId);
-      const stats = this.roundStats.get(player.sessionId);
-      const spawnPosition = this.getPlayerSpawnPosition(stats != null ? stats.joinOrder - 1 : fallbackSpawnIndex);
-      fallbackSpawnIndex += 1;
+      const spawnPosition = this.getPlayerSpawnPosition(player.sessionId);
       player.x = spawnPosition.x;
       player.y = spawnPosition.y;
       player.z = spawnPosition.z;
@@ -1020,7 +972,7 @@ export class MyRoom extends Room<MyRoomState> {
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
     });
 
-    this.broadcast("roundPlayerReset", "reset");
+    this.sendRoundPlayerResetMessages();
   }
 
   private resetPlayersForRoundStart(now: number) {
@@ -1050,7 +1002,24 @@ export class MyRoom extends Room<MyRoomState> {
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
     });
 
-    this.broadcast("roundPlayerReset", "reset");
+    this.sendRoundPlayerResetMessages();
+  }
+
+  private sendRoundPlayerResetMessages() {
+    for (let index = 0; index < this.clients.length; index++) {
+      const client = this.clients[index];
+      const player = this.state.players.get(client.sessionId);
+      if (!player) {
+        continue;
+      }
+
+      client.send("roundPlayerReset", JSON.stringify({
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        rotationY: player.rotationY,
+      }));
+    }
   }
 
   private recordPlayerDowned(sessionId: string, now: number) {
@@ -1174,4 +1143,17 @@ export class MyRoom extends Room<MyRoomState> {
     return Math.max(1000, Math.round(value));
   }
 
+  private getStableSpawnIndex(sessionId: string, spawnPointCount: number) {
+    if (spawnPointCount <= 0) {
+      return 0;
+    }
+
+    let hash = 0;
+    for (let i = 0; i < sessionId.length; i++) {
+      hash = ((hash * 31) + sessionId.charCodeAt(i)) | 0;
+    }
+
+    const normalized = hash % spawnPointCount;
+    return normalized < 0 ? normalized + spawnPointCount : normalized;
+  }
 }

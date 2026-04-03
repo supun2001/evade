@@ -3,6 +3,7 @@ using UnityEngine;
 public class NextbotAgent : MonoBehaviour
 {
     [Header("Network Smoothing")]
+    [SerializeField] private string nextbotId = "nextbot_0";
     [SerializeField] private float positionLerpSpeed = 12f;
     [SerializeField] private float rotationLerpSpeed = 14f;
 
@@ -86,12 +87,24 @@ public class NextbotAgent : MonoBehaviour
     private NextbotState GetNextbotState()
     {
         NetworkManager networkManager = NetworkManager.Instance;
-        if (networkManager == null || networkManager.Room == null || networkManager.Room.State == null)
+        if (networkManager == null
+            || networkManager.Room == null
+            || networkManager.Room.State == null
+            || networkManager.Room.State.nextbots == null
+            || string.IsNullOrEmpty(nextbotId))
         {
             return null;
         }
 
-        return networkManager.Room.State.nextbot;
+        return networkManager.Room.State.nextbots.TryGetValue(nextbotId, out NextbotState nextbotState)
+            ? nextbotState
+            : null;
+    }
+
+    public void AssignNextbotId(string networkNextbotId)
+    {
+        nextbotId = networkNextbotId;
+        _hasAppliedServerState = false;
     }
 
     private void EnsureFaceRenderer()
