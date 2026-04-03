@@ -12,6 +12,12 @@ public struct NextbotSpawnPointConfig
     public Vector3 position;
 }
 
+[Serializable]
+public struct PlayerSpawnPointConfig
+{
+    public Vector3 position;
+}
+
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
@@ -34,6 +40,13 @@ public class NetworkManager : MonoBehaviour
         new NextbotSpawnPointConfig { position = new Vector3(6.45f, 0f, -2.38f) },
         new NextbotSpawnPointConfig { position = new Vector3(-6.45f, 0f, 2.38f) },
         new NextbotSpawnPointConfig { position = new Vector3(0f, 0f, 7.5f) },
+    };
+    [Tooltip("Server-authoritative player spawn points used for joins and round resets.")]
+    [SerializeField] private List<PlayerSpawnPointConfig> playerSpawnPoints = new()
+    {
+        new PlayerSpawnPointConfig { position = new Vector3(0f, 0f, -6f) },
+        new PlayerSpawnPointConfig { position = new Vector3(2f, 0f, -6f) },
+        new PlayerSpawnPointConfig { position = new Vector3(-2f, 0f, -6f) },
     };
     [Header("Round Timing")]
     [Tooltip("How long the intermission lasts before the round starts.")]
@@ -347,9 +360,22 @@ public class NetworkManager : MonoBehaviour
             });
         }
 
+        List<object> serializedPlayerSpawnPoints = new List<object>();
+        for (int i = 0; i < playerSpawnPoints.Count; i++)
+        {
+            Vector3 point = playerSpawnPoints[i].position;
+            serializedPlayerSpawnPoints.Add(new Dictionary<string, object>
+            {
+                ["x"] = point.x,
+                ["y"] = point.y,
+                ["z"] = point.z,
+            });
+        }
+
         return new Dictionary<string, object>
         {
             ["nextbotSpawnPoints"] = serializedSpawnPoints,
+            ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
         };

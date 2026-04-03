@@ -8,6 +8,11 @@ const DEFAULT_NEXTBOT_SPAWN_POINTS = [
   { x: -6.45, y: 0, z: 2.38 },
   { x: 0, y: 0, z: 7.5 },
 ];
+const DEFAULT_PLAYER_SPAWN_POINTS = [
+  { x: 0, y: 0, z: -6 },
+  { x: 2, y: 0, z: -6 },
+  { x: -2, y: 0, z: -6 },
+];
 const NEXTBOT_MOVE_SPEED = 9;
 const NEXTBOT_STOPPING_DISTANCE = 0.7;
 const NEXTBOT_INJURY_DISTANCE = 0.95;
@@ -134,6 +139,7 @@ export class MyRoom extends Room<MyRoomState> {
   private playerSafeUntil = new Map<string, number>();
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
   private activeNextbotSpawnPoint = DEFAULT_NEXTBOT_SPAWN_POINTS[0];
+  private playerSpawnPoints = DEFAULT_PLAYER_SPAWN_POINTS;
   private nextTargetScanAt = 0;
   private currentTargetSessionId = "";
   private targetLockedUntil = 0;
@@ -155,6 +161,7 @@ export class MyRoom extends Room<MyRoomState> {
 
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
+    this.playerSpawnPoints = this.resolvePlayerSpawnPoints(options);
     this.intermissionDurationMs = this.resolvePositiveDurationMs(options?.intermissionDurationMs, DEFAULT_INTERMISSION_DURATION_MS);
     this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
     this.activeNextbotSpawnPoint = this.nextbotSpawnPoints[0];
@@ -341,7 +348,8 @@ export class MyRoom extends Room<MyRoomState> {
       player.isReady = true;
     }
 
-    const spawnPosition = this.getSafePlayerSpawnPosition();
+    const joinOrder = this.nextJoinOrder;
+    const spawnPosition = this.getPlayerSpawnPosition(joinOrder - 1);
     player.x = spawnPosition.x;
     player.y = 0;
     player.z = spawnPosition.z;
@@ -376,8 +384,8 @@ export class MyRoom extends Room<MyRoomState> {
       currentLifeStartMs: this.currentPhase === "round" ? Date.now() : null,
       downedCount: 0,
       revivesDone: 0,
-      joinOrder: this.nextJoinOrder,
-      displayName: `Player ${this.nextJoinOrder}`,
+      joinOrder,
+      displayName: `Player ${joinOrder}`,
     });
     this.nextJoinOrder += 1;
 
@@ -840,20 +848,14 @@ export class MyRoom extends Room<MyRoomState> {
     };
   }
 
-  private getSafePlayerSpawnPosition() {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const x = Math.random() * PLAYER_SPAWN_RANGE - PLAYER_SPAWN_RANGE * 0.5;
-      const z = Math.random() * PLAYER_SPAWN_RANGE - PLAYER_SPAWN_RANGE * 0.5;
-      const dx = x - this.activeNextbotSpawnPoint.x;
-      const dz = z - this.activeNextbotSpawnPoint.z;
-      if (Math.hypot(dx, dz) >= PLAYER_MIN_SPAWN_DISTANCE_FROM_NEXTBOT) {
-        return { x, z };
-      }
-    }
-
+  private getPlayerSpawnPosition(spawnIndex = 0) {
+    const spawnPoints = this.playerSpawnPoints.length > 0 ? this.playerSpawnPoints : DEFAULT_PLAYER_SPAWN_POINTS;
+    const normalizedIndex = ((spawnIndex % spawnPoints.length) + spawnPoints.length) % spawnPoints.length;
+    const spawnPoint = spawnPoints[normalizedIndex];
     return {
-      x: -this.activeNextbotSpawnPoint.x,
-      z: -this.activeNextbotSpawnPoint.z,
+      x: spawnPoint.x,
+      y: spawnPoint.y,
+      z: spawnPoint.z,
     };
   }
 
@@ -882,6 +884,32 @@ export class MyRoom extends Room<MyRoomState> {
 
     if (parsedPoints.length === 0) {
       return DEFAULT_NEXTBOT_SPAWN_POINTS;
+    }
+
+    return parsedPoints;
+  }
+
+  private resolvePlayerSpawnPoints(options: any): SpawnPoint[] {
+    const candidatePoints = options?.playerSpawnPoints;
+    if (!Array.isArray(candidatePoints) || candidatePoints.length === 0) {
+      return DEFAULT_PLAYER_SPAWN_POINTS;
+    }
+
+    const parsedPoints = candidatePoints
+      .map((point) => {
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        const z = Number(point?.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+          return undefined;
+        }
+
+        return { x, y, z };
+      })
+      .filter((point): point is { x: number; y: number; z: number } => point !== undefined);
+
+    if (parsedPoints.length === 0) {
+      return DEFAULT_PLAYER_SPAWN_POINTS;
     }
 
     return parsedPoints;
@@ -959,8 +987,18 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private resetPlayersForIntermission(now: number) {
+    let fallbackSpawnIndex = 0;
     this.state.players.forEach((player) => {
       this.clearCarryStateForPlayer(player.sessionId);
+      const stats = this.roundStats.get(player.sessionId);
+      const spawnPosition = this.getPlayerSpawnPosition(stats != null ? stats.joinOrder - 1 : fallbackSpawnIndex);
+      fallbackSpawnIndex += 1;
+      player.x = spawnPosition.x;
+      player.y = spawnPosition.y;
+      player.z = spawnPosition.z;
+      player.velocityX = 0;
+      player.velocityY = 0;
+      player.velocityZ = 0;
       player.isInjured = false;
       player.isHitReacting = false;
       player.hitReactionTimeRemaining = 0;
@@ -971,6 +1009,13 @@ export class MyRoom extends Room<MyRoomState> {
       player.hitSourceX = 0;
       player.hitSourceY = 0;
       player.hitSourceZ = 0;
+      player.isGrounded = true;
+      player.isJumping = false;
+      player.isCrouching = false;
+      player.isWallRunning = false;
+      player.wallRunSide = 0;
+      player.moveInputX = 0;
+      player.moveInputY = 0;
       this.playerSafeUntil.set(player.sessionId, now + this.intermissionDurationMs + NEXTBOT_START_GRACE_MS);
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
     });
