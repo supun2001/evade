@@ -200,6 +200,12 @@ MonoBehaviour:
   _sidewaysFriction: 16
   _nonForwardSpeedMultiplier: 0.5
   _injuredRotationSharpness: 12
+  _maxSpeedBoostMultiplier: 2.5
+  _pickupFadeColor: {r: 1, g: 0.24, b: 0.24, a: 1}
+  _jumpPickupFadeColor: {r: 0.24, g: 0.5, b: 1, a: 1}
+  _pickupFadePeakOpacity: 0.18
+  _pickupFadeDuration: 0.35
+  _maxJumpBoostMultiplier: 2
   _nextbotHitReactionDuration: 0.45
   _nextbotHitShoveForce: 8
   _nextbotHitUpwardForce: 4

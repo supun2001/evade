@@ -41,6 +41,14 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _nonForwardSpeedMultiplier = 0.5f;
     [SerializeField] private float _injuredRotationSharpness = 12f;
 
+    [Header("Temporary Buffs")]
+    [SerializeField] private float _maxSpeedBoostMultiplier = 2.5f;
+    [SerializeField] private float _maxJumpBoostMultiplier = 2f;
+    [SerializeField] private Color _pickupFadeColor = new Color(1f, 0.24f, 0.24f, 1f);
+    [SerializeField] private Color _jumpPickupFadeColor = new Color(0.24f, 0.5f, 1f, 1f);
+    [SerializeField, Range(0f, 1f)] private float _pickupFadePeakOpacity = 0.18f;
+    [SerializeField, Min(0.05f)] private float _pickupFadeDuration = 0.35f;
+
     [Header("Nextbot Hit Reaction")]
     [SerializeField] private float _nextbotHitReactionDuration = 3f;
     [SerializeField] private float _nextbotHitShoveForce = 8f;
@@ -173,6 +181,7 @@ public class PlayerController : MonoBehaviour
     private Label _speedLabel;
     private Label _animationDebugLabel;
     private VisualElement _crosshairDotElement;
+    private VisualElement _pickupFadeOverlayElement;
     private VisualElement _nextbotWarningIndicatorElement;
     private VisualElement _nextbotWarningArrowElement;
     private VisualElement _nextbotWarningSkullElement;
@@ -193,6 +202,11 @@ public class PlayerController : MonoBehaviour
     private float _verticalVelocity = 0f;
     private Vector3 _horizontalVelocity = Vector3.zero;
     private float _runHeldTime = 0f;
+    private float _speedBoostMultiplier = 1f;
+    private float _speedBoostExpiresAt = -1f;
+    private float _jumpBoostMultiplier = 1f;
+    private float _jumpBoostExpiresAt = -1f;
+    private Coroutine _pickupFadeCoroutine;
     private float _reviveHoldTimer;
     private float _reviveHoldStartedAt = -1f;
     private string _reviveHoldTargetSessionId;
@@ -978,6 +992,8 @@ public class PlayerController : MonoBehaviour
         _continueButton = root.Q<Button>("continue-button");
         _mainMenuButton = root.Q<Button>("main-menu-button");
 
+        EnsurePickupFadeOverlay(root);
+
         if (!_hudEventsBound)
         {
             if (_continueButton != null)
@@ -995,6 +1011,37 @@ public class PlayerController : MonoBehaviour
 
         SetPauseMenuDisplay(_isPauseMenuOpen);
         ConfigureNextbotWarningVisuals();
+    }
+
+    private void EnsurePickupFadeOverlay(VisualElement root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        _pickupFadeOverlayElement = root.Q<VisualElement>("pickup-fade-overlay");
+        if (_pickupFadeOverlayElement != null)
+        {
+            return;
+        }
+
+        _pickupFadeOverlayElement = new VisualElement
+        {
+            name = "pickup-fade-overlay",
+            pickingMode = PickingMode.Ignore
+        };
+
+        _pickupFadeOverlayElement.style.position = Position.Absolute;
+        _pickupFadeOverlayElement.style.left = 0f;
+        _pickupFadeOverlayElement.style.right = 0f;
+        _pickupFadeOverlayElement.style.top = 0f;
+        _pickupFadeOverlayElement.style.bottom = 0f;
+        _pickupFadeOverlayElement.style.backgroundColor = _pickupFadeColor;
+        _pickupFadeOverlayElement.style.opacity = 0f;
+        _pickupFadeOverlayElement.style.display = DisplayStyle.None;
+
+        root.Add(_pickupFadeOverlayElement);
     }
 
     private void CacheDownedGroundReferenceTransforms()
@@ -3150,7 +3197,8 @@ public class PlayerController : MonoBehaviour
             _wallRunSprintGraceTimer = canPrimeWallRun ? _wallRunGroundSprintGraceTime : 0f;
 
             _jumpedThisFrame = true;
-            _verticalVelocity += MathF.Sqrt(jumpForce * JUMP_VELOCITY_MULTIPLIER * gravity);
+            float effectiveJumpForce = jumpForce * GetActiveJumpBoostMultiplier();
+            _verticalVelocity += MathF.Sqrt(effectiveJumpForce * JUMP_VELOCITY_MULTIPLIER * gravity);
         }
     }
 
@@ -3221,6 +3269,8 @@ public class PlayerController : MonoBehaviour
 
     private float GetCurrentMoveSpeed()
     {
+        float baseSpeed;
+
         if (_isBeingCarried)
         {
             return 0f;
@@ -3228,21 +3278,150 @@ public class PlayerController : MonoBehaviour
 
         if (_isCarryingPlayer)
         {
-            return _carryMoveSpeed;
+            baseSpeed = _carryMoveSpeed;
+            return baseSpeed * GetActiveSpeedBoostMultiplier();
         }
 
         if (IsInjured())
         {
-            return _injuredMoveSpeed;
+            baseSpeed = _injuredMoveSpeed;
+            return baseSpeed * GetActiveSpeedBoostMultiplier();
         }
 
         if (IsCrouching())
         {
-            return _crouchMoveSpeed;
+            baseSpeed = _crouchMoveSpeed;
+            return baseSpeed * GetActiveSpeedBoostMultiplier();
         }
 
-        float baseSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
-        return baseSpeed;
+        baseSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
+        return baseSpeed * GetActiveSpeedBoostMultiplier();
+    }
+
+    public void ApplyTemporarySpeedBoost(float multiplier, float durationSeconds)
+    {
+        if (durationSeconds <= 0f)
+        {
+            return;
+        }
+
+        float clampedMultiplier = Mathf.Clamp(multiplier, 1f, Mathf.Max(1f, _maxSpeedBoostMultiplier));
+        if (clampedMultiplier <= 1f)
+        {
+            return;
+        }
+
+        _speedBoostMultiplier = Mathf.Max(_speedBoostMultiplier, clampedMultiplier);
+        _speedBoostExpiresAt = Mathf.Max(_speedBoostExpiresAt, Time.time + durationSeconds);
+    }
+
+    public void ApplyTemporaryJumpBoost(float multiplier, float durationSeconds)
+    {
+        if (durationSeconds <= 0f)
+        {
+            return;
+        }
+
+        float clampedMultiplier = Mathf.Clamp(multiplier, 1f, Mathf.Max(1f, _maxJumpBoostMultiplier));
+        if (clampedMultiplier <= 1f)
+        {
+            return;
+        }
+
+        _jumpBoostMultiplier = Mathf.Max(_jumpBoostMultiplier, clampedMultiplier);
+        _jumpBoostExpiresAt = Mathf.Max(_jumpBoostExpiresAt, Time.time + durationSeconds);
+    }
+
+    public void PlayPickupFade()
+    {
+        PlayPickupFade(_pickupFadeColor);
+    }
+
+    public void PlayPickupFade(Color fadeColor)
+    {
+        if (_pickupFadeOverlayElement == null)
+        {
+            CacheHudElements();
+            if (_pickupFadeOverlayElement == null)
+            {
+                return;
+            }
+        }
+
+        _pickupFadeOverlayElement.style.backgroundColor = fadeColor;
+        _pickupFadeOverlayElement.style.display = DisplayStyle.Flex;
+
+        if (_pickupFadeCoroutine != null)
+        {
+            StopCoroutine(_pickupFadeCoroutine);
+        }
+
+        _pickupFadeCoroutine = StartCoroutine(AnimatePickupFade());
+    }
+
+    public void PlayJumpPickupFade()
+    {
+        PlayPickupFade(_jumpPickupFadeColor);
+    }
+
+    private float GetActiveSpeedBoostMultiplier()
+    {
+        if (_speedBoostExpiresAt <= Time.time)
+        {
+            _speedBoostMultiplier = 1f;
+            _speedBoostExpiresAt = -1f;
+            return 1f;
+        }
+
+        return Mathf.Max(1f, _speedBoostMultiplier);
+    }
+
+    private float GetActiveJumpBoostMultiplier()
+    {
+        if (_jumpBoostExpiresAt <= Time.time)
+        {
+            _jumpBoostMultiplier = 1f;
+            _jumpBoostExpiresAt = -1f;
+            return 1f;
+        }
+
+        return Mathf.Max(1f, _jumpBoostMultiplier);
+    }
+
+    private IEnumerator AnimatePickupFade()
+    {
+        if (_pickupFadeOverlayElement == null)
+        {
+            yield break;
+        }
+
+        float duration = Mathf.Max(0.05f, _pickupFadeDuration);
+        float halfDuration = duration * 0.5f;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+
+            float opacity;
+            if (elapsed <= halfDuration)
+            {
+                float inT = Mathf.Clamp01(elapsed / halfDuration);
+                opacity = Mathf.Lerp(0f, _pickupFadePeakOpacity, inT);
+            }
+            else
+            {
+                float outT = Mathf.Clamp01((elapsed - halfDuration) / halfDuration);
+                opacity = Mathf.Lerp(_pickupFadePeakOpacity, 0f, outT);
+            }
+
+            _pickupFadeOverlayElement.style.opacity = opacity;
+            yield return null;
+        }
+
+        _pickupFadeOverlayElement.style.opacity = 0f;
+        _pickupFadeOverlayElement.style.display = DisplayStyle.None;
+        _pickupFadeCoroutine = null;
     }
 
     private float GetSprintProgress()

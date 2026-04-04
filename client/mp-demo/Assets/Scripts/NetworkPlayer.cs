@@ -23,6 +23,8 @@ public class NetworkPlayer : MonoBehaviour
     private float _lastProcessedHitTriggerId = -1f;
     private bool _isInitialized;
 
+    public bool IsLocalPlayer => isLocal;
+
     public void Initialize(Player state, bool isLocalPlayer)
     {
         playerState = state;
