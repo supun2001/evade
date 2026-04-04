@@ -5,6 +5,8 @@ public class JumpBoostPickup : MonoBehaviour
 {
     [SerializeField, Min(1f)] private float _jumpMultiplier = 1.3f;
     [SerializeField, Min(0.1f)] private float _durationSeconds = 5f;
+    [SerializeField] private AudioClip _pickupSound;
+    [SerializeField, Range(0f, 1f)] private float _pickupSoundVolume = 1f;
     [SerializeField] private bool _destroyOnPickup = true;
 
     private void Reset()
@@ -26,6 +28,7 @@ public class JumpBoostPickup : MonoBehaviour
 
         playerController.ApplyTemporaryJumpBoost(_jumpMultiplier, _durationSeconds);
         playerController.PlayJumpPickupFade();
+        playerController.PlayLocalAbilitySound(_pickupSound, _pickupSoundVolume);
 
         if (_destroyOnPickup)
         {

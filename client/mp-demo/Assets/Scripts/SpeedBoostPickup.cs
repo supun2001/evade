@@ -5,6 +5,9 @@ public class SpeedBoostPickup : MonoBehaviour
 {
     [SerializeField, Min(1f)] private float _speedMultiplier = 1.5f;
     [SerializeField, Min(0.1f)] private float _durationSeconds = 5f;
+    [SerializeField] private AudioClip _pickupSound;
+    [SerializeField, Range(0f, 1f)] private float _pickupSoundVolume = 1f;
+    [SerializeField, Min(0.05f)] private float _pickupSoundMaxDuration = 0.55f;
     [SerializeField] private bool _destroyOnPickup = true;
 
     private void Reset()
@@ -26,6 +29,7 @@ public class SpeedBoostPickup : MonoBehaviour
 
         playerController.ApplyTemporarySpeedBoost(_speedMultiplier, _durationSeconds);
         playerController.PlayPickupFade();
+        playerController.PlayLocalAbilitySound(_pickupSound, _pickupSoundVolume, _pickupSoundMaxDuration);
 
         if (_destroyOnPickup)
         {

@@ -176,6 +176,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField, Min(0f)] private float _footstepVolume = 0.6f;
     [SerializeField, Range(0f, 0.3f)] private float _footstepPitchRandomness = 0.04f;
     [SerializeField, Min(0f)] private float _footstepMinHorizontalSpeed = 0.5f;
+    [SerializeField] private AudioClip[] _crouchFootstepClips;
+    [SerializeField, Min(0f)] private float _crouchFootstepVolume = 0.4f;
+    [SerializeField] private AudioClip[] _jumpStartFootstepClips;
+    [SerializeField, Min(0f)] private float _jumpStartFootstepVolume = 0.7f;
+    [SerializeField] private AudioClip[] _landingFootstepClips;
+    [SerializeField, Min(0f)] private float _landingFootstepVolume = 0.8f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
@@ -205,6 +211,8 @@ public class PlayerController : MonoBehaviour
     private CinemachineThirdPersonFollow _thirdPersonFollow;
     private NetworkPlayer _networkPlayer;
     private AudioSource _footstepAudioSource;
+    private AudioSource _pickupAudioSource;
+    private Coroutine _pickupAudioStopCoroutine;
     
     private Vector2 _cameraRotation = Vector2.zero;
     private float _playerRotationY = 0f;
@@ -273,6 +281,9 @@ public class PlayerController : MonoBehaviour
     private int _lastFootstepClipIndex = -1;
     private float _footstepStepTimer;
     private float _lastAnimationEventFootstepTime = float.NegativeInfinity;
+    private int _lastCrouchFootstepClipIndex = -1;
+    private int _lastJumpStartClipIndex = -1;
+    private int _lastLandingClipIndex = -1;
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Quaternion _nextbotHitLeftArmBaseLocalRotation = Quaternion.identity;
@@ -381,6 +392,12 @@ public class PlayerController : MonoBehaviour
         _footstepAudioSource.spatialBlend = 0f;
         _footstepAudioSource.dopplerLevel = 0f;
         _footstepAudioSource.volume = _footstepVolume;
+
+        _pickupAudioSource = gameObject.AddComponent<AudioSource>();
+        _pickupAudioSource.playOnAwake = false;
+        _pickupAudioSource.loop = false;
+        _pickupAudioSource.spatialBlend = 0f;
+        _pickupAudioSource.dopplerLevel = 0f;
     }
     
     private void Start() {
@@ -3221,8 +3238,7 @@ public class PlayerController : MonoBehaviour
             Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
             bool canPrimeWallRun =
                 IsSprinting()
-                && movementInput.y > 0.1f
-                && Mathf.Abs(movementInput.x) > 0.1f;
+                && movementInput.y > 0.1f;
 
             _wallRunSprintGraceTimer = canPrimeWallRun ? _wallRunGroundSprintGraceTime : 0f;
 
@@ -3394,6 +3410,42 @@ public class PlayerController : MonoBehaviour
         PlayPickupFade(_jumpPickupFadeColor);
     }
 
+    public void PlayLocalAbilitySound(AudioClip clip, float volume = 1f, float maxDuration = -1f)
+    {
+        if (clip == null || _pickupAudioSource == null)
+        {
+            return;
+        }
+
+        if (_pickupAudioStopCoroutine != null)
+        {
+            StopCoroutine(_pickupAudioStopCoroutine);
+            _pickupAudioStopCoroutine = null;
+        }
+
+        _pickupAudioSource.Stop();
+        _pickupAudioSource.volume = Mathf.Clamp01(volume);
+        _pickupAudioSource.pitch = 1f;
+        _pickupAudioSource.PlayOneShot(clip);
+
+        if (maxDuration > 0f)
+        {
+            _pickupAudioStopCoroutine = StartCoroutine(StopPickupAudioAfterDelay(maxDuration));
+        }
+    }
+
+    private IEnumerator StopPickupAudioAfterDelay(float delaySeconds)
+    {
+        yield return new WaitForSeconds(Mathf.Max(0.01f, delaySeconds));
+
+        if (_pickupAudioSource != null)
+        {
+            _pickupAudioSource.Stop();
+        }
+
+        _pickupAudioStopCoroutine = null;
+    }
+
     private float GetActiveSpeedBoostMultiplier()
     {
         if (_speedBoostExpiresAt <= Time.time)
@@ -3532,17 +3584,57 @@ public class PlayerController : MonoBehaviour
         }
 
         _lastAnimationEventFootstepTime = Time.time;
-        PlayRandomFootstepClip();
+        PlayRandomClip(_footstepClips, _footstepVolume, ref _lastFootstepClipIndex);
+    }
+
+    public void AnimationEvent_PlayCrouchFootstep()
+    {
+        if (!_useAnimationEventFootsteps)
+        {
+            return;
+        }
+
+        if (!CanPlayFootsteps())
+        {
+            return;
+        }
+
+        if (Time.time - _lastAnimationEventFootstepTime < FOOTSTEP_ANIMATION_EVENT_COOLDOWN)
+        {
+            return;
+        }
+
+        _lastAnimationEventFootstepTime = Time.time;
+        AudioClip[] clipsToUse = _crouchFootstepClips != null && _crouchFootstepClips.Length > 0 ? _crouchFootstepClips : _footstepClips;
+        float volumeToUse = _crouchFootstepClips != null && _crouchFootstepClips.Length > 0 ? _crouchFootstepVolume : _footstepVolume * 0.7f;
+        PlayRandomClip(clipsToUse, volumeToUse, ref _lastCrouchFootstepClipIndex);
+    }
+
+    public void AnimationEvent_PlayJumpStartFootstep()
+    {
+        if (!_useAnimationEventFootsteps || !CanPlayLocalCharacterAudio())
+        {
+            return;
+        }
+
+        AudioClip[] clipsToUse = _jumpStartFootstepClips != null && _jumpStartFootstepClips.Length > 0 ? _jumpStartFootstepClips : _footstepClips;
+        PlayRandomClip(clipsToUse, _jumpStartFootstepVolume, ref _lastJumpStartClipIndex);
+    }
+
+    public void AnimationEvent_PlayLandingFootstep()
+    {
+        if (!_useAnimationEventFootsteps || !CanPlayLocalCharacterAudio())
+        {
+            return;
+        }
+
+        AudioClip[] clipsToUse = _landingFootstepClips != null && _landingFootstepClips.Length > 0 ? _landingFootstepClips : _footstepClips;
+        PlayRandomClip(clipsToUse, _landingFootstepVolume, ref _lastLandingClipIndex);
     }
 
     private bool CanPlayFootsteps()
     {
-        if (_networkPlayer != null && !_networkPlayer.IsLocalPlayer)
-        {
-            return false;
-        }
-
-        if (_footstepAudioSource == null || _footstepClips == null || _footstepClips.Length == 0)
+        if (!CanPlayLocalCharacterAudio())
         {
             return false;
         }
@@ -3558,30 +3650,60 @@ public class PlayerController : MonoBehaviour
 
     private void PlayRandomFootstepClip()
     {
-        int clipIndex = GetRandomFootstepClipIndex();
-        AudioClip clip = _footstepClips[clipIndex];
+        PlayRandomClip(_footstepClips, _footstepVolume, ref _lastFootstepClipIndex);
+    }
+
+    private bool CanPlayLocalCharacterAudio()
+    {
+        if (_networkPlayer != null && !_networkPlayer.IsLocalPlayer)
+        {
+            return false;
+        }
+
+        if (_footstepAudioSource == null)
+        {
+            return false;
+        }
+
+        return !IsInjuredOrHitReacting() && !_isBeingCarried;
+    }
+
+    private void PlayRandomClip(AudioClip[] clips, float volume, ref int lastClipIndex)
+    {
+        if (clips == null || clips.Length == 0 || _footstepAudioSource == null)
+        {
+            return;
+        }
+
+        int clipIndex = GetRandomClipIndex(clips, lastClipIndex);
+        AudioClip clip = clips[clipIndex];
         if (clip == null)
         {
             return;
         }
 
-        _lastFootstepClipIndex = clipIndex;
-        _footstepAudioSource.volume = _footstepVolume;
+        lastClipIndex = clipIndex;
+        _footstepAudioSource.volume = volume;
         _footstepAudioSource.pitch = 1f + UnityEngine.Random.Range(-_footstepPitchRandomness, _footstepPitchRandomness);
         _footstepAudioSource.PlayOneShot(clip);
     }
 
     private int GetRandomFootstepClipIndex()
     {
-        if (_footstepClips.Length == 1)
+        return GetRandomClipIndex(_footstepClips, _lastFootstepClipIndex);
+    }
+
+    private int GetRandomClipIndex(AudioClip[] clips, int lastClipIndex)
+    {
+        if (clips == null || clips.Length <= 1)
         {
             return 0;
         }
 
-        int clipIndex = UnityEngine.Random.Range(0, _footstepClips.Length);
-        if (clipIndex == _lastFootstepClipIndex)
+        int clipIndex = UnityEngine.Random.Range(0, clips.Length);
+        if (clipIndex == lastClipIndex)
         {
-            clipIndex = (clipIndex + 1) % _footstepClips.Length;
+            clipIndex = (clipIndex + 1) % clips.Length;
         }
 
         return clipIndex;
@@ -3684,13 +3806,8 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        if (!_playerLocomotionInput.JumpHeld)
-        {
-            return false;
-        }
-
         Vector2 movementInput = _playerLocomotionInput.MovementInput;
-        if (movementInput.y <= 0.1f || Mathf.Abs(movementInput.x) <= 0.1f)
+        if (movementInput.y <= 0.1f)
         {
             return false;
         }
@@ -3717,7 +3834,7 @@ public class PlayerController : MonoBehaviour
         }
 
         float intoWallAmount = Vector3.Dot(desiredMovementDirection, -wallNormal.normalized);
-        return intoWallAmount >= _wallRunStartIntoWallThreshold;
+        return intoWallAmount >= -0.1f;
     }
 
     private Vector3 GetPlanarMovementDirection(Vector2 movementInput)
@@ -3739,10 +3856,6 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        Vector2 movementInput = _playerLocomotionInput.MovementInput;
-
-        int desiredSide = movementInput.x > 0f ? 1 : -1;
-        Vector3 rayDirection = desiredSide > 0 ? _transform.right : -_transform.right;
         Vector3 rayOrigin = _transform.position + Vector3.up * (_characterController.height * 0.5f);
         float effectiveCheckDistance = _wallRunCheckDistance;
 
@@ -3753,17 +3866,46 @@ public class PlayerController : MonoBehaviour
                 _characterController.radius + _characterController.skinWidth + _wallRunCheckDistance);
         }
 
-        if (!Physics.Raycast(rayOrigin, rayDirection, out RaycastHit hit, effectiveCheckDistance, _wallRunLayers, QueryTriggerInteraction.Ignore))
+        bool hitRight = Physics.Raycast(
+            rayOrigin,
+            _transform.right,
+            out RaycastHit rightHit,
+            effectiveCheckDistance,
+            _wallRunLayers,
+            QueryTriggerInteraction.Ignore);
+
+        bool hitLeft = Physics.Raycast(
+            rayOrigin,
+            -_transform.right,
+            out RaycastHit leftHit,
+            effectiveCheckDistance,
+            _wallRunLayers,
+            QueryTriggerInteraction.Ignore);
+
+        if (!hitRight && !hitLeft)
         {
             return false;
         }
+
+        bool useRightHit;
+        if (hitRight && hitLeft)
+        {
+            float inputX = _playerLocomotionInput.MovementInput.x;
+            useRightHit = inputX > 0.05f ? true : inputX < -0.05f ? false : rightHit.distance <= leftHit.distance;
+        }
+        else
+        {
+            useRightHit = hitRight;
+        }
+
+        RaycastHit hit = useRightHit ? rightHit : leftHit;
 
         if (Mathf.Abs(hit.normal.y) > 0.2f)
         {
             return false;
         }
 
-        wallSide = desiredSide;
+        wallSide = useRightHit ? 1 : -1;
         wallNormal = hit.normal;
         return true;
     }

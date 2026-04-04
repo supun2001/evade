@@ -66,7 +66,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 04ffb1f86f7db4d55b035f036573a489, type: 3}
       propertyPath: m_Name
-      value: SpeedBost 1
+      value: SpeedBost
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -124,8 +124,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7d549111a134495e934d8bc4f0b786d1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SpeedBoostPickup
-  _speedMultiplier: 1.5
+  _speedMultiplier: 2
   _durationSeconds: 5
+  _pickupSound: {fileID: 8300000, guid: d91d920f653794ef2894053adec7f112, type: 3}
+  _pickupSoundVolume: 1
+  _pickupSoundMaxDuration: 5
   _destroyOnPickup: 1
 --- !u!135 &1254686536376285798
 SphereCollider:
