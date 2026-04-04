@@ -170,6 +170,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Texture2D _nextbotWarningArrowTexture;
     [SerializeField] private Texture2D _nextbotWarningSkullTexture;
 
+    [Header("Footsteps")]
+    [SerializeField] private AudioClip[] _footstepClips;
+    [SerializeField, Min(0f)] private float _footstepVolume = 0.6f;
+    [SerializeField, Range(0f, 0.3f)] private float _footstepPitchRandomness = 0.04f;
+    [SerializeField, Min(0f)] private float _footstepMinHorizontalSpeed = 0.5f;
+
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
     private Transform _cameraTransform;
@@ -196,6 +202,8 @@ public class PlayerController : MonoBehaviour
     private CinemachineBrain _cinemachineBrain;
     private CinemachineCamera _cinemachineCamera;
     private CinemachineThirdPersonFollow _thirdPersonFollow;
+    private NetworkPlayer _networkPlayer;
+    private AudioSource _footstepAudioSource;
     
     private Vector2 _cameraRotation = Vector2.zero;
     private float _playerRotationY = 0f;
@@ -261,6 +269,8 @@ public class PlayerController : MonoBehaviour
     private Transform _nextbotHitRightArmTransform;
     private Transform _nextbotHitLeftLegTransform;
     private Transform _nextbotHitRightLegTransform;
+    private int _lastFootstepClipIndex = -1;
+    private float _footstepStepTimer;
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Quaternion _nextbotHitLeftArmBaseLocalRotation = Quaternion.identity;
@@ -298,6 +308,9 @@ public class PlayerController : MonoBehaviour
     private const string NEXTBOT_HIT_RIGHT_ARM_BONE_NAME = "ArmR1";
     private const string NEXTBOT_HIT_LEFT_LEG_BONE_NAME = "LegL1";
     private const string NEXTBOT_HIT_RIGHT_LEG_BONE_NAME = "LegR1";
+    private const float FOOTSTEP_WALK_INTERVAL = 0.42f;
+    private const float FOOTSTEP_RUN_INTERVAL = 0.28f;
+    private const float FOOTSTEP_MAX_UPWARD_SPEED = 0.15f;
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     private float NextbotHitImpactForce => Mathf.Lerp(_nextbotHitShoveForce * 1.15f, _nextbotHitShoveForce * 1.75f, _nextbotHitTumble);
@@ -327,6 +340,7 @@ public class PlayerController : MonoBehaviour
     private void Awake() {
         _playerLocomotionInput = GetComponent<PlayerLocomotionInput>();
         _playerAnimation = GetComponent<PlayerAnimation>();
+        _networkPlayer = GetComponent<NetworkPlayer>();
         _transform = transform;
         _cameraTransform = _playerCamera.transform;
         _thirdPersonFollow = GetComponentInChildren<CinemachineThirdPersonFollow>(true);
@@ -352,6 +366,18 @@ public class PlayerController : MonoBehaviour
             _defaultCharacterControllerRadius = _characterController.radius;
             _defaultCharacterControllerCenter = _characterController.center;
         }
+
+        _footstepAudioSource = GetComponent<AudioSource>();
+        if (_footstepAudioSource == null)
+        {
+            _footstepAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        _footstepAudioSource.playOnAwake = false;
+        _footstepAudioSource.loop = false;
+        _footstepAudioSource.spatialBlend = 0f;
+        _footstepAudioSource.dopplerLevel = 0f;
+        _footstepAudioSource.volume = _footstepVolume;
     }
     
     private void Start() {
@@ -407,6 +433,7 @@ public class PlayerController : MonoBehaviour
         finalVelocity.y = _verticalVelocity;
 
         _characterController.Move(finalVelocity * Time.deltaTime);
+        UpdateFootstepAudio();
     }
     
     private void HandleCursorLock()
@@ -3447,6 +3474,81 @@ public class PlayerController : MonoBehaviour
     private bool IsSprinting()
     {
         return GetSprintProgress() >= 0.999f;
+    }
+
+    public float GetSprintProgressForAudio()
+    {
+        return GetSprintProgress();
+    }
+
+    private void UpdateFootstepAudio()
+    {
+        if (_networkPlayer != null && !_networkPlayer.IsLocalPlayer)
+        {
+            return;
+        }
+
+        if (_footstepAudioSource == null || _footstepClips == null || _footstepClips.Length == 0)
+        {
+            return;
+        }
+
+        bool canPlayFootsteps =
+            IsGrounded()
+            && !IsInjuredOrHitReacting()
+            && !_isBeingCarried
+            && !_isCarryingPlayer
+            && !DidJumpThisFrame()
+            && GetVerticalVelocity() <= FOOTSTEP_MAX_UPWARD_SPEED
+            && GetHorizontalSpeed() >= _footstepMinHorizontalSpeed;
+
+        if (!canPlayFootsteps)
+        {
+            _footstepStepTimer = 0f;
+            return;
+        }
+
+        float stepInterval = Mathf.Lerp(FOOTSTEP_WALK_INTERVAL, FOOTSTEP_RUN_INTERVAL, GetSprintProgress());
+        _footstepStepTimer += Time.deltaTime;
+
+        if (_footstepStepTimer < stepInterval)
+        {
+            return;
+        }
+
+        _footstepStepTimer -= stepInterval;
+        PlayRandomFootstepClip();
+    }
+
+    private void PlayRandomFootstepClip()
+    {
+        int clipIndex = GetRandomFootstepClipIndex();
+        AudioClip clip = _footstepClips[clipIndex];
+        if (clip == null)
+        {
+            return;
+        }
+
+        _lastFootstepClipIndex = clipIndex;
+        _footstepAudioSource.volume = _footstepVolume;
+        _footstepAudioSource.pitch = 1f + UnityEngine.Random.Range(-_footstepPitchRandomness, _footstepPitchRandomness);
+        _footstepAudioSource.PlayOneShot(clip);
+    }
+
+    private int GetRandomFootstepClipIndex()
+    {
+        if (_footstepClips.Length == 1)
+        {
+            return 0;
+        }
+
+        int clipIndex = UnityEngine.Random.Range(0, _footstepClips.Length);
+        if (clipIndex == _lastFootstepClipIndex)
+        {
+            clipIndex = (clipIndex + 1) % _footstepClips.Length;
+        }
+
+        return clipIndex;
     }
 
     public bool IsCrouching()

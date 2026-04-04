@@ -201,11 +201,11 @@ MonoBehaviour:
   _nonForwardSpeedMultiplier: 0.5
   _injuredRotationSharpness: 12
   _maxSpeedBoostMultiplier: 2.5
+  _maxJumpBoostMultiplier: 2
   _pickupFadeColor: {r: 1, g: 0.24, b: 0.24, a: 1}
   _jumpPickupFadeColor: {r: 0.24, g: 0.5, b: 1, a: 1}
   _pickupFadePeakOpacity: 0.18
   _pickupFadeDuration: 0.35
-  _maxJumpBoostMultiplier: 2
   _nextbotHitReactionDuration: 0.45
   _nextbotHitShoveForce: 8
   _nextbotHitUpwardForce: 4
@@ -313,6 +313,20 @@ MonoBehaviour:
   _nextbotWarningArrowVerticalOffset: 22
   _nextbotWarningArrowTexture: {fileID: 2800000, guid: dbb4e54ef009049a2b41b12955e582ab, type: 3}
   _nextbotWarningSkullTexture: {fileID: 2800000, guid: 89056f0c66fdf4283a0c17977b47ce63, type: 3}
+  _footstepClips:
+  - {fileID: 8300000, guid: 9e68ea1ebd76aa44c8cfa5beb9850830, type: 3}
+  - {fileID: 8300000, guid: 1deb201b8bf8f89479323a74e421150b, type: 3}
+  - {fileID: 8300000, guid: 7c518e8469a403b4c981664ecb28a79a, type: 3}
+  - {fileID: 8300000, guid: 1f2844efbf7abf647ba3d75d510f823a, type: 3}
+  - {fileID: 8300000, guid: fa95ebee958fb0e41a42a832aab767eb, type: 3}
+  - {fileID: 8300000, guid: 0cfeb72dea261a54cb7672590d2d1656, type: 3}
+  - {fileID: 8300000, guid: 924e3e09c67130946a6d7b666e8b8b68, type: 3}
+  - {fileID: 8300000, guid: 6da235e2573048249bcbe608f984ff48, type: 3}
+  - {fileID: 8300000, guid: fdc05ea2699023143ba7e93533cc5a0b, type: 3}
+  - {fileID: 8300000, guid: f26cf9ded47cf0140957490a16f85acc, type: 3}
+  _footstepVolume: 0.6
+  _footstepPitchRandomness: 0.04
+  _footstepMinHorizontalSpeed: 0.5
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -900,6 +914,11 @@ PrefabInstance:
 --- !u!4 &2349431067809538906 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
+  m_PrefabInstance: {fileID: 2814857960615871665}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &3157317695037094368 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
   m_PrefabInstance: {fileID: 2814857960615871665}
   m_PrefabAsset: {fileID: 0}
 --- !u!95 &8537408513011366176 stripped
