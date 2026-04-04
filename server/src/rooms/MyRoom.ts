@@ -9,7 +9,7 @@ const DEFAULT_NEXTBOT_SPAWN_POINTS = [
   { x: -6.45, y: 0, z: 2.38 },
   { x: 0, y: 0, z: 7.5 },
 ];
-const NEXTBOT_COUNT = 5;
+const DEFAULT_NEXTBOT_IDS = ["nextbot_0", "nextbot_1", "nextbot_2", "nextbot_3", "nextbot_4"];
 const DEFAULT_PLAYER_SPAWN_POINTS = [
   { x: 0, y: 0, z: -6 },
   { x: 2, y: 0, z: -6 },
@@ -70,6 +70,10 @@ const PLAYER_UPDATE_HIT_REACTION_TIME_REMAINING = 21;
 const PLAYER_UPDATE_HIT_REACTION_PITCH = 22;
 const PLAYER_UPDATE_HIT_REACTION_ROLL = 23;
 const PLAYER_UPDATE_HIT_REACTION_SEED = 24;
+const PLAYER_UPDATE_SPEED_BOOST_MULTIPLIER = 25;
+const PLAYER_UPDATE_SPEED_BOOST_TIME_REMAINING = 26;
+const PLAYER_UPDATE_JUMP_BOOST_MULTIPLIER = 27;
+const PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING = 28;
 
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
@@ -82,6 +86,7 @@ type ScoredTarget = {
 };
 type NextbotControllerState = {
   id: string;
+  moveSpeed: number;
   spawnIndex: number;
   patrolPointIndex: number;
   nextInjuryAt: number;
@@ -147,6 +152,8 @@ export class MyRoom extends Room<MyRoomState> {
   state = new MyRoomState();
   private playerSafeUntil = new Map<string, number>();
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
+  private nextbotIds = DEFAULT_NEXTBOT_IDS;
+  private nextbotMoveSpeeds = new Map<string, number>();
   private nextbotControllers: NextbotControllerState[] = [];
   private playerSpawnPoints = DEFAULT_PLAYER_SPAWN_POINTS;
   private nextTargetScanAt = 0;
@@ -164,6 +171,8 @@ export class MyRoom extends Room<MyRoomState> {
 
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
+    this.nextbotIds = this.resolveNextbotIds(options);
+    this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
     this.playerSpawnPoints = this.resolvePlayerSpawnPoints(options);
     this.intermissionDurationMs = this.resolvePositiveDurationMs(options?.intermissionDurationMs, DEFAULT_INTERMISSION_DURATION_MS);
     this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
@@ -205,6 +214,10 @@ export class MyRoom extends Room<MyRoomState> {
         player.hitReactionPitch = 0;
         player.hitReactionRoll = 0;
         player.hitReactionSeed = 0;
+        player.speedBoostMultiplier = 1;
+        player.speedBoostTimeRemaining = 0;
+        player.jumpBoostMultiplier = 1;
+        player.jumpBoostTimeRemaining = 0;
         player.isCrouching = false;
         player.isWallRunning = false;
         player.wallRunSide = 0;
@@ -218,6 +231,10 @@ export class MyRoom extends Room<MyRoomState> {
         player.hitReactionPitch = 0;
         player.hitReactionRoll = 0;
         player.hitReactionSeed = 0;
+        player.speedBoostMultiplier = 1;
+        player.speedBoostTimeRemaining = 0;
+        player.jumpBoostMultiplier = 1;
+        player.jumpBoostTimeRemaining = 0;
       }
 
       // Position & Rotation
@@ -250,6 +267,10 @@ export class MyRoom extends Room<MyRoomState> {
       player.hitReactionPitch = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_PITCH, "hitReactionPitch");
       player.hitReactionRoll = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_ROLL, "hitReactionRoll");
       player.hitReactionSeed = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_SEED, "hitReactionSeed");
+      player.speedBoostMultiplier = Math.max(1, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_MULTIPLIER, "speedBoostMultiplier"));
+      player.speedBoostTimeRemaining = Math.max(0, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_TIME_REMAINING, "speedBoostTimeRemaining"));
+      player.jumpBoostMultiplier = Math.max(1, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_MULTIPLIER, "jumpBoostMultiplier"));
+      player.jumpBoostTimeRemaining = Math.max(0, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING, "jumpBoostTimeRemaining"));
 
       if (keepAuthoritativeInjuredState) {
         player.isHitReacting = false;
@@ -257,6 +278,10 @@ export class MyRoom extends Room<MyRoomState> {
         player.hitReactionPitch = 0;
         player.hitReactionRoll = 0;
         player.hitReactionSeed = 0;
+        player.speedBoostMultiplier = 1;
+        player.speedBoostTimeRemaining = 0;
+        player.jumpBoostMultiplier = 1;
+        player.jumpBoostTimeRemaining = 0;
       }
 
       if (player.isBeingCarried) {
@@ -380,10 +405,16 @@ export class MyRoom extends Room<MyRoomState> {
         player.skinIndex = skinIndex;
       }
     });
+
+    this.onMessage("syncNextbotConfigs", (_client, payload) => {
+      this.applyNextbotConfigOverrides(payload);
+    });
   }
 
   onJoin(client: Client, options: any) {
     console.log(client.sessionId, "joined!");
+
+    this.applyNextbotConfigOverrides(options);
 
     //Create a new player
     const player = new Player();
@@ -421,6 +452,10 @@ export class MyRoom extends Room<MyRoomState> {
     player.isBeingCarried = false;
     player.carriedPlayerSessionId = "";
     player.carrierSessionId = "";
+    player.speedBoostMultiplier = 1;
+    player.speedBoostTimeRemaining = 0;
+    player.jumpBoostMultiplier = 1;
+    player.jumpBoostTimeRemaining = 0;
 
     //Add player to state
     this.state.players.set(client.sessionId, player);
@@ -500,6 +535,10 @@ export class MyRoom extends Room<MyRoomState> {
     player.carriedPlayerSessionId = "";
     player.carrierSessionId = "";
     player.isEliminated = false;
+    player.speedBoostMultiplier = 1;
+    player.speedBoostTimeRemaining = 0;
+    player.jumpBoostMultiplier = 1;
+    player.jumpBoostTimeRemaining = 0;
   }
 
   update(deltaTime: number) {
@@ -539,7 +578,7 @@ export class MyRoom extends Room<MyRoomState> {
       if (target != null && this.isScoreEligibleTarget(target, now, nextbot)) {
         nextbot.targetSessionId = target.sessionId;
         const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
-        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds);
+        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed);
         this.tryInjurePlayer(controller, nextbot, target, now);
         continue;
       }
@@ -554,7 +593,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.state.nextbots.clear();
     this.nextbotControllers = [];
 
-    for (let index = 0; index < NEXTBOT_COUNT; index++) {
+    for (let index = 0; index < this.nextbotIds.length; index++) {
       const botId = this.getNextbotId(index);
       const spawnPoint = this.getNextbotSpawnPoint(index);
       const nextbotState = new NextbotState();
@@ -567,6 +606,7 @@ export class MyRoom extends Room<MyRoomState> {
       this.state.nextbots.set(botId, nextbotState);
       this.nextbotControllers.push({
         id: botId,
+        moveSpeed: this.getConfiguredNextbotMoveSpeed(botId),
         spawnIndex: index,
         patrolPointIndex: (index + 1) % Math.max(1, this.nextbotSpawnPoints.length),
         nextInjuryAt: 0,
@@ -684,10 +724,10 @@ export class MyRoom extends Room<MyRoomState> {
       x: nextPatrolTarget.x,
       z: nextPatrolTarget.z,
       distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
-    }, deltaSeconds);
+    }, deltaSeconds, controller.moveSpeed);
   }
 
-  private moveNextbotTowardsPosition(nextbot: NextbotState, target: PredictedTargetPosition, deltaSeconds: number) {
+  private moveNextbotTowardsPosition(nextbot: NextbotState, target: PredictedTargetPosition, deltaSeconds: number, moveSpeed: number = NEXTBOT_MOVE_SPEED) {
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
@@ -702,7 +742,8 @@ export class MyRoom extends Room<MyRoomState> {
       return;
     }
 
-    const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, NEXTBOT_MOVE_SPEED * deltaSeconds);
+    const effectiveMoveSpeed = Number.isFinite(moveSpeed) && moveSpeed > 0 ? moveSpeed : NEXTBOT_MOVE_SPEED;
+    const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, effectiveMoveSpeed * deltaSeconds);
     nextbot.x += (dx / distance) * moveDistance;
     nextbot.z += (dz / distance) * moveDistance;
   }
@@ -869,7 +910,11 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private getNextbotId(index: number) {
-    return `nextbot_${index}`;
+    if (index < 0 || index >= this.nextbotIds.length) {
+      return DEFAULT_NEXTBOT_IDS[Math.max(0, Math.min(DEFAULT_NEXTBOT_IDS.length - 1, index))];
+    }
+
+    return this.nextbotIds[index];
   }
 
   private getNextbotState(index: number) {
@@ -906,6 +951,71 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     return parsedPoints;
+  }
+
+  private resolveNextbotIds(options: any): string[] {
+    const candidateIds = options?.nextbotIds;
+    if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
+      return DEFAULT_NEXTBOT_IDS;
+    }
+
+    const parsedIds = candidateIds
+      .map((id) => typeof id === "string" ? id.trim() : "")
+      .filter((id) => id.length > 0);
+
+    if (parsedIds.length === 0) {
+      return DEFAULT_NEXTBOT_IDS;
+    }
+
+    return parsedIds;
+  }
+
+  private resolveNextbotMoveSpeeds(options: any, nextbotIds: string[]): Map<string, number> {
+    const moveSpeeds = new Map<string, number>();
+    const candidateConfigs = options?.nextbotConfigs;
+
+    if (Array.isArray(candidateConfigs)) {
+      for (const config of candidateConfigs) {
+        const id = typeof config?.id === "string" ? config.id.trim() : "";
+        const speed = Number(config?.speed);
+        if (!id || !Number.isFinite(speed) || speed <= 0) {
+          continue;
+        }
+
+        moveSpeeds.set(id, speed);
+      }
+    }
+
+    for (const nextbotId of nextbotIds) {
+      if (!moveSpeeds.has(nextbotId)) {
+        moveSpeeds.set(nextbotId, NEXTBOT_MOVE_SPEED);
+      }
+    }
+
+    return moveSpeeds;
+  }
+
+  private applyNextbotConfigOverrides(options: any) {
+    const refreshedMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
+    this.nextbotMoveSpeeds = refreshedMoveSpeeds;
+
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      if (controller == null) {
+        continue;
+      }
+
+      controller.moveSpeed = this.getConfiguredNextbotMoveSpeed(controller.id);
+    }
+  }
+
+  private getConfiguredNextbotMoveSpeed(nextbotId: string): number {
+    const configuredSpeed = this.nextbotMoveSpeeds.get(nextbotId);
+    if (!Number.isFinite(configuredSpeed) || configuredSpeed == null || configuredSpeed <= 0) {
+      return NEXTBOT_MOVE_SPEED;
+    }
+
+    return configuredSpeed;
   }
 
   private resolvePlayerSpawnPoints(options: any): SpawnPoint[] {

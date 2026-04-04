@@ -121,10 +121,12 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Color _defaultBaseColor = Color.white;
     private AudioClip _defaultLoopClip;
     private float _defaultLoopPitch = 1f;
+    private float _defaultMoveSpeed = 10f;
 
     private void Awake()
     {
         _defaultLoopClip = _loopClip;
+        _defaultMoveSpeed = _moveSpeed;
         _characterController = GetComponent<CharacterController>();
         _navMeshAgent = GetComponent<NavMeshAgent>();
         _pathBuffer = new NavMeshPath();
@@ -242,12 +244,18 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         EnsureVisualBillboardChild();
 
+        _moveSpeed = entry != null && entry.speed > 0f ? entry.speed : _defaultMoveSpeed;
         _loopClip = entry != null && entry.loopClip != null ? entry.loopClip : _defaultLoopClip;
-        float loopPitch = entry != null ? entry.loopPitch : _defaultLoopPitch;
+        float loopPitch = entry != null ? Mathf.Max(0.5f, entry.loopPitch) : _defaultLoopPitch;
         if (_loopAudioSource != null)
         {
             _loopAudioSource.clip = _loopClip;
             _loopAudioSource.pitch = loopPitch;
+        }
+
+        if (_navMeshAgent != null)
+        {
+            _navMeshAgent.speed = _moveSpeed;
         }
 
         MeshRenderer targetRenderer = _visualMeshRenderer != null ? _visualMeshRenderer : _rootMeshRenderer;
@@ -259,6 +267,10 @@ public class NextbotFollowPlayer : MonoBehaviour
         Material[] materials = targetRenderer.materials;
         Texture iconTexture = entry != null && entry.iconTexture != null ? entry.iconTexture : _defaultBaseMap;
         Color tint = entry != null ? entry.tint : _defaultBaseColor;
+        if (tint.a <= 0.01f)
+        {
+            tint.a = 1f;
+        }
 
         for (int i = 0; i < materials.Length; i++)
         {

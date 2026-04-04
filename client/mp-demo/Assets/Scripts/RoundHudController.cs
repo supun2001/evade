@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 
 [DefaultExecutionOrder(200)]
@@ -11,6 +13,7 @@ public class RoundHudController : MonoBehaviour
     private const string IntermissionMusicResourcePath = "SFX/Intermission";
     private const string InGameMusicResourcePath = "SFX/InGameMusic";
     private const string RoundStartSfxResourcePath = "SFX/RoundStart";
+    private const string SkinRegistryResourcePath = "SkinRegistry";
 
     private NetworkManager _networkManager;
     private UIDocument _hudDocument;
@@ -23,6 +26,7 @@ public class RoundHudController : MonoBehaviour
     private AudioClip _inGameMusicClip;
     private AudioClip _roundStartClip;
     private AudioClip _activeLoopClip;
+    private SkinRegistry _skinRegistry;
 
     private VisualElement _roundPhaseContainer;
     private Label _roundPhaseTitleLabel;
@@ -36,6 +40,12 @@ public class RoundHudController : MonoBehaviour
     private Label _roundResultsRevivesValue;
     private Label _roundResultsDownedValue;
     private VisualElement _roundResultsLeaderboardList;
+    private VisualElement _tabScoreboardOverlay;
+    private ScrollView _tabScoreboardList;
+    private Label _tabScoreboardMapLabel;
+    private Label _tabScoreboardPhaseLabel;
+    private Label _tabScoreboardModeLabel;
+    private Label _tabScoreboardPlayerCountLabel;
 
     private RoundPhaseMessageData _currentPhase;
     private float _phaseEndsAtUnscaledTime;
@@ -51,6 +61,7 @@ public class RoundHudController : MonoBehaviour
         _intermissionMusicClip = Resources.Load<AudioClip>(IntermissionMusicResourcePath);
         _inGameMusicClip = Resources.Load<AudioClip>(InGameMusicResourcePath);
         _roundStartClip = Resources.Load<AudioClip>(RoundStartSfxResourcePath);
+        _skinRegistry = Resources.Load<SkinRegistry>(SkinRegistryResourcePath);
 
         _musicAudioSource = gameObject.AddComponent<AudioSource>();
         _musicAudioSource.playOnAwake = false;
@@ -95,6 +106,7 @@ public class RoundHudController : MonoBehaviour
         RefreshHudBindings();
         UpdateAnnouncementLifetime();
         HandleResultsCloseInput();
+        RefreshTabScoreboardDisplay();
         RefreshBackgroundMusic();
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
@@ -150,10 +162,17 @@ public class RoundHudController : MonoBehaviour
         _roundResultsRevivesValue = _hudRoot?.Q<Label>("round-results-revives-value");
         _roundResultsDownedValue = _hudRoot?.Q<Label>("round-results-downed-value");
         _roundResultsLeaderboardList = _hudRoot?.Q<VisualElement>("round-results-leaderboard-list");
+        _tabScoreboardOverlay = _hudRoot?.Q<VisualElement>("tab-scoreboard-overlay");
+        _tabScoreboardList = _hudRoot?.Q<ScrollView>("tab-scoreboard-list");
+        _tabScoreboardMapLabel = _hudRoot?.Q<Label>("tab-scoreboard-map-label");
+        _tabScoreboardPhaseLabel = _hudRoot?.Q<Label>("tab-scoreboard-phase-label");
+        _tabScoreboardModeLabel = _hudRoot?.Q<Label>("tab-scoreboard-mode-label");
+        _tabScoreboardPlayerCountLabel = _hudRoot?.Q<Label>("tab-scoreboard-player-count-label");
 
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
         RefreshResultsDisplay();
+        RefreshTabScoreboardDisplay();
     }
 
     private UIDocument GetLocalHudDocument()
@@ -307,6 +326,329 @@ public class RoundHudController : MonoBehaviour
         }
     }
 
+    private void RefreshTabScoreboardDisplay()
+    {
+        if (_tabScoreboardOverlay == null || _tabScoreboardList == null)
+        {
+            return;
+        }
+
+        bool visible = ShouldShowTabScoreboard();
+        _tabScoreboardOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+
+        if (!visible)
+        {
+            return;
+        }
+
+        RebuildTabScoreboardRows();
+        RefreshTabScoreboardFooter();
+    }
+
+    private bool ShouldShowTabScoreboard()
+    {
+        if (Keyboard.current == null || !Keyboard.current.tabKey.isPressed)
+        {
+            return false;
+        }
+
+        if (_showResults)
+        {
+            return false;
+        }
+
+        bool isMenuVisible = _lobbyUi != null && _lobbyUi.menuPanel != null && _lobbyUi.menuPanel.activeInHierarchy;
+        if (isMenuVisible)
+        {
+            return false;
+        }
+
+        return _networkManager != null
+            && _networkManager.Room != null
+            && _networkManager.Room.State != null
+            && _networkManager.Room.State.players != null
+            && _networkManager.Room.State.players.Count > 0;
+    }
+
+    private void RebuildTabScoreboardRows()
+    {
+        _tabScoreboardList.Clear();
+
+        if (_networkManager?.Room?.State?.players == null)
+        {
+            return;
+        }
+
+        List<PlayerRowData> rows = new List<PlayerRowData>();
+        foreach (string sessionId in _networkManager.Room.State.players.Keys)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                continue;
+            }
+
+            Player player = _networkManager.Room.State.players[sessionId];
+            if (player == null)
+            {
+                continue;
+            }
+
+            rows.Add(new PlayerRowData
+            {
+                SessionId = sessionId,
+                Player = player,
+                SortPriority = GetPlayerStatePriority(player),
+                DisplayName = GetScoreboardDisplayName(sessionId)
+            });
+        }
+
+        rows.Sort((a, b) =>
+        {
+            int priorityCompare = a.SortPriority.CompareTo(b.SortPriority);
+            if (priorityCompare != 0)
+            {
+                return priorityCompare;
+            }
+
+            if (string.Equals(a.SessionId, _networkManager.LocalSessionId, StringComparison.Ordinal))
+            {
+                return -1;
+            }
+
+            if (string.Equals(b.SessionId, _networkManager.LocalSessionId, StringComparison.Ordinal))
+            {
+                return 1;
+            }
+
+            return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+        });
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            _tabScoreboardList.Add(CreateTabScoreboardRow(rows[i], i));
+        }
+    }
+
+    private void RefreshTabScoreboardFooter()
+    {
+        if (_tabScoreboardMapLabel != null)
+        {
+            _tabScoreboardMapLabel.text = $"Map: {SceneManager.GetActiveScene().name}";
+        }
+
+        if (_tabScoreboardPhaseLabel != null)
+        {
+            string phaseText = "Waiting";
+            if (_currentPhase != null && !string.IsNullOrWhiteSpace(_currentPhase.phase))
+            {
+                phaseText = char.ToUpperInvariant(_currentPhase.phase[0]) + _currentPhase.phase.Substring(1).ToLowerInvariant();
+            }
+
+            _tabScoreboardPhaseLabel.text = $"Phase: {phaseText}";
+        }
+
+        if (_tabScoreboardModeLabel != null)
+        {
+            _tabScoreboardModeLabel.text = "Gamemode: Default";
+        }
+
+        if (_tabScoreboardPlayerCountLabel != null)
+        {
+            int playerCount = _networkManager?.Room?.State?.players?.Count ?? 0;
+            _tabScoreboardPlayerCountLabel.text = $"{playerCount} players";
+        }
+    }
+
+    private VisualElement CreateTabScoreboardRow(PlayerRowData rowData, int index)
+    {
+        bool isLocal = _networkManager != null && string.Equals(rowData.SessionId, _networkManager.LocalSessionId, StringComparison.Ordinal);
+
+        VisualElement row = new VisualElement();
+        row.style.flexDirection = FlexDirection.Row;
+        row.style.alignItems = Align.Center;
+        row.style.minHeight = 46f;
+        row.style.paddingLeft = 10f;
+        row.style.paddingRight = 10f;
+        row.style.paddingTop = 5f;
+        row.style.paddingBottom = 5f;
+        row.style.backgroundColor = index % 2 == 0
+            ? new Color(1f, 1f, 1f, 0.02f)
+            : new Color(0f, 0f, 0f, 0.08f);
+        if (isLocal)
+        {
+            row.style.backgroundColor = new Color(1f, 0.9f, 0.55f, 0.08f);
+        }
+
+        VisualElement nameCell = new VisualElement();
+        nameCell.style.flexDirection = FlexDirection.Row;
+        nameCell.style.alignItems = Align.Center;
+        nameCell.style.flexGrow = 1f;
+
+        VisualElement avatar = new VisualElement();
+        avatar.style.width = 56f;
+        avatar.style.height = 30f;
+        avatar.style.marginRight = 10f;
+        avatar.style.borderTopLeftRadius = 2f;
+        avatar.style.borderTopRightRadius = 2f;
+        avatar.style.borderBottomLeftRadius = 2f;
+        avatar.style.borderBottomRightRadius = 2f;
+        avatar.style.backgroundColor = new Color(1f, 1f, 1f, 0.08f);
+        avatar.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        Texture2D avatarTexture = GetSkinPreviewTexture(Mathf.RoundToInt(rowData.Player.skinIndex));
+        if (avatarTexture != null)
+        {
+            avatar.style.backgroundImage = new StyleBackground(avatarTexture);
+        }
+
+        Label nameLabel = new Label(rowData.DisplayName);
+        nameLabel.style.color = isLocal ? new Color(1f, 0.95f, 0.75f) : Color.white;
+        nameLabel.style.fontSize = 20f;
+        nameLabel.style.unityFontStyleAndWeight = isLocal ? FontStyle.Bold : FontStyle.Normal;
+
+        nameCell.Add(avatar);
+        nameCell.Add(nameLabel);
+
+        Label stateLabel = new Label(GetPlayerStateText(rowData.Player));
+        stateLabel.style.width = 110f;
+        stateLabel.style.fontSize = 18f;
+        stateLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        stateLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        stateLabel.style.color = GetPlayerStateColor(rowData.Player);
+
+        VisualElement skinCell = new VisualElement();
+        skinCell.style.width = 110f;
+        skinCell.style.alignItems = Align.Center;
+        skinCell.style.justifyContent = Justify.Center;
+
+        VisualElement skinPreview = new VisualElement();
+        skinPreview.style.width = 70f;
+        skinPreview.style.height = 30f;
+        skinPreview.style.backgroundColor = new Color(1f, 1f, 1f, 0.06f);
+        skinPreview.style.borderTopLeftRadius = 2f;
+        skinPreview.style.borderTopRightRadius = 2f;
+        skinPreview.style.borderBottomLeftRadius = 2f;
+        skinPreview.style.borderBottomRightRadius = 2f;
+        skinPreview.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        if (avatarTexture != null)
+        {
+            skinPreview.style.backgroundImage = new StyleBackground(avatarTexture);
+        }
+
+        skinCell.Add(skinPreview);
+
+        Label readyLabel = new Label(rowData.Player.isReady ? "IN" : "MENU");
+        readyLabel.style.width = 88f;
+        readyLabel.style.fontSize = 18f;
+        readyLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        readyLabel.style.unityTextAlign = TextAnchor.MiddleRight;
+        readyLabel.style.color = rowData.Player.isReady
+            ? new Color(1f, 0.87f, 0.35f)
+            : new Color(0.7f, 0.7f, 0.7f);
+
+        row.Add(nameCell);
+        row.Add(stateLabel);
+        row.Add(skinCell);
+        row.Add(readyLabel);
+        return row;
+    }
+
+    private string GetScoreboardDisplayName(string sessionId)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            return "Player";
+        }
+
+        if (_networkManager != null && string.Equals(sessionId, _networkManager.LocalSessionId, StringComparison.Ordinal))
+        {
+            return "You";
+        }
+
+        int suffixLength = Mathf.Min(4, sessionId.Length);
+        return $"Player {sessionId.Substring(sessionId.Length - suffixLength, suffixLength)}";
+    }
+
+    private static int GetPlayerStatePriority(Player player)
+    {
+        if (player == null)
+        {
+            return 3;
+        }
+
+        if (player.isEliminated)
+        {
+            return 2;
+        }
+
+        if (player.isInjured)
+        {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static string GetPlayerStateText(Player player)
+    {
+        if (player == null)
+        {
+            return "UNKNOWN";
+        }
+
+        if (player.isEliminated)
+        {
+            return "DEAD";
+        }
+
+        if (player.isInjured)
+        {
+            return "DOWN";
+        }
+
+        return "ALIVE";
+    }
+
+    private static Color GetPlayerStateColor(Player player)
+    {
+        if (player == null)
+        {
+            return new Color(0.9f, 0.9f, 0.9f);
+        }
+
+        if (player.isEliminated)
+        {
+            return new Color(1f, 0.45f, 0.45f);
+        }
+
+        if (player.isInjured)
+        {
+            return new Color(1f, 0.8f, 0.4f);
+        }
+
+        return new Color(0.52f, 1f, 0.48f);
+    }
+
+    private Texture2D GetSkinPreviewTexture(int skinIndex)
+    {
+        if (_skinRegistry == null || _skinRegistry.skins == null || _skinRegistry.skins.Length == 0)
+        {
+            return null;
+        }
+
+        if (skinIndex < 0 || skinIndex >= _skinRegistry.skins.Length)
+        {
+            return null;
+        }
+
+        Sprite preview = _skinRegistry.skins[skinIndex].uiPreview;
+        if (preview != null)
+        {
+            return preview.texture;
+        }
+
+        return _skinRegistry.skins[skinIndex].texture;
+    }
+
     private void RefreshPhaseDisplay()
     {
         if (_roundPhaseContainer == null || _roundPhaseTitleLabel == null || _roundPhaseTimerLabel == null)
@@ -435,5 +777,13 @@ public class RoundHudController : MonoBehaviour
         int minutesPart = seconds / 60;
         int secondsPart = seconds % 60;
         return $"{minutesPart}:{secondsPart:00}";
+    }
+
+    private sealed class PlayerRowData
+    {
+        public string SessionId;
+        public string DisplayName;
+        public Player Player;
+        public int SortPriority;
     }
 }

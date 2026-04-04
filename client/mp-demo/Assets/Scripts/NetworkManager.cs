@@ -21,7 +21,7 @@ public struct PlayerSpawnPointConfig
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
-    private const int PlayerUpdateFieldCount = 25;
+    private const int PlayerUpdateFieldCount = 29;
 
     public static NetworkManager Instance;
     
@@ -200,7 +200,11 @@ public class NetworkManager : MonoBehaviour
         float hitReactionTimeRemaining,
         float hitReactionPitch,
         float hitReactionRoll,
-        float hitReactionSeed)
+        float hitReactionSeed,
+        float speedBoostMultiplier,
+        float speedBoostTimeRemaining,
+        float jumpBoostMultiplier,
+        float jumpBoostTimeRemaining)
     {
         if (room == null) return;
 
@@ -226,7 +230,11 @@ public class NetworkManager : MonoBehaviour
                 hitReactionTimeRemaining = hitReactionTimeRemaining,
                 hitReactionPitch = hitReactionPitch,
                 hitReactionRoll = hitReactionRoll,
-                hitReactionSeed = hitReactionSeed
+                hitReactionSeed = hitReactionSeed,
+                speedBoostMultiplier = speedBoostMultiplier,
+                speedBoostTimeRemaining = speedBoostTimeRemaining,
+                jumpBoostMultiplier = jumpBoostMultiplier,
+                jumpBoostTimeRemaining = jumpBoostTimeRemaining
             });
             return;
         }
@@ -258,6 +266,10 @@ public class NetworkManager : MonoBehaviour
         playerUpdatePayload[22] = hitReactionPitch;
         playerUpdatePayload[23] = hitReactionRoll;
         playerUpdatePayload[24] = hitReactionSeed;
+        playerUpdatePayload[25] = speedBoostMultiplier;
+        playerUpdatePayload[26] = speedBoostTimeRemaining;
+        playerUpdatePayload[27] = jumpBoostMultiplier;
+        playerUpdatePayload[28] = jumpBoostTimeRemaining;
 
         _ = room.Send("playerUpdate", playerUpdatePayload);
     }
@@ -375,13 +387,66 @@ public class NetworkManager : MonoBehaviour
             });
         }
 
+        List<object> serializedNextbotIds = BuildSerializedNextbotIds();
+        List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
+
         return new Dictionary<string, object>
         {
             ["nextbotSpawnPoints"] = serializedSpawnPoints,
+            ["nextbotIds"] = serializedNextbotIds,
+            ["nextbotConfigs"] = serializedNextbotConfigs,
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
         };
+    }
+
+    private static List<object> BuildSerializedNextbotIds()
+    {
+        List<object> serializedNextbotIds = new List<object>();
+        NextbotRegistry registry = Resources.Load<NextbotRegistry>("NextbotRegistry");
+        if (registry == null || registry.entries == null)
+        {
+            return serializedNextbotIds;
+        }
+
+        for (int i = 0; i < registry.entries.Length; i++)
+        {
+            NextbotRegistryEntry entry = registry.entries[i];
+            if (entry != null && !string.IsNullOrWhiteSpace(entry.nextbotId))
+            {
+                serializedNextbotIds.Add(entry.nextbotId);
+            }
+        }
+
+        return serializedNextbotIds;
+    }
+
+    private static List<object> BuildSerializedNextbotConfigs()
+    {
+        List<object> serializedNextbotConfigs = new List<object>();
+        NextbotRegistry registry = Resources.Load<NextbotRegistry>("NextbotRegistry");
+        if (registry == null || registry.entries == null)
+        {
+            return serializedNextbotConfigs;
+        }
+
+        for (int i = 0; i < registry.entries.Length; i++)
+        {
+            NextbotRegistryEntry entry = registry.entries[i];
+            if (entry == null || string.IsNullOrWhiteSpace(entry.nextbotId))
+            {
+                continue;
+            }
+
+            serializedNextbotConfigs.Add(new Dictionary<string, object>
+            {
+                ["id"] = entry.nextbotId,
+                ["speed"] = entry.speed,
+            });
+        }
+
+        return serializedNextbotConfigs;
     }
 
     private int IntermissionDurationMs => Mathf.Max(1000, Mathf.RoundToInt(intermissionDurationSeconds * 1000f));
@@ -483,6 +548,11 @@ public class NetworkManager : MonoBehaviour
     {
         currentRoomId = room.RoomId;
         Debug.Log($"Connected! Room ID: {currentRoomId}");
+
+        room.Send("syncNextbotConfigs", new Dictionary<string, object>
+        {
+            ["nextbotConfigs"] = BuildSerializedNextbotConfigs(),
+        });
         
         // Setup Handlers 
         room.OnStateChange += OnStateChange;

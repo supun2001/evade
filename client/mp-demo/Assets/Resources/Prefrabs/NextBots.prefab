@@ -127,12 +127,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4f8ac8173af485daa8544c56da89bd5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NextbotFollowPlayer
-  _useRoomStateAuthority: 1
-  _networkNextbotId: nextbot_0
-  _roomStatePositionLerpSpeed: 12
-  _roomStateRotationLerpSpeed: 14
-  _roomStateSnapDistance: 1.1
-  _moveSpeed: 25
+  _moveSpeed: 10
   _acceleration: 18
   _rotationSpeed: 10
   _stoppingDistance: 1.4

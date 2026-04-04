@@ -359,60 +359,292 @@
             <ui:VisualElement
                 name="pause-card"
                 style="
-                    min-width: 280px;
-                    padding-left: 24px;
-                    padding-right: 24px;
-                    padding-top: 24px;
-                    padding-bottom: 24px;
-                    background-color: rgba(16, 18, 24, 0.92);
-                    border-top-left-radius: 16px;
-                    border-top-right-radius: 16px;
-                    border-bottom-left-radius: 16px;
-                    border-bottom-right-radius: 16px;
+                    width: 860px;
+                    max-width: 94%;
+                    min-height: 640px;
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    padding-top: 18px;
+                    padding-bottom: 18px;
+                    background-color: rgba(28, 10, 6, 0.9);
+                    border-top-left-radius: 14px;
+                    border-top-right-radius: 14px;
+                    border-bottom-left-radius: 14px;
+                    border-bottom-right-radius: 14px;
+                    border-left-width: 1px;
+                    border-right-width: 1px;
+                    border-top-width: 1px;
+                    border-bottom-width: 1px;
+                    border-left-color: rgba(255, 255, 255, 0.08);
+                    border-right-color: rgba(255, 255, 255, 0.08);
+                    border-top-color: rgba(255, 255, 255, 0.08);
+                    border-bottom-color: rgba(255, 255, 255, 0.08);
                     align-items: stretch;
                 "
             >
-                <ui:Label
-                    text="Paused"
+                <ui:VisualElement
                     style="
-                        color: rgb(255, 255, 255);
-                        font-size: 30px;
+                        flex-direction: row;
+                        justify-content: center;
+                        align-items: center;
+                        height: 52px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        border-bottom-width: 1px;
+                        border-bottom-color: rgba(255, 255, 255, 0.12);
+                    "
+                >
+                    <ui:Label text="Settings" style="color: rgb(255,255,255); font-size: 22px; -unity-font-style: bold; border-bottom-width: 2px; border-bottom-color: rgb(255,255,255); padding-bottom: 8px;" />
+                </ui:VisualElement>
+                <ui:ScrollView
+                    mode="Vertical"
+                    horizontal-scroller-visibility="Hidden"
+                    style="
+                        flex-grow: 1;
+                        margin-top: 12px;
+                        margin-bottom: 16px;
+                    "
+                >
+                    <ui:Label text="Audio" style="color: rgb(255,255,255); font-size: 22px; -unity-font-style: bold; margin-bottom: 12px;" />
+                    <ui:VisualElement
+                        style="
+                            flex-direction: row;
+                            align-items: center;
+                            min-height: 52px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            background-color: rgba(50, 50, 50, 0.9);
+                            border-top-left-radius: 10px;
+                            border-top-right-radius: 10px;
+                            border-bottom-left-radius: 10px;
+                            border-bottom-right-radius: 10px;
+                        "
+                    >
+                        <ui:Label text="Volume" style="width: 180px; color: rgb(255,255,255); font-size: 18px;" />
+                        <ui:SliderInt
+                            name="pause-volume-slider"
+                            low-value="0"
+                            high-value="10"
+                            page-size="1"
+                            show-input-field="false"
+                            style="flex-grow: 1;"
+                        />
+                    </ui:VisualElement>
+                    <ui:Label text="Display &amp; Graphics" style="margin-top: 26px; color: rgb(255,255,255); font-size: 22px; -unity-font-style: bold; margin-bottom: 12px;" />
+                    <ui:VisualElement
+                        style="
+                            flex-direction: row;
+                            align-items: center;
+                            min-height: 52px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            background-color: rgba(50, 50, 50, 0.9);
+                            border-top-left-radius: 10px;
+                            border-top-right-radius: 10px;
+                            border-bottom-left-radius: 10px;
+                            border-bottom-right-radius: 10px;
+                        "
+                    >
+                        <ui:Label text="Graphics Quality" style="width: 180px; color: rgb(255,255,255); font-size: 18px;" />
+                        <ui:Button
+                            name="pause-graphics-low-button"
+                            text="Low"
+                            style="
+                                width: 120px;
+                                height: 40px;
+                                margin-right: 10px;
+                                color: rgb(255,255,255);
+                                background-color: rgba(77, 104, 58, 0.95);
+                                border-top-left-radius: 8px;
+                                border-top-right-radius: 8px;
+                                border-bottom-left-radius: 8px;
+                                border-bottom-right-radius: 8px;
+                                -unity-font-style: bold;
+                            "
+                        />
+                        <ui:Button
+                            name="pause-graphics-medium-button"
+                            text="Medium"
+                            style="
+                                width: 120px;
+                                height: 40px;
+                                color: rgb(255,255,255);
+                                background-color: rgba(82, 96, 138, 0.95);
+                                border-top-left-radius: 8px;
+                                border-top-right-radius: 8px;
+                                border-bottom-left-radius: 8px;
+                                border-bottom-right-radius: 8px;
+                                -unity-font-style: bold;
+                            "
+                        />
+                        <ui:Label
+                            name="pause-graphics-value-label"
+                            text="Medium"
+                            style="
+                                margin-left: 16px;
+                                flex-grow: 1;
+                                color: rgba(255,255,255,0.8);
+                                font-size: 18px;
+                                unity-text-align: middle-right;
+                            "
+                        />
+                    </ui:VisualElement>
+                </ui:ScrollView>
+                <ui:VisualElement
+                    style="
+                        flex-direction: row;
+                        justify-content: space-between;
+                        align-items: center;
+                    "
+                >
+                    <ui:Button
+                        name="main-menu-button"
+                        text="[L]  Leave"
+                        style="
+                            width: 31%;
+                            height: 52px;
+                            color: rgb(255, 255, 255);
+                            background-color: rgba(72, 54, 52, 0.96);
+                            border-top-left-radius: 10px;
+                            border-top-right-radius: 10px;
+                            border-bottom-left-radius: 10px;
+                            border-bottom-right-radius: 10px;
+                            font-size: 18px;
+                            -unity-font-style: bold;
+                        "
+                    />
+                    <ui:Button
+                        name="respawn-button"
+                        text="[R]  Respawn"
+                        style="
+                            width: 31%;
+                            height: 52px;
+                            color: rgba(255, 255, 255, 0.58);
+                            background-color: rgba(72, 54, 52, 0.86);
+                            border-top-left-radius: 10px;
+                            border-top-right-radius: 10px;
+                            border-bottom-left-radius: 10px;
+                            border-bottom-right-radius: 10px;
+                            font-size: 18px;
+                            -unity-font-style: bold;
+                        "
+                    />
+                    <ui:Button
+                        name="continue-button"
+                        text="[ESC]  Resume"
+                        style="
+                            width: 31%;
+                            height: 52px;
+                            color: rgb(255, 255, 255);
+                            background-color: rgb(45, 53, 133);
+                            border-top-left-radius: 10px;
+                            border-top-right-radius: 10px;
+                            border-bottom-left-radius: 10px;
+                            border-bottom-right-radius: 10px;
+                            font-size: 18px;
+                            -unity-font-style: bold;
+                        "
+                    />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement
+            name="tab-scoreboard-overlay"
+            picking-mode="Ignore"
+            style="
+                display: none;
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                translate: -50% -50%;
+                width: 720px;
+                max-width: 90%;
+                min-height: 520px;
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 18px;
+                padding-bottom: 18px;
+                background-color: rgba(6, 6, 6, 0.76);
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+                border-left-width: 1px;
+                border-right-width: 1px;
+                border-top-width: 1px;
+                border-bottom-width: 1px;
+                border-left-color: rgba(215, 191, 144, 0.2);
+                border-right-color: rgba(215, 191, 144, 0.2);
+                border-top-color: rgba(215, 191, 144, 0.2);
+                border-bottom-color: rgba(215, 191, 144, 0.2);
+            "
+        >
+            <ui:VisualElement
+                style="
+                    height: 58px;
+                    align-items: center;
+                    justify-content: center;
+                    background-color: rgb(179, 156, 115);
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                    border-bottom-left-radius: 4px;
+                    border-bottom-right-radius: 4px;
+                "
+            >
+                <ui:Label
+                    text="PLAYERS"
+                    style="
+                        color: rgb(56, 48, 36);
+                        font-size: 28px;
                         -unity-font-style: bold;
                         unity-text-align: middle-center;
-                        margin-bottom: 18px;
+                        letter-spacing: 1px;
                     "
                 />
-                <ui:Button
-                    name="continue-button"
-                    text="Continue"
-                    style="
-                        height: 46px;
-                        margin-bottom: 12px;
-                        color: rgb(255, 255, 255);
-                        background-color: rgb(51, 180, 110);
-                        border-top-left-radius: 10px;
-                        border-top-right-radius: 10px;
-                        border-bottom-left-radius: 10px;
-                        border-bottom-right-radius: 10px;
-                        font-size: 18px;
-                        -unity-font-style: bold;
-                    "
-                />
-                <ui:Button
-                    name="main-menu-button"
-                    text="Main Menu"
-                    style="
-                        height: 46px;
-                        color: rgb(255, 255, 255);
-                        background-color: rgb(209, 75, 75);
-                        border-top-left-radius: 10px;
-                        border-top-right-radius: 10px;
-                        border-bottom-left-radius: 10px;
-                        border-bottom-right-radius: 10px;
-                        font-size: 18px;
-                        -unity-font-style: bold;
-                    "
-                />
+            </ui:VisualElement>
+            <ui:VisualElement
+                style="
+                    flex-direction: row;
+                    margin-top: 14px;
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    background-color: rgba(0, 0, 0, 0.42);
+                "
+            >
+                <ui:Label text="NAME" style="flex-grow: 1; color: rgba(255,255,255,0.55); font-size: 15px; -unity-font-style: bold;" />
+                <ui:Label text="STATE" style="width: 110px; color: rgba(255,255,255,0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-center;" />
+                <ui:Label text="SKIN" style="width: 110px; color: rgba(255,255,255,0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-center;" />
+                <ui:Label text="READY" style="width: 88px; color: rgba(255,255,255,0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-right;" />
+            </ui:VisualElement>
+            <ui:ScrollView
+                name="tab-scoreboard-list"
+                mode="Vertical"
+                vertical-scroller-visibility="Hidden"
+                horizontal-scroller-visibility="Hidden"
+                style="
+                    flex-grow: 1;
+                    margin-top: 4px;
+                    background-color: rgba(0, 0, 0, 0.14);
+                "
+            />
+            <ui:VisualElement
+                style="
+                    flex-direction: row;
+                    justify-content: space-between;
+                    align-items: flex-end;
+                    margin-top: 14px;
+                "
+            >
+                <ui:VisualElement>
+                    <ui:Label name="tab-scoreboard-map-label" text="Map: SampleScene" style="color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;" />
+                    <ui:Label name="tab-scoreboard-phase-label" text="Phase: Waiting" style="margin-top: 4px; color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;" />
+                </ui:VisualElement>
+                <ui:VisualElement style="align-items: flex-end;">
+                    <ui:Label name="tab-scoreboard-mode-label" text="Gamemode: Default" style="color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;" />
+                    <ui:Label name="tab-scoreboard-player-count-label" text="0 players" style="margin-top: 4px; color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;" />
+                </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
         <ui:VisualElement

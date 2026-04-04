@@ -128,4 +128,16 @@ public Player() { }
 
 	[Type(37, "boolean")]
 	public bool isEliminated = default(bool);
+
+	[Type(38, "number")]
+	public float speedBoostMultiplier = 1f;
+
+	[Type(39, "number")]
+	public float speedBoostTimeRemaining = default(float);
+
+	[Type(40, "number")]
+	public float jumpBoostMultiplier = 1f;
+
+	[Type(41, "number")]
+	public float jumpBoostTimeRemaining = default(float);
 	}

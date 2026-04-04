@@ -52,4 +52,8 @@ export class Player extends Schema {
     @type("string") carriedPlayerSessionId: string = "";
     @type("string") carrierSessionId: string = "";
     @type("boolean") isEliminated: boolean = false;
+    @type("number") speedBoostMultiplier: number = 1;
+    @type("number") speedBoostTimeRemaining: number = 0;
+    @type("number") jumpBoostMultiplier: number = 1;
+    @type("number") jumpBoostTimeRemaining: number = 0;
 }

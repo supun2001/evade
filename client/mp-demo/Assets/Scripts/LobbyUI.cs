@@ -30,18 +30,28 @@ public class LobbyUI : MonoBehaviour
     private UIDocument _menuDocument;
     private UIToolkitButton _startButton;
     private UIToolkitButton _settingsButton;
+    private UIToolkitButton _settingsCloseButton;
     private UIToolkitButton _graphicsLowButton;
     private UIToolkitButton _graphicsMediumButton;
     private UIToolkitButton _shopButton;
     private UIToolkitButton _inventoryButton;
     private UIToolkitButton _spectateButton;
+    private UIToolkitButton _comingSoonCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
+    private Label _comingSoonMessageLabel;
     private VisualElement _graphicsSettingsPanel;
+    private VisualElement _settingsCard;
+    private VisualElement _comingSoonOverlay;
+    private SliderInt _graphicsVolumeSlider;
+    private bool _settingsPopupVisible;
     private bool _menuEventsBound;
     private readonly List<UIToolkitButton> _hoverButtons = new();
+    private readonly Dictionary<UIToolkitButton, Vector3> _buttonCurrentScales = new();
+    private readonly Dictionary<UIToolkitButton, Vector3> _buttonTargetScales = new();
     private const string DefaultMenuHoverText = "Pick what you want to do next";
     private const float MenuHoverLabelFadeSpeed = 7f;
+    private const float MenuButtonScaleLerpSpeed = 12f;
     private const string JoinGameCardResourcePath = "UI/JoinGameCard";
     private const string ShopCardResourcePath = "UI/ShopCard";
     private const string InventoryCardResourcePath = "UI/InventoryCard";
@@ -93,6 +103,7 @@ public class LobbyUI : MonoBehaviour
         }
 
         UpdateHoverLabelFade();
+        UpdateMenuButtonScaleAnimation();
     }
     
     private void OnDestroy()
@@ -282,22 +293,31 @@ public class LobbyUI : MonoBehaviour
 
         _startButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("start-button");
         _settingsButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("settings-button");
+        _settingsCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("settings-close-button");
         _graphicsLowButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-low-button");
         _graphicsMediumButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-medium-button");
         _shopButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-button");
         _inventoryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("inventory-button");
         _spectateButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("spectate-button");
+        _comingSoonCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("coming-soon-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
+        _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
         _menuHoverLabel = _menuDocument.rootVisualElement?.Q<Label>("menu-hover-label");
+        _comingSoonMessageLabel = _menuDocument.rootVisualElement?.Q<Label>("coming-soon-message-label");
         _graphicsSettingsPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("graphics-settings-panel");
+        _settingsCard = _menuDocument.rootVisualElement?.Q<VisualElement>("settings-card");
+        _comingSoonOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("coming-soon-overlay");
         if (_startButton == null)
         {
             Debug.LogWarning("LobbyUI: Start button was not found in MainMenu.uxml.");
         }
 
-        if (_graphicsSettingsPanel != null)
+        _settingsPopupVisible = false;
+        SetSettingsPopupVisible(false);
+
+        if (_comingSoonOverlay != null)
         {
-            _graphicsSettingsPanel.style.display = DisplayStyle.None;
+            _comingSoonOverlay.style.display = DisplayStyle.None;
         }
 
         ConfigureMenuButtonDescriptions();
@@ -325,6 +345,18 @@ public class LobbyUI : MonoBehaviour
         {
             _settingsButton.clicked += HandleSettingsButtonClicked;
         }
+        if (_settingsCloseButton != null)
+        {
+            _settingsCloseButton.clicked += HandleSettingsCloseButtonClicked;
+        }
+        if (_graphicsSettingsPanel != null)
+        {
+            _graphicsSettingsPanel.RegisterCallback<ClickEvent>(HandleSettingsOverlayClicked);
+        }
+        if (_settingsCard != null)
+        {
+            _settingsCard.RegisterCallback<ClickEvent>(HandleSettingsCardClicked);
+        }
         if (_graphicsLowButton != null)
         {
             _graphicsLowButton.clicked += HandleGraphicsLowButtonClicked;
@@ -332,6 +364,14 @@ public class LobbyUI : MonoBehaviour
         if (_graphicsMediumButton != null)
         {
             _graphicsMediumButton.clicked += HandleGraphicsMediumButtonClicked;
+        }
+        if (_graphicsVolumeSlider != null)
+        {
+            _graphicsVolumeSlider.RegisterValueChangedCallback(HandleGraphicsVolumeSliderChanged);
+        }
+        if (_comingSoonCloseButton != null)
+        {
+            _comingSoonCloseButton.clicked += HandleComingSoonCloseButtonClicked;
         }
         BindHoverEffects();
         BindPlaceholderActions();
@@ -350,6 +390,18 @@ public class LobbyUI : MonoBehaviour
         {
             _settingsButton.clicked -= HandleSettingsButtonClicked;
         }
+        if (_settingsCloseButton != null)
+        {
+            _settingsCloseButton.clicked -= HandleSettingsCloseButtonClicked;
+        }
+        if (_graphicsSettingsPanel != null)
+        {
+            _graphicsSettingsPanel.UnregisterCallback<ClickEvent>(HandleSettingsOverlayClicked);
+        }
+        if (_settingsCard != null)
+        {
+            _settingsCard.UnregisterCallback<ClickEvent>(HandleSettingsCardClicked);
+        }
         if (_graphicsLowButton != null)
         {
             _graphicsLowButton.clicked -= HandleGraphicsLowButtonClicked;
@@ -357,6 +409,14 @@ public class LobbyUI : MonoBehaviour
         if (_graphicsMediumButton != null)
         {
             _graphicsMediumButton.clicked -= HandleGraphicsMediumButtonClicked;
+        }
+        if (_graphicsVolumeSlider != null)
+        {
+            _graphicsVolumeSlider.UnregisterValueChangedCallback(HandleGraphicsVolumeSliderChanged);
+        }
+        if (_comingSoonCloseButton != null)
+        {
+            _comingSoonCloseButton.clicked -= HandleComingSoonCloseButtonClicked;
         }
         UnbindPlaceholderActions();
         UnbindHoverEffects();
@@ -386,14 +446,27 @@ public class LobbyUI : MonoBehaviour
 
     private void HandleSettingsButtonClicked()
     {
-        if (_graphicsSettingsPanel == null)
+        SetSettingsPopupVisible(!_settingsPopupVisible);
+    }
+
+    private void HandleSettingsCloseButtonClicked()
+    {
+        SetSettingsPopupVisible(false);
+    }
+
+    private void HandleSettingsOverlayClicked(ClickEvent evt)
+    {
+        if (evt == null)
         {
             return;
         }
 
-        bool showSettings = _graphicsSettingsPanel.style.display == DisplayStyle.None;
-        _graphicsSettingsPanel.style.display = showSettings ? DisplayStyle.Flex : DisplayStyle.None;
-        RefreshGraphicsSettingsUi();
+        SetSettingsPopupVisible(false);
+    }
+
+    private void HandleSettingsCardClicked(ClickEvent evt)
+    {
+        evt?.StopPropagation();
     }
 
     private void HandleGraphicsLowButtonClicked()
@@ -406,23 +479,58 @@ public class LobbyUI : MonoBehaviour
         ApplyGraphicsQuality(WebGLPerformanceBootstrap.MediumQualityName);
     }
 
+    private void HandleGraphicsVolumeSliderChanged(ChangeEvent<int> evt)
+    {
+        AudioListener.volume = Mathf.Clamp01(evt.newValue / 10f);
+    }
+
     private void HandlePlaceholderButtonClicked()
     {
         ShowNotification("This menu item is not wired yet.");
     }
 
+    private void HandleComingSoonButtonClicked()
+    {
+        ShowComingSoonPopup("This feature is still being built.");
+    }
+
+    private void HandleComingSoonCloseButtonClicked()
+    {
+        HideComingSoonPopup();
+    }
+
     private void BindPlaceholderActions()
     {
-        BindPlaceholderAction(_shopButton);
-        BindPlaceholderAction(_inventoryButton);
+        BindComingSoonAction(_shopButton);
+        BindComingSoonAction(_inventoryButton);
         BindPlaceholderAction(_spectateButton);
     }
 
     private void UnbindPlaceholderActions()
     {
-        UnbindPlaceholderAction(_shopButton);
-        UnbindPlaceholderAction(_inventoryButton);
+        UnbindComingSoonAction(_shopButton);
+        UnbindComingSoonAction(_inventoryButton);
         UnbindPlaceholderAction(_spectateButton);
+    }
+
+    private void BindComingSoonAction(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.clicked += HandleComingSoonButtonClicked;
+    }
+
+    private void UnbindComingSoonAction(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        button.clicked -= HandleComingSoonButtonClicked;
     }
 
     private void BindPlaceholderAction(UIToolkitButton button)
@@ -495,6 +603,8 @@ public class LobbyUI : MonoBehaviour
         }
 
         _hoverButtons.Clear();
+        _buttonCurrentScales.Clear();
+        _buttonTargetScales.Clear();
         _pendingHoverLabelText = DefaultMenuHoverText;
         _targetHoverLabelOpacity = 0f;
     }
@@ -510,6 +620,8 @@ public class LobbyUI : MonoBehaviour
         button.RegisterCallback<PointerEnterEvent>(HandleMenuButtonPointerEnter);
         button.RegisterCallback<PointerLeaveEvent>(HandleMenuButtonPointerLeave);
         _hoverButtons.Add(button);
+        _buttonCurrentScales[button] = Vector3.one;
+        _buttonTargetScales[button] = Vector3.one;
     }
 
     private void HandleMenuButtonPointerEnter(PointerEnterEvent evt)
@@ -520,7 +632,7 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        button.style.scale = new StyleScale(GetHoverScale(button));
+        _buttonTargetScales[button] = GetHoverScaleVector(button);
         ApplyButtonHoverVisual(button, true);
 
         _pendingHoverLabelText = button.userData as string ?? DefaultMenuHoverText;
@@ -539,7 +651,7 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        button.style.scale = new StyleScale(DefaultButtonScale);
+        _buttonTargetScales[button] = Vector3.one;
         ApplyButtonHoverVisual(button, false);
         _pendingHoverLabelText = DefaultMenuHoverText;
         _targetHoverLabelOpacity = 0f;
@@ -566,6 +678,27 @@ public class LobbyUI : MonoBehaviour
         return HoverButtonScale;
     }
 
+    private static Vector3 GetHoverScaleVector(UIToolkitButton button)
+    {
+        if (button == null)
+        {
+            return Vector3.one;
+        }
+
+        if (string.Equals(button.name, "start-button", StringComparison.Ordinal))
+        {
+            return new Vector3(1.03f, 1.03f, 1f);
+        }
+
+        if (string.Equals(button.name, "shop-button", StringComparison.Ordinal)
+            || string.Equals(button.name, "inventory-button", StringComparison.Ordinal))
+        {
+            return new Vector3(1.18f, 1.18f, 1f);
+        }
+
+        return new Vector3(1.02f, 1.02f, 1f);
+    }
+
     private void ResetHoverLabelVisual()
     {
         _currentHoverLabelOpacity = 0f;
@@ -575,6 +708,29 @@ public class LobbyUI : MonoBehaviour
         {
             _menuHoverLabel.text = _pendingHoverLabelText;
             _menuHoverLabel.style.opacity = 0f;
+        }
+    }
+
+    private void ShowComingSoonPopup(string message)
+    {
+        if (_comingSoonMessageLabel != null)
+        {
+            _comingSoonMessageLabel.text = string.IsNullOrWhiteSpace(message)
+                ? "This feature is still being built."
+                : message;
+        }
+
+        if (_comingSoonOverlay != null)
+        {
+            _comingSoonOverlay.style.display = DisplayStyle.Flex;
+        }
+    }
+
+    private void HideComingSoonPopup()
+    {
+        if (_comingSoonOverlay != null)
+        {
+            _comingSoonOverlay.style.display = DisplayStyle.None;
         }
     }
 
@@ -640,6 +796,40 @@ public class LobbyUI : MonoBehaviour
         }
 
         _menuHoverLabel.style.opacity = _currentHoverLabelOpacity;
+    }
+
+    private void UpdateMenuButtonScaleAnimation()
+    {
+        if (_hoverButtons.Count == 0)
+        {
+            return;
+        }
+
+        float t = 1f - Mathf.Exp(-MenuButtonScaleLerpSpeed * Time.unscaledDeltaTime);
+        for (int i = 0; i < _hoverButtons.Count; i++)
+        {
+            UIToolkitButton button = _hoverButtons[i];
+            if (button == null)
+            {
+                continue;
+            }
+
+            Vector3 currentScale = _buttonCurrentScales.TryGetValue(button, out Vector3 cachedCurrentScale)
+                ? cachedCurrentScale
+                : Vector3.one;
+            Vector3 targetScale = _buttonTargetScales.TryGetValue(button, out Vector3 cachedTargetScale)
+                ? cachedTargetScale
+                : Vector3.one;
+
+            Vector3 nextScale = Vector3.Lerp(currentScale, targetScale, t);
+            if ((targetScale - nextScale).sqrMagnitude <= 0.00001f)
+            {
+                nextScale = targetScale;
+            }
+
+            _buttonCurrentScales[button] = nextScale;
+            button.style.scale = new StyleScale(new Scale(nextScale));
+        }
     }
 
     private static void ApplyButtonHoverVisual(UIToolkitButton button, bool hovered)
@@ -726,6 +916,12 @@ public class LobbyUI : MonoBehaviour
             _graphicsCurrentLabel.text = $"Current: {formattedName}";
         }
 
+        if (_graphicsVolumeSlider != null)
+        {
+            int volumeValue = Mathf.RoundToInt(Mathf.Clamp01(AudioListener.volume) * 10f);
+            _graphicsVolumeSlider.SetValueWithoutNotify(volumeValue);
+        }
+
         if (_graphicsLowButton != null)
         {
             bool isLowSelected = string.Equals(activeQualityName, WebGLPerformanceBootstrap.LowQualityName, StringComparison.Ordinal);
@@ -738,6 +934,21 @@ public class LobbyUI : MonoBehaviour
             bool isMediumSelected = string.Equals(activeQualityName, WebGLPerformanceBootstrap.MediumQualityName, StringComparison.Ordinal);
             _graphicsMediumButton.text = isMediumSelected ? "Medium Selected" : "Medium";
             _graphicsMediumButton.SetEnabled(!isMediumSelected);
+        }
+    }
+
+    private void SetSettingsPopupVisible(bool visible)
+    {
+        _settingsPopupVisible = visible;
+
+        if (_graphicsSettingsPanel != null)
+        {
+            _graphicsSettingsPanel.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        if (visible)
+        {
+            RefreshGraphicsSettingsUi();
         }
     }
 

@@ -8,6 +8,7 @@ public class NextbotRegistryEntry
     public Texture2D iconTexture;
     public AudioClip loopClip;
     public Color tint = Color.white;
+    [Min(0f)] public float speed = 0f;
     [Range(0.5f, 1.5f)] public float loopPitch = 1f;
 }
 

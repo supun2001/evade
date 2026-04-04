@@ -184,6 +184,10 @@ public class NetworkPlayer : MonoBehaviour
         float hitReactionPitch = 0f;
         float hitReactionRoll = 0f;
         float hitReactionSeed = 0f;
+        float speedBoostMultiplier = controller != null ? controller.GetSyncedSpeedBoostMultiplier() : 1f;
+        float speedBoostTimeRemaining = controller != null ? controller.GetSyncedSpeedBoostTimeRemaining() : 0f;
+        float jumpBoostMultiplier = controller != null ? controller.GetSyncedJumpBoostMultiplier() : 1f;
+        float jumpBoostTimeRemaining = controller != null ? controller.GetSyncedJumpBoostTimeRemaining() : 0f;
 
         if (anim != null)
         {
@@ -224,7 +228,11 @@ public class NetworkPlayer : MonoBehaviour
             hitReactionTimeRemaining,
             hitReactionPitch,
             hitReactionRoll,
-            hitReactionSeed
+            hitReactionSeed,
+            speedBoostMultiplier,
+            speedBoostTimeRemaining,
+            jumpBoostMultiplier,
+            jumpBoostTimeRemaining
         );
     }
 

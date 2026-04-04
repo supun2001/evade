@@ -221,6 +221,11 @@ public class PlayerController : MonoBehaviour
     private VisualElement _pauseMenuElement;
     private Button _continueButton;
     private Button _mainMenuButton;
+    private Button _respawnButton;
+    private Button _pauseGraphicsLowButton;
+    private Button _pauseGraphicsMediumButton;
+    private SliderInt _pauseVolumeSlider;
+    private Label _pauseGraphicsValueLabel;
     private CinemachineBrain _cinemachineBrain;
     private CinemachineCamera _cinemachineCamera;
     private CinemachineThirdPersonFollow _thirdPersonFollow;
@@ -1077,6 +1082,11 @@ public class PlayerController : MonoBehaviour
         _pauseMenuElement = root.Q<VisualElement>("pause-menu");
         _continueButton = root.Q<Button>("continue-button");
         _mainMenuButton = root.Q<Button>("main-menu-button");
+        _respawnButton = root.Q<Button>("respawn-button");
+        _pauseGraphicsLowButton = root.Q<Button>("pause-graphics-low-button");
+        _pauseGraphicsMediumButton = root.Q<Button>("pause-graphics-medium-button");
+        _pauseVolumeSlider = root.Q<SliderInt>("pause-volume-slider");
+        _pauseGraphicsValueLabel = root.Q<Label>("pause-graphics-value-label");
 
         EnsurePickupFadeOverlay(root);
 
@@ -1092,10 +1102,26 @@ public class PlayerController : MonoBehaviour
                 _mainMenuButton.clicked += OnMainMenuButtonClicked;
             }
 
+            if (_pauseGraphicsLowButton != null)
+            {
+                _pauseGraphicsLowButton.clicked += OnPauseGraphicsLowButtonClicked;
+            }
+
+            if (_pauseGraphicsMediumButton != null)
+            {
+                _pauseGraphicsMediumButton.clicked += OnPauseGraphicsMediumButtonClicked;
+            }
+
+            if (_pauseVolumeSlider != null)
+            {
+                _pauseVolumeSlider.RegisterValueChangedCallback(OnPauseVolumeSliderChanged);
+            }
+
             _hudEventsBound = true;
         }
 
         SetPauseMenuDisplay(_isPauseMenuOpen);
+        RefreshPauseMenuSettingsUi();
         ConfigureNextbotWarningVisuals();
     }
 
@@ -1812,6 +1838,7 @@ public class PlayerController : MonoBehaviour
 
         _isPauseMenuOpen = visible;
         SetPauseMenuDisplay(visible);
+        RefreshPauseMenuSettingsUi();
 
         UnityEngine.Cursor.lockState = visible ? CursorLockMode.None : CursorLockMode.Locked;
         UnityEngine.Cursor.visible = visible;
@@ -1839,6 +1866,82 @@ public class PlayerController : MonoBehaviour
         {
             lobbyUI.LeaveRoom();
         }
+    }
+
+    private void OnPauseGraphicsLowButtonClicked()
+    {
+        ApplyPauseMenuGraphicsQuality(WebGLPerformanceBootstrap.LowQualityName);
+    }
+
+    private void OnPauseGraphicsMediumButtonClicked()
+    {
+        ApplyPauseMenuGraphicsQuality(WebGLPerformanceBootstrap.MediumQualityName);
+    }
+
+    private void OnPauseVolumeSliderChanged(ChangeEvent<int> evt)
+    {
+        AudioListener.volume = Mathf.Clamp01(evt.newValue / 10f);
+    }
+
+    private void ApplyPauseMenuGraphicsQuality(string qualityName)
+    {
+        if (!WebGLPerformanceBootstrap.TryApplyManualGraphicsQuality(qualityName))
+        {
+            return;
+        }
+
+        RefreshPauseMenuSettingsUi();
+    }
+
+    private void RefreshPauseMenuSettingsUi()
+    {
+        if (_pauseVolumeSlider != null)
+        {
+            int volumeValue = Mathf.RoundToInt(Mathf.Clamp01(AudioListener.volume) * 10f);
+            _pauseVolumeSlider.SetValueWithoutNotify(volumeValue);
+        }
+
+        string activeQualityName = WebGLPerformanceBootstrap.GetActiveGraphicsQualityName();
+        string formattedQualityName = FormatPauseMenuQualityName(activeQualityName);
+
+        if (_pauseGraphicsValueLabel != null)
+        {
+            _pauseGraphicsValueLabel.text = formattedQualityName;
+        }
+
+        if (_pauseGraphicsLowButton != null)
+        {
+            bool isLowSelected = string.Equals(activeQualityName, WebGLPerformanceBootstrap.LowQualityName, StringComparison.Ordinal);
+            _pauseGraphicsLowButton.text = isLowSelected ? "Low Selected" : "Low";
+            _pauseGraphicsLowButton.SetEnabled(!isLowSelected);
+        }
+
+        if (_pauseGraphicsMediumButton != null)
+        {
+            bool isMediumSelected = string.Equals(activeQualityName, WebGLPerformanceBootstrap.MediumQualityName, StringComparison.Ordinal);
+            _pauseGraphicsMediumButton.text = isMediumSelected ? "Medium Selected" : "Medium";
+            _pauseGraphicsMediumButton.SetEnabled(!isMediumSelected);
+        }
+
+        if (_respawnButton != null)
+        {
+            _respawnButton.SetEnabled(false);
+        }
+    }
+
+    private static string FormatPauseMenuQualityName(string qualityName)
+    {
+        if (string.IsNullOrEmpty(qualityName))
+        {
+            return "Unknown";
+        }
+
+        if (qualityName.StartsWith("WebGL ", StringComparison.Ordinal))
+        {
+            return qualityName.Substring("WebGL ".Length);
+        }
+
+        return qualityName;
     }
 
     private Camera FindGameplayCamera()
@@ -3521,6 +3624,38 @@ public class PlayerController : MonoBehaviour
 
         _jumpBoostMultiplier = Mathf.Max(_jumpBoostMultiplier, clampedMultiplier);
         _jumpBoostExpiresAt = Mathf.Max(_jumpBoostExpiresAt, Time.time + durationSeconds);
+    }
+
+    public float GetSyncedSpeedBoostMultiplier()
+    {
+        return GetActiveSpeedBoostMultiplier();
+    }
+
+    public float GetSyncedSpeedBoostTimeRemaining()
+    {
+        float multiplier = GetActiveSpeedBoostMultiplier();
+        if (multiplier <= 1f || _speedBoostExpiresAt < 0f)
+        {
+            return 0f;
+        }
+
+        return Mathf.Max(0f, _speedBoostExpiresAt - Time.time);
+    }
+
+    public float GetSyncedJumpBoostMultiplier()
+    {
+        return GetActiveJumpBoostMultiplier();
+    }
+
+    public float GetSyncedJumpBoostTimeRemaining()
+    {
+        float multiplier = GetActiveJumpBoostMultiplier();
+        if (multiplier <= 1f || _jumpBoostExpiresAt < 0f)
+        {
+            return 0f;
+        }
+
+        return Mathf.Max(0f, _jumpBoostExpiresAt - Time.time);
     }
 
     public void PlayPickupFade()
