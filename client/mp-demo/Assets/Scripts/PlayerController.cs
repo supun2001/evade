@@ -29,7 +29,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _injuredMoveSpeed = 1.75f;
     [SerializeField] private float _crouchMoveSpeed = 2f;
     [SerializeField, Min(0.01f)] private float _crouchRunHoldDuration = 3f;
-    [SerializeField, Min(0.01f)] private float _crouchRunAnimationDuration = 0.4f;
+    [SerializeField, Range(0f, 1f)] private float _crouchRunAnimationExitSpeedRatio = 0.2f;
     [SerializeField, Min(0f)] private float _crouchRunEnterMinSpeed = 4f;
     public float autoSprintDelay = 5f;
     public float drag = 0.1f;
@@ -231,7 +231,6 @@ public class PlayerController : MonoBehaviour
     private Vector3 _horizontalVelocity = Vector3.zero;
     private float _runHeldTime = 0f;
     private float _crouchRunTimer;
-    private float _crouchRunAnimationTimer;
     private float _crouchRunStartMoveSpeed;
     private bool _isCrouchRunning;
     private float _speedBoostMultiplier = 1f;
@@ -707,6 +706,7 @@ public class PlayerController : MonoBehaviour
         Vector2 lookInput = _playerLocomotionInput.LookInput;
         float minPitch = _currentViewMode == CameraViewMode.FirstPerson ? -_firstPersonLookUpLimit : -lookLimitV;
         float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
+        bool lookBackHeld = Keyboard.current != null && Keyboard.current.rKey.isPressed;
         
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, minPitch, maxPitch);
@@ -737,6 +737,10 @@ public class PlayerController : MonoBehaviour
 
         UpdateDownedVisualRootPosition();
         float cameraYawOffset = allowBodyLookRotation ? 0f : _cameraRotation.x;
+        if (lookBackHeld)
+        {
+            cameraYawOffset += 180f;
+        }
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, cameraYawOffset, 0f);
         UpdateSprintCameraBob();
         UpdateFirstPersonWallRunCameraPose();
@@ -3422,10 +3426,7 @@ public class PlayerController : MonoBehaviour
 
         if (_isCrouchRunning)
         {
-            float crouchRunProgress = _crouchRunHoldDuration <= 0.01f
-                ? 1f
-                : 1f - Mathf.Clamp01(_crouchRunTimer / _crouchRunHoldDuration);
-            baseSpeed = Mathf.Lerp(_crouchRunStartMoveSpeed, _crouchMoveSpeed, crouchRunProgress);
+            baseSpeed = GetCurrentCrouchRunBaseSpeed();
             return baseSpeed * GetActiveSpeedBoostMultiplier();
         }
 
@@ -3816,7 +3817,19 @@ public class PlayerController : MonoBehaviour
 
     public bool IsCrouchRunAnimationActive()
     {
-        return _crouchRunAnimationTimer > 0f;
+        if (!_isCrouchRunning)
+        {
+            return false;
+        }
+
+        if (_crouchRunStartMoveSpeed <= _crouchMoveSpeed + 0.01f)
+        {
+            return false;
+        }
+
+        float currentCrouchRunSpeed = GetCurrentCrouchRunBaseSpeed();
+        float normalizedCrouchRunSpeed = Mathf.InverseLerp(_crouchMoveSpeed, _crouchRunStartMoveSpeed, currentCrouchRunSpeed);
+        return normalizedCrouchRunSpeed > _crouchRunAnimationExitSpeedRatio;
     }
 
     private bool IsInjured()
@@ -3840,7 +3853,6 @@ public class PlayerController : MonoBehaviour
             float uncrouchedMoveSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
             _crouchRunStartMoveSpeed = Mathf.Max(uncrouchedMoveSpeed, GetHorizontalSpeed());
             _crouchRunTimer = Mathf.Max(0.01f, _crouchRunHoldDuration);
-            _crouchRunAnimationTimer = Mathf.Max(0.01f, _crouchRunAnimationDuration);
             _isCrouchRunning = true;
         }
 
@@ -3850,19 +3862,16 @@ public class PlayerController : MonoBehaviour
             {
                 _isCrouchRunning = false;
                 _crouchRunTimer = 0f;
-                _crouchRunAnimationTimer = 0f;
                 _isCrouching = false;
                 _crouchRunStartMoveSpeed = 0f;
                 return;
             }
 
             _crouchRunTimer = Mathf.Max(0f, _crouchRunTimer - Time.deltaTime);
-            _crouchRunAnimationTimer = Mathf.Max(0f, _crouchRunAnimationTimer - Time.deltaTime);
             if (_crouchRunTimer <= 0f)
             {
                 _isCrouchRunning = false;
                 _crouchRunTimer = 0f;
-                _crouchRunAnimationTimer = 0f;
                 _crouchRunStartMoveSpeed = 0f;
             }
         }
@@ -3879,9 +3888,16 @@ public class PlayerController : MonoBehaviour
         {
             _isCrouchRunning = false;
             _crouchRunTimer = 0f;
-            _crouchRunAnimationTimer = 0f;
             _crouchRunStartMoveSpeed = 0f;
         }
+    }
+
+    private float GetCurrentCrouchRunBaseSpeed()
+    {
+        float crouchRunProgress = _crouchRunHoldDuration <= 0.01f
+            ? 1f
+            : 1f - Mathf.Clamp01(_crouchRunTimer / _crouchRunHoldDuration);
+        return Mathf.Lerp(_crouchRunStartMoveSpeed, _crouchMoveSpeed, crouchRunProgress);
     }
 
     private void UpdateWallRunState()
