@@ -255,6 +255,12 @@ MonoBehaviour:
   _wallRunGroundSprintGraceTime: 0.25
   _wallRunContactLossBuffer: 0.18
   _wallRunStartIntoWallThreshold: 0.2
+  _rampLayerName: Ramp
+  _rampLipSpeedMultiplier: 1.5
+  _rampLipJumpForceMultiplier: 1.7
+  _rampLipGraceTime: 0.14
+  _rampLipMinHorizontalSpeed: 6
+  _rampGroundCheckDistance: 0.45
   lookSenseH: 0.1
   lookSenseV: 0.1
   lookLimitV: 70

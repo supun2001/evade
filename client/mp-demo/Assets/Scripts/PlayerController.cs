@@ -102,6 +102,14 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _wallRunContactLossBuffer = 0.18f;
     [SerializeField] private float _wallRunStartIntoWallThreshold = 0.2f;
 
+    [Header("Ramp Boost")]
+    [SerializeField] private string _rampLayerName = "Ramp";
+    [SerializeField, Min(1f)] private float _rampLipSpeedMultiplier = 1.18f;
+    [SerializeField, Min(1f)] private float _rampLipJumpForceMultiplier = 1.22f;
+    [SerializeField, Min(0.01f)] private float _rampLipGraceTime = 0.14f;
+    [SerializeField, Min(0f)] private float _rampLipMinHorizontalSpeed = 6f;
+    [SerializeField, Min(0.05f)] private float _rampGroundCheckDistance = 0.45f;
+
     [Header("Camera Settings")]
     public float lookSenseH = 0.1f;
     public float lookSenseV = 0.1f;
@@ -348,6 +356,8 @@ public class PlayerController : MonoBehaviour
     private float NextbotHitLegYawRange => Mathf.Lerp(4f, 16f, _nextbotHitLimbFlail);
     private float NextbotHitLegRollRange => Mathf.Lerp(6f, 22f, _nextbotHitLimbFlail);
     private float _lastAppliedRemoteHitReactionSeed = float.NaN;
+    private int _rampLayer = -1;
+    private float _lastRampTouchTime = float.NegativeInfinity;
     #endregion
 
     #region Setup
@@ -355,6 +365,7 @@ public class PlayerController : MonoBehaviour
         _playerLocomotionInput = GetComponent<PlayerLocomotionInput>();
         _playerAnimation = GetComponent<PlayerAnimation>();
         _networkPlayer = GetComponent<NetworkPlayer>();
+        _rampLayer = LayerMask.NameToLayer(_rampLayerName);
         _transform = transform;
         _cameraTransform = _playerCamera.transform;
         _thirdPersonFollow = GetComponentInChildren<CinemachineThirdPersonFollow>(true);
@@ -433,6 +444,7 @@ public class PlayerController : MonoBehaviour
         UpdateWallRunEligibility();
         UpdateWallRunState();
         UpdateZoom();
+        UpdateRampState();
 
         if (_isBeingCarried)
         {
@@ -3216,6 +3228,8 @@ public class PlayerController : MonoBehaviour
         }
 
         if(!IsInjured() && !IsCrouching() && !_isCarryingPlayer && _playerLocomotionInput.JumpPressed && isGrounded){
+            bool applyRampLipBoost = CanApplyRampLipBoost();
+
             if (_horizontalVelocity.sqrMagnitude > 0.001f)
             {
                 Vector3 horizontalDirection = _horizontalVelocity.normalized;
@@ -3232,6 +3246,11 @@ public class PlayerController : MonoBehaviour
                     boostedSpeed += fullSprintJumpSpeedBonus;
                 }
 
+                if (applyRampLipBoost)
+                {
+                    boostedSpeed *= _rampLipSpeedMultiplier;
+                }
+
                 _horizontalVelocity = horizontalDirection * boostedSpeed;
             }
 
@@ -3244,12 +3263,67 @@ public class PlayerController : MonoBehaviour
 
             _jumpedThisFrame = true;
             float effectiveJumpForce = jumpForce * GetActiveJumpBoostMultiplier();
+            if (applyRampLipBoost)
+            {
+                effectiveJumpForce *= _rampLipJumpForceMultiplier;
+            }
             _verticalVelocity += MathF.Sqrt(effectiveJumpForce * JUMP_VELOCITY_MULTIPLIER * gravity);
         }
     }
 
     public bool IsGrounded() {
         return _characterController.isGrounded;   
+    }
+
+    private void UpdateRampState()
+    {
+        if (IsStandingOnRamp())
+        {
+            _lastRampTouchTime = Time.time;
+        }
+    }
+
+    private bool CanApplyRampLipBoost()
+    {
+        if (_rampLayer < 0 || _rampLipSpeedMultiplier <= 1f || _rampLipJumpForceMultiplier <= 1f)
+        {
+            return false;
+        }
+
+        if (Time.time - _lastRampTouchTime > _rampLipGraceTime)
+        {
+            return false;
+        }
+
+        return GetHorizontalSpeed() >= _rampLipMinHorizontalSpeed;
+    }
+
+    private bool IsStandingOnRamp()
+    {
+        if (_rampLayer < 0 || !IsGrounded() || _playerLocomotionInput == null)
+        {
+            return false;
+        }
+
+        if (_playerLocomotionInput.MovementInput.sqrMagnitude <= 0.01f)
+        {
+            return false;
+        }
+
+        Vector3 origin = _transform.position + Vector3.up * 0.2f;
+        float sphereRadius = _characterController != null
+            ? Mathf.Max(0.05f, _characterController.radius * 0.85f)
+            : 0.25f;
+        float checkDistance = _characterController != null
+            ? Mathf.Max(_rampGroundCheckDistance, _characterController.skinWidth + 0.1f)
+            : _rampGroundCheckDistance;
+
+        if (!Physics.SphereCast(origin, sphereRadius, Vector3.down, out RaycastHit hit, checkDistance, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return false;
+        }
+
+        return hit.collider != null && hit.collider.gameObject.layer == _rampLayer;
     }
     #endregion
 
