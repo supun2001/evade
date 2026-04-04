@@ -313,6 +313,7 @@ MonoBehaviour:
   _nextbotWarningArrowVerticalOffset: 22
   _nextbotWarningArrowTexture: {fileID: 2800000, guid: dbb4e54ef009049a2b41b12955e582ab, type: 3}
   _nextbotWarningSkullTexture: {fileID: 2800000, guid: 89056f0c66fdf4283a0c17977b47ce63, type: 3}
+  _useAnimationEventFootsteps: 1
   _footstepClips:
   - {fileID: 8300000, guid: 9e68ea1ebd76aa44c8cfa5beb9850830, type: 3}
   - {fileID: 8300000, guid: 1deb201b8bf8f89479323a74e421150b, type: 3}
@@ -909,7 +910,10 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 7001204013457842198}
   m_SourcePrefab: {fileID: 100100000, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
 --- !u!4 &2349431067809538906 stripped
 Transform:
@@ -921,6 +925,18 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
   m_PrefabInstance: {fileID: 2814857960615871665}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &7001204013457842198
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3157317695037094368}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f3f935b6ffb4b3f99da844047df9016, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerAnimationEventRelay
 --- !u!95 &8537408513011366176 stripped
 Animator:
   m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}

@@ -171,6 +171,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Texture2D _nextbotWarningSkullTexture;
 
     [Header("Footsteps")]
+    [SerializeField] private bool _useAnimationEventFootsteps;
     [SerializeField] private AudioClip[] _footstepClips;
     [SerializeField, Min(0f)] private float _footstepVolume = 0.6f;
     [SerializeField, Range(0f, 0.3f)] private float _footstepPitchRandomness = 0.04f;
@@ -271,6 +272,7 @@ public class PlayerController : MonoBehaviour
     private Transform _nextbotHitRightLegTransform;
     private int _lastFootstepClipIndex = -1;
     private float _footstepStepTimer;
+    private float _lastAnimationEventFootstepTime = float.NegativeInfinity;
     private Quaternion _lastLeftArmSprintOffset = Quaternion.identity;
     private Quaternion _lastRightArmSprintOffset = Quaternion.identity;
     private Quaternion _nextbotHitLeftArmBaseLocalRotation = Quaternion.identity;
@@ -311,6 +313,7 @@ public class PlayerController : MonoBehaviour
     private const float FOOTSTEP_WALK_INTERVAL = 0.42f;
     private const float FOOTSTEP_RUN_INTERVAL = 0.28f;
     private const float FOOTSTEP_MAX_UPWARD_SPEED = 0.15f;
+    private const float FOOTSTEP_ANIMATION_EVENT_COOLDOWN = 0.08f;
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     private float NextbotHitImpactForce => Mathf.Lerp(_nextbotHitShoveForce * 1.15f, _nextbotHitShoveForce * 1.75f, _nextbotHitTumble);
@@ -3483,26 +3486,17 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateFootstepAudio()
     {
+        if (_useAnimationEventFootsteps)
+        {
+            return;
+        }
+
         if (_networkPlayer != null && !_networkPlayer.IsLocalPlayer)
         {
             return;
         }
 
-        if (_footstepAudioSource == null || _footstepClips == null || _footstepClips.Length == 0)
-        {
-            return;
-        }
-
-        bool canPlayFootsteps =
-            IsGrounded()
-            && !IsInjuredOrHitReacting()
-            && !_isBeingCarried
-            && !_isCarryingPlayer
-            && !DidJumpThisFrame()
-            && GetVerticalVelocity() <= FOOTSTEP_MAX_UPWARD_SPEED
-            && GetHorizontalSpeed() >= _footstepMinHorizontalSpeed;
-
-        if (!canPlayFootsteps)
+        if (!CanPlayFootsteps())
         {
             _footstepStepTimer = 0f;
             return;
@@ -3518,6 +3512,48 @@ public class PlayerController : MonoBehaviour
 
         _footstepStepTimer -= stepInterval;
         PlayRandomFootstepClip();
+    }
+
+    public void AnimationEvent_PlayFootstep()
+    {
+        if (!_useAnimationEventFootsteps)
+        {
+            return;
+        }
+
+        if (!CanPlayFootsteps())
+        {
+            return;
+        }
+
+        if (Time.time - _lastAnimationEventFootstepTime < FOOTSTEP_ANIMATION_EVENT_COOLDOWN)
+        {
+            return;
+        }
+
+        _lastAnimationEventFootstepTime = Time.time;
+        PlayRandomFootstepClip();
+    }
+
+    private bool CanPlayFootsteps()
+    {
+        if (_networkPlayer != null && !_networkPlayer.IsLocalPlayer)
+        {
+            return false;
+        }
+
+        if (_footstepAudioSource == null || _footstepClips == null || _footstepClips.Length == 0)
+        {
+            return false;
+        }
+
+        return IsGrounded()
+            && !IsInjuredOrHitReacting()
+            && !_isBeingCarried
+            && !_isCarryingPlayer
+            && !DidJumpThisFrame()
+            && GetVerticalVelocity() <= FOOTSTEP_MAX_UPWARD_SPEED
+            && GetHorizontalSpeed() >= _footstepMinHorizontalSpeed;
     }
 
     private void PlayRandomFootstepClip()
