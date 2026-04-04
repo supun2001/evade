@@ -7,9 +7,22 @@ using UnityEngine.UIElements;
 [DefaultExecutionOrder(200)]
 public class RoundHudController : MonoBehaviour
 {
+    private const string MainMenuMusicResourcePath = "SFX/MainMenu";
+    private const string IntermissionMusicResourcePath = "SFX/Intermission";
+    private const string InGameMusicResourcePath = "SFX/InGameMusic";
+    private const string RoundStartSfxResourcePath = "SFX/RoundStart";
+
     private NetworkManager _networkManager;
     private UIDocument _hudDocument;
     private VisualElement _hudRoot;
+    private LobbyUI _lobbyUi;
+    private AudioSource _musicAudioSource;
+    private AudioSource _oneShotAudioSource;
+    private AudioClip _mainMenuMusicClip;
+    private AudioClip _intermissionMusicClip;
+    private AudioClip _inGameMusicClip;
+    private AudioClip _roundStartClip;
+    private AudioClip _activeLoopClip;
 
     private VisualElement _roundPhaseContainer;
     private Label _roundPhaseTitleLabel;
@@ -32,6 +45,28 @@ public class RoundHudController : MonoBehaviour
     private RoundResultsMessageData _results;
     private bool _showResults;
 
+    private void Awake()
+    {
+        _mainMenuMusicClip = Resources.Load<AudioClip>(MainMenuMusicResourcePath);
+        _intermissionMusicClip = Resources.Load<AudioClip>(IntermissionMusicResourcePath);
+        _inGameMusicClip = Resources.Load<AudioClip>(InGameMusicResourcePath);
+        _roundStartClip = Resources.Load<AudioClip>(RoundStartSfxResourcePath);
+
+        _musicAudioSource = gameObject.AddComponent<AudioSource>();
+        _musicAudioSource.playOnAwake = false;
+        _musicAudioSource.loop = true;
+        _musicAudioSource.spatialBlend = 0f;
+        _musicAudioSource.dopplerLevel = 0f;
+        _musicAudioSource.volume = 0.65f;
+
+        _oneShotAudioSource = gameObject.AddComponent<AudioSource>();
+        _oneShotAudioSource.playOnAwake = false;
+        _oneShotAudioSource.loop = false;
+        _oneShotAudioSource.spatialBlend = 0f;
+        _oneShotAudioSource.dopplerLevel = 0f;
+        _oneShotAudioSource.volume = 1f;
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
     {
@@ -52,9 +87,15 @@ public class RoundHudController : MonoBehaviour
             RebindNetworkManager(NetworkManager.Instance);
         }
 
+        if (_lobbyUi == null)
+        {
+            _lobbyUi = FindFirstObjectByType<LobbyUI>();
+        }
+
         RefreshHudBindings();
         UpdateAnnouncementLifetime();
         HandleResultsCloseInput();
+        RefreshBackgroundMusic();
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
         RefreshResultsDisplay();
@@ -156,6 +197,13 @@ public class RoundHudController : MonoBehaviour
         _announcementTitle = message.title ?? string.Empty;
         _announcementSubtitle = message.subtitle ?? string.Empty;
         _announcementHideAt = Time.unscaledTime + Mathf.Max(0.5f, message.durationSeconds);
+
+        if (string.Equals(_announcementTitle, "ROUND STARTED", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(_announcementSubtitle, "SURVIVE FOR 3 MINUTES", StringComparison.OrdinalIgnoreCase))
+        {
+            PlayRoundStartSfx();
+        }
+
         RefreshAnnouncementDisplay();
     }
 
@@ -188,6 +236,60 @@ public class RoundHudController : MonoBehaviour
             _announcementSubtitle = string.Empty;
             _announcementHideAt = 0f;
         }
+    }
+
+    private void RefreshBackgroundMusic()
+    {
+        if (_musicAudioSource == null)
+        {
+            return;
+        }
+
+        AudioClip targetClip = null;
+        bool isMenuVisible = _lobbyUi != null && _lobbyUi.menuPanel != null && _lobbyUi.menuPanel.activeInHierarchy;
+
+        if (isMenuVisible)
+        {
+            targetClip = _mainMenuMusicClip;
+        }
+        else if (_currentPhase != null && string.Equals(_currentPhase.phase, "round", StringComparison.OrdinalIgnoreCase))
+        {
+            targetClip = _inGameMusicClip;
+        }
+        else if (_currentPhase != null && !string.Equals(_currentPhase.phase, "waiting", StringComparison.OrdinalIgnoreCase))
+        {
+            targetClip = _intermissionMusicClip;
+        }
+
+        if (_activeLoopClip == targetClip)
+        {
+            if (targetClip != null && !_musicAudioSource.isPlaying)
+            {
+                _musicAudioSource.Play();
+            }
+
+            return;
+        }
+
+        _activeLoopClip = targetClip;
+        _musicAudioSource.Stop();
+        _musicAudioSource.clip = targetClip;
+
+        if (targetClip != null)
+        {
+            _musicAudioSource.Play();
+        }
+    }
+
+    private void PlayRoundStartSfx()
+    {
+        if (_roundStartClip == null || _oneShotAudioSource == null)
+        {
+            return;
+        }
+
+        _oneShotAudioSource.Stop();
+        _oneShotAudioSource.PlayOneShot(_roundStartClip);
     }
 
     private void HandleResultsCloseInput()

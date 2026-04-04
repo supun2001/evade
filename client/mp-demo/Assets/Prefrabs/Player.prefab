@@ -360,6 +360,8 @@ MonoBehaviour:
   - {fileID: 8300000, guid: 8802544ed0324a14095edc70ab3bbab1, type: 3}
   - {fileID: 8300000, guid: 65d9836027675574b8d070c5718f99c7, type: 3}
   _landingFootstepVolume: 0.8
+  _playerGotHitClip: {fileID: 8300000, guid: f88bf6f7ac1494bf7a8076c8a43e71b9, type: 3}
+  _playerGotHitVolume: 1
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0

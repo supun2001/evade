@@ -91,6 +91,19 @@ public class NetworkPlayer : MonoBehaviour
 
         if (isLocal)
         {
+            if (playerState.isEliminated && controller != null)
+            {
+                controller.ApplyNetworkEliminated();
+            }
+            else if (playerState.isInjured && controller != null && !controller.IsInjuredOrHitReacting())
+            {
+                controller.ApplyNetworkInjured();
+            }
+            else if (!playerState.isInjured && !playerState.isEliminated && controller != null && controller.IsInjuredOrHitReacting())
+            {
+                controller.ApplyNetworkRevive();
+            }
+
             HandleServerHitTrigger();
             ApplyCarryStateFromServer();
 
@@ -134,7 +147,8 @@ public class NetworkPlayer : MonoBehaviour
 
         if (hitDistance > MaxAcceptedServerHitDistance)
         {
-            Debug.LogWarning($"Ignoring remote nextbot hit outside accepted range. Distance: {hitDistance:F2}");
+            Debug.LogWarning($"Server nextbot hit arrived outside accepted shove range. Applying injured fallback. Distance: {hitDistance:F2}");
+            controller.ApplyNetworkInjured();
             _lastProcessedHitTriggerId = playerState.hitTriggerId;
             return;
         }
@@ -236,7 +250,7 @@ public class NetworkPlayer : MonoBehaviour
                     playerState.isGrounded,
                     playerState.isJumping,
                     playerState.velocityY,
-                    playerState.isInjured,
+                    playerState.isInjured || playerState.isEliminated,
                     playerState.isCrouching,
                     playerState.isWallRunning,
                     Mathf.RoundToInt(playerState.wallRunSide));
@@ -261,7 +275,7 @@ public class NetworkPlayer : MonoBehaviour
 
             controller.ApplyRemoteVisualState(
                 new Vector2(playerState.moveInputX, playerState.moveInputY),
-                playerState.isInjured,
+                playerState.isInjured || playerState.isEliminated,
                 playerState.isCrouching);
 
             controller.ApplyRemoteHitReactionState(

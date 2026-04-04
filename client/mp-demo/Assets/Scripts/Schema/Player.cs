@@ -125,4 +125,7 @@ public Player() { }
 
 	[Type(36, "string")]
 	public string carrierSessionId = default(string);
+
+	[Type(37, "boolean")]
+	public bool isEliminated = default(bool);
 	}

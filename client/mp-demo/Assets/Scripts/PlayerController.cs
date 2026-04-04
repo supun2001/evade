@@ -194,6 +194,10 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private AudioClip[] _landingFootstepClips;
     [SerializeField, Min(0f)] private float _landingFootstepVolume = 0.8f;
 
+    [Header("Hit Audio")]
+    [SerializeField] private AudioClip _playerGotHitClip;
+    [SerializeField, Range(0f, 1f)] private float _playerGotHitVolume = 1f;
+
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
     private Transform _cameraTransform;
@@ -223,6 +227,7 @@ public class PlayerController : MonoBehaviour
     private NetworkPlayer _networkPlayer;
     private AudioSource _footstepAudioSource;
     private AudioSource _pickupAudioSource;
+    private AudioSource _hurtAudioSource;
     private Coroutine _pickupAudioStopCoroutine;
     
     private Vector2 _cameraRotation = Vector2.zero;
@@ -415,6 +420,12 @@ public class PlayerController : MonoBehaviour
         _pickupAudioSource.loop = false;
         _pickupAudioSource.spatialBlend = 0f;
         _pickupAudioSource.dopplerLevel = 0f;
+
+        _hurtAudioSource = gameObject.AddComponent<AudioSource>();
+        _hurtAudioSource.playOnAwake = false;
+        _hurtAudioSource.loop = false;
+        _hurtAudioSource.spatialBlend = 0f;
+        _hurtAudioSource.dopplerLevel = 0f;
     }
     
     private void Start() {
@@ -1706,6 +1717,43 @@ public class PlayerController : MonoBehaviour
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         SetDebugInjuredState(false);
         ResetInjuredVisualRootRotation();
+        UpdateDownedCollisionShape();
+        UpdateDownedVisualRootPosition();
+        UpdateForcedCameraViewState(forceImmediate: true);
+    }
+
+    public void ApplyNetworkInjured()
+    {
+        ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        PlayPlayerGotHitSound();
+        SetDebugInjuredState(true);
+        _horizontalVelocity = Vector3.zero;
+        _verticalVelocity = Mathf.Min(_verticalVelocity, 0f);
+        _jumpedThisFrame = false;
+        _isCrouching = false;
+        _isWallRunning = false;
+        _wallRunSide = 0;
+        _wallRunNormal = Vector3.zero;
+        _wallRunContactHoldTimer = 0f;
+        _wallRunSprintGraceTimer = 0f;
+        UpdateDownedCollisionShape();
+        UpdateDownedVisualRootPosition();
+        UpdateForcedCameraViewState(forceImmediate: true);
+    }
+
+    public void ApplyNetworkEliminated()
+    {
+        ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        SetDebugInjuredState(true);
+        _horizontalVelocity = Vector3.zero;
+        _verticalVelocity = 0f;
+        _jumpedThisFrame = false;
+        _isCrouching = false;
+        _isWallRunning = false;
+        _wallRunSide = 0;
+        _wallRunNormal = Vector3.zero;
+        _wallRunContactHoldTimer = 0f;
+        _wallRunSprintGraceTimer = 0f;
         UpdateDownedCollisionShape();
         UpdateDownedVisualRootPosition();
         UpdateForcedCameraViewState(forceImmediate: true);
@@ -3049,6 +3097,7 @@ public class PlayerController : MonoBehaviour
             1f - NextbotHitImpactForceRandomness,
             1f + NextbotHitImpactForceRandomness);
 
+        PlayPlayerGotHitSound();
         _isHitReacting = true;
         _nextbotHitReactionTimer = _nextbotHitReactionDuration;
         _nextbotHitReactionSeed = UnityEngine.Random.Range(0f, 10000f);
@@ -3540,6 +3589,19 @@ public class PlayerController : MonoBehaviour
         }
 
         _pickupAudioStopCoroutine = null;
+    }
+
+    public void PlayPlayerGotHitSound()
+    {
+        if (_playerGotHitClip == null || _hurtAudioSource == null)
+        {
+            return;
+        }
+
+        _hurtAudioSource.Stop();
+        _hurtAudioSource.volume = Mathf.Clamp01(_playerGotHitVolume);
+        _hurtAudioSource.pitch = 1f;
+        _hurtAudioSource.PlayOneShot(_playerGotHitClip);
     }
 
     private float GetActiveSpeedBoostMultiplier()

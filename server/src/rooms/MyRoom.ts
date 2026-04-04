@@ -41,6 +41,8 @@ const NEXTBOT_FRONT_ANGLE_THRESHOLD = 85;
 const NEXTBOT_PATROL_REACHED_DISTANCE = 1.1;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
+const PLAYER_INJURY_SYNC_GRACE_MS = 600;
+const PLAYER_MAX_DOWNS_BEFORE_ELIMINATION = 3;
 const DEFAULT_INTERMISSION_DURATION_MS = 30_000;
 const DEFAULT_ROUND_DURATION_MS = 180_000;
 const PLAYER_UPDATE_X = 0;
@@ -149,6 +151,7 @@ export class MyRoom extends Room<MyRoomState> {
   private playerSpawnPoints = DEFAULT_PLAYER_SPAWN_POINTS;
   private nextTargetScanAt = 0;
   private playerRevivedUntil = new Map<string, number>();
+  private playerForcedInjuredUntil = new Map<string, number>();
   private currentPhase: RoundPhase = "waiting";
   private phaseEndsAt = 0;
   private roundIndex = 0;
@@ -176,7 +179,9 @@ export class MyRoom extends Room<MyRoomState> {
       if (!player) return;
       const now = Date.now();
       const revivedUntil = this.playerRevivedUntil.get(client.sessionId) ?? 0;
+      const forcedInjuredUntil = this.playerForcedInjuredUntil.get(client.sessionId) ?? 0;
       const ignoreStaleInjuredState = revivedUntil > now;
+      const keepAuthoritativeInjuredState = forcedInjuredUntil > now;
       const playerUpdate = message as PlayerUpdateMessage;
       const wasInjured = player.isInjured;
 
@@ -184,6 +189,36 @@ export class MyRoom extends Room<MyRoomState> {
       player.cameraRotationX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_X, "cameraRotationX");
       player.cameraRotationY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_Y, "cameraRotationY");
       player.timestamp = now;
+
+      if (player.isEliminated) {
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.velocityZ = 0;
+        player.animInputX = 0;
+        player.animInputY = 0;
+        player.moveInputX = 0;
+        player.moveInputY = 0;
+        player.isJumping = false;
+        player.isInjured = true;
+        player.isHitReacting = false;
+        player.hitReactionTimeRemaining = 0;
+        player.hitReactionPitch = 0;
+        player.hitReactionRoll = 0;
+        player.hitReactionSeed = 0;
+        player.isCrouching = false;
+        player.isWallRunning = false;
+        player.wallRunSide = 0;
+        return;
+      }
+
+      if (this.currentPhase !== "round") {
+        player.isInjured = false;
+        player.isHitReacting = false;
+        player.hitReactionTimeRemaining = 0;
+        player.hitReactionPitch = 0;
+        player.hitReactionRoll = 0;
+        player.hitReactionSeed = 0;
+      }
 
       // Position & Rotation
       player.x = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_X, "x");
@@ -201,7 +236,9 @@ export class MyRoom extends Room<MyRoomState> {
       player.animInputY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_Y, "animInputY");
       player.isGrounded = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_GROUNDED, "isGrounded");
       player.isJumping = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_JUMPING, "isJumping");
-      player.isInjured = ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_INJURED, "isInjured");
+      player.isInjured = keepAuthoritativeInjuredState
+        ? true
+        : (ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_INJURED, "isInjured"));
       player.isCrouching = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_CROUCHING, "isCrouching");
       player.isWallRunning = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_WALL_RUNNING, "isWallRunning");
       player.wallRunSide = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_WALL_RUN_SIDE, "wallRunSide");
@@ -213,6 +250,14 @@ export class MyRoom extends Room<MyRoomState> {
       player.hitReactionPitch = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_PITCH, "hitReactionPitch");
       player.hitReactionRoll = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_ROLL, "hitReactionRoll");
       player.hitReactionSeed = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_SEED, "hitReactionSeed");
+
+      if (keepAuthoritativeInjuredState) {
+        player.isHitReacting = false;
+        player.hitReactionTimeRemaining = 0;
+        player.hitReactionPitch = 0;
+        player.hitReactionRoll = 0;
+        player.hitReactionSeed = 0;
+      }
 
       if (player.isBeingCarried) {
         player.velocityX = 0;
@@ -257,7 +302,7 @@ export class MyRoom extends Room<MyRoomState> {
         return;
       }
 
-      if (reviver.isInjured || reviver.isHitReacting || !target.isInjured) {
+      if (reviver.isInjured || reviver.isHitReacting || reviver.isEliminated || !target.isInjured || target.isEliminated) {
         return;
       }
 
@@ -268,12 +313,14 @@ export class MyRoom extends Room<MyRoomState> {
 
       this.clearCarryStateForPlayer(target.sessionId);
       target.isInjured = false;
+      target.isEliminated = false;
       target.isHitReacting = false;
       target.hitReactionTimeRemaining = 0;
       target.hitReactionPitch = 0;
       target.hitReactionRoll = 0;
       target.hitReactionSeed = 0;
       this.playerRevivedUntil.set(targetSessionId, Date.now() + PLAYER_REVIVE_SYNC_GRACE_MS);
+      this.playerForcedInjuredUntil.delete(targetSessionId);
       this.recordPlayerRevived(targetSessionId, Date.now());
       const reviverStats = this.roundStats.get(client.sessionId);
       if (reviverStats != null && this.currentPhase === "round") {
@@ -293,7 +340,7 @@ export class MyRoom extends Room<MyRoomState> {
         return;
       }
 
-      if (carrier.isInjured || carrier.isHitReacting || target.isHitReacting || !target.isInjured) {
+      if (carrier.isInjured || carrier.isHitReacting || carrier.isEliminated || target.isHitReacting || !target.isInjured || target.isEliminated) {
         return;
       }
 
@@ -404,6 +451,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.state.players.delete(client.sessionId);
     this.playerSafeUntil.delete(client.sessionId);
     this.playerRevivedUntil.delete(client.sessionId);
+    this.playerForcedInjuredUntil.delete(client.sessionId);
     this.roundStats.delete(client.sessionId);
 
     // If no players left, reset game state
@@ -451,6 +499,7 @@ export class MyRoom extends Room<MyRoomState> {
     player.isBeingCarried = false;
     player.carriedPlayerSessionId = "";
     player.carrierSessionId = "";
+    player.isEliminated = false;
   }
 
   update(deltaTime: number) {
@@ -462,7 +511,7 @@ export class MyRoom extends Room<MyRoomState> {
       return;
     }
 
-    const shouldActivateNextbots = this.state.isGameStarted && this.state.players.size > 0;
+    const shouldActivateNextbots = this.state.isGameStarted && this.getReadyPlayerCount() > 0;
     this.setAllNextbotsActive(shouldActivateNextbots);
 
     if (!shouldActivateNextbots) {
@@ -663,12 +712,19 @@ export class MyRoom extends Room<MyRoomState> {
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
 
-    if (distance > NEXTBOT_INJURY_DISTANCE || now < controller.nextInjuryAt || target.isInjured || target.isHitReacting) {
+    if (distance > NEXTBOT_INJURY_DISTANCE || now < controller.nextInjuryAt || target.isInjured || target.isHitReacting || target.isEliminated) {
       return;
     }
 
     controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
     this.recordPlayerDowned(target.sessionId, now);
+    target.isInjured = true;
+    target.isHitReacting = false;
+    target.hitReactionTimeRemaining = 0;
+    target.hitReactionPitch = 0;
+    target.hitReactionRoll = 0;
+    target.hitReactionSeed = 0;
+    this.playerForcedInjuredUntil.set(target.sessionId, now + PLAYER_INJURY_SYNC_GRACE_MS);
     target.hitTriggerId += 1;
     target.hitSourceX = nextbot.x;
     target.hitSourceY = nextbot.y;
@@ -713,6 +769,14 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private isScoreEligibleTarget(player: Player, now: number, nextbot: NextbotState) {
+    if (!player.isReady) {
+      return false;
+    }
+
+    if (player.isEliminated) {
+      return false;
+    }
+
     const safeUntil = this.playerSafeUntil.get(player.sessionId) ?? 0;
     if (safeUntil > now) {
       return false;
@@ -894,6 +958,17 @@ export class MyRoom extends Room<MyRoomState> {
     this.beginIntermission(Date.now());
   }
 
+  private getReadyPlayerCount() {
+    let readyPlayerCount = 0;
+    this.state.players.forEach((player) => {
+      if (player.isReady) {
+        readyPlayerCount += 1;
+      }
+    });
+
+    return readyPlayerCount;
+  }
+
   private updateRoundFlow(now: number) {
     if (this.state.players.size === 0) {
       return;
@@ -952,6 +1027,7 @@ export class MyRoom extends Room<MyRoomState> {
       player.velocityY = 0;
       player.velocityZ = 0;
       player.isInjured = false;
+      player.isEliminated = false;
       player.isHitReacting = false;
       player.hitReactionTimeRemaining = 0;
       player.hitReactionPitch = 0;
@@ -970,6 +1046,7 @@ export class MyRoom extends Room<MyRoomState> {
       player.moveInputY = 0;
       this.playerSafeUntil.set(player.sessionId, now + this.intermissionDurationMs + NEXTBOT_START_GRACE_MS);
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
+      this.playerForcedInjuredUntil.delete(player.sessionId);
     });
 
     this.sendRoundPlayerResetMessages();
@@ -987,7 +1064,15 @@ export class MyRoom extends Room<MyRoomState> {
       }
 
       this.clearCarryStateForPlayer(player.sessionId);
+      const spawnPosition = this.getPlayerSpawnPosition(player.sessionId);
+      player.x = spawnPosition.x;
+      player.y = spawnPosition.y;
+      player.z = spawnPosition.z;
+      player.velocityX = 0;
+      player.velocityY = 0;
+      player.velocityZ = 0;
       player.isInjured = false;
+      player.isEliminated = false;
       player.isHitReacting = false;
       player.hitReactionTimeRemaining = 0;
       player.hitReactionPitch = 0;
@@ -997,9 +1082,17 @@ export class MyRoom extends Room<MyRoomState> {
       player.hitSourceX = 0;
       player.hitSourceY = 0;
       player.hitSourceZ = 0;
+      player.isGrounded = true;
       player.timestamp = now;
+      player.isJumping = false;
+      player.isCrouching = false;
+      player.isWallRunning = false;
+      player.wallRunSide = 0;
+      player.moveInputX = 0;
+      player.moveInputY = 0;
       this.playerSafeUntil.set(player.sessionId, safeUntil);
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
+      this.playerForcedInjuredUntil.delete(player.sessionId);
     });
 
     this.sendRoundPlayerResetMessages();
@@ -1036,6 +1129,29 @@ export class MyRoom extends Room<MyRoomState> {
     stats.bestTimeMs = Math.max(stats.bestTimeMs, runTime);
     stats.downedCount += 1;
     stats.currentLifeStartMs = null;
+
+    const player = this.state.players.get(sessionId);
+    if (player != null && stats.downedCount >= PLAYER_MAX_DOWNS_BEFORE_ELIMINATION) {
+      this.clearCarryStateForPlayer(sessionId);
+      player.isEliminated = true;
+      player.isInjured = true;
+      player.isHitReacting = false;
+      player.hitReactionTimeRemaining = 0;
+      player.hitReactionPitch = 0;
+      player.hitReactionRoll = 0;
+      player.hitReactionSeed = 0;
+      player.velocityX = 0;
+      player.velocityY = 0;
+      player.velocityZ = 0;
+      player.animInputX = 0;
+      player.animInputY = 0;
+      player.moveInputX = 0;
+      player.moveInputY = 0;
+      player.isJumping = false;
+      player.isCrouching = false;
+      player.isWallRunning = false;
+      player.wallRunSide = 0;
+    }
   }
 
   private recordPlayerRevived(sessionId: string, now: number) {

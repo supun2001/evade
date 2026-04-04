@@ -41,9 +41,20 @@ public class LobbyUI : MonoBehaviour
     private bool _menuEventsBound;
     private readonly List<UIToolkitButton> _hoverButtons = new();
     private const string DefaultMenuHoverText = "Pick what you want to do next";
-    private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.08f, 1.08f, 1f));
+    private const float MenuHoverLabelFadeSpeed = 7f;
+    private const string JoinGameCardResourcePath = "UI/JoinGameCard";
+    private const string ShopCardResourcePath = "UI/ShopCard";
+    private const string InventoryCardResourcePath = "UI/InventoryCard";
+    private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
+    private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
     private static readonly Scale DefaultButtonScale = new Scale(Vector3.one);
+    private static Texture2D s_joinGameCardTexture;
+    private static Texture2D s_shopCardTexture;
+    private static Texture2D s_inventoryCardTexture;
+    private string _pendingHoverLabelText = DefaultMenuHoverText;
+    private float _currentHoverLabelOpacity;
+    private float _targetHoverLabelOpacity;
     #endregion
 
     #region Class Methods
@@ -80,6 +91,8 @@ public class LobbyUI : MonoBehaviour
                 AutoStartJoinedRoom();
             }
         }
+
+        UpdateHoverLabelFade();
     }
     
     private void OnDestroy()
@@ -105,6 +118,11 @@ public class LobbyUI : MonoBehaviour
 
     private void SwitchToMenu()
     {
+        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
+        {
+            NetworkManager.Instance.SendReadyState(false);
+        }
+
         menuPanel.SetActive(true);
         RefreshMenuUiBindings();
         hasAutoReadiedCurrentRoom = false;
@@ -234,6 +252,11 @@ public class LobbyUI : MonoBehaviour
         if (menuPanel != null) menuPanel.SetActive(false);
         hasAutoReadiedCurrentRoom = true;
 
+        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
+        {
+            NetworkManager.Instance.SendReadyState(true);
+        }
+
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(false);
         
         // Lock cursor for gameplay
@@ -279,6 +302,8 @@ public class LobbyUI : MonoBehaviour
 
         ConfigureMenuButtonDescriptions();
         RefreshGraphicsSettingsUi();
+        ApplyMenuArt();
+        ResetHoverLabelVisual();
     }
 
     private void RefreshMenuUiBindings()
@@ -428,10 +453,7 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_spectateButton, "Watch the current match");
         SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
 
-        if (_menuHoverLabel != null)
-        {
-            _menuHoverLabel.text = DefaultMenuHoverText;
-        }
+        _pendingHoverLabelText = DefaultMenuHoverText;
     }
 
     private static void SetMenuButtonDescription(UIToolkitButton button, string description)
@@ -469,14 +491,12 @@ public class LobbyUI : MonoBehaviour
             button.UnregisterCallback<PointerEnterEvent>(HandleMenuButtonPointerEnter);
             button.UnregisterCallback<PointerLeaveEvent>(HandleMenuButtonPointerLeave);
             button.style.scale = new StyleScale(DefaultButtonScale);
+            ApplyButtonHoverVisual(button, false);
         }
 
         _hoverButtons.Clear();
-
-        if (_menuHoverLabel != null)
-        {
-            _menuHoverLabel.text = DefaultMenuHoverText;
-        }
+        _pendingHoverLabelText = DefaultMenuHoverText;
+        _targetHoverLabelOpacity = 0f;
     }
 
     private void RegisterHoverButton(UIToolkitButton button)
@@ -501,11 +521,14 @@ public class LobbyUI : MonoBehaviour
         }
 
         button.style.scale = new StyleScale(GetHoverScale(button));
+        ApplyButtonHoverVisual(button, true);
 
+        _pendingHoverLabelText = button.userData as string ?? DefaultMenuHoverText;
         if (_menuHoverLabel != null)
         {
-            _menuHoverLabel.text = button.userData as string ?? DefaultMenuHoverText;
+            _menuHoverLabel.text = _pendingHoverLabelText;
         }
+        _targetHoverLabelOpacity = 1f;
     }
 
     private void HandleMenuButtonPointerLeave(PointerLeaveEvent evt)
@@ -517,11 +540,9 @@ public class LobbyUI : MonoBehaviour
         }
 
         button.style.scale = new StyleScale(DefaultButtonScale);
-
-        if (_menuHoverLabel != null)
-        {
-            _menuHoverLabel.text = DefaultMenuHoverText;
-        }
+        ApplyButtonHoverVisual(button, false);
+        _pendingHoverLabelText = DefaultMenuHoverText;
+        _targetHoverLabelOpacity = 0f;
     }
 
     private static Scale GetHoverScale(UIToolkitButton button)
@@ -531,9 +552,156 @@ public class LobbyUI : MonoBehaviour
             return HoverButtonScale;
         }
 
-        return string.Equals(button.name, "start-button", StringComparison.Ordinal)
-            ? LargeHoverButtonScale
-            : HoverButtonScale;
+        if (string.Equals(button.name, "start-button", StringComparison.Ordinal))
+        {
+            return LargeHoverButtonScale;
+        }
+
+        if (string.Equals(button.name, "shop-button", StringComparison.Ordinal)
+            || string.Equals(button.name, "inventory-button", StringComparison.Ordinal))
+        {
+            return FeaturedSideHoverButtonScale;
+        }
+
+        return HoverButtonScale;
+    }
+
+    private void ResetHoverLabelVisual()
+    {
+        _currentHoverLabelOpacity = 0f;
+        _targetHoverLabelOpacity = 0f;
+
+        if (_menuHoverLabel != null)
+        {
+            _menuHoverLabel.text = _pendingHoverLabelText;
+            _menuHoverLabel.style.opacity = 0f;
+        }
+    }
+
+    private void ApplyMenuArt()
+    {
+        if (_startButton == null)
+        {
+            return;
+        }
+
+        if (s_joinGameCardTexture == null)
+        {
+            s_joinGameCardTexture = Resources.Load<Texture2D>(JoinGameCardResourcePath);
+        }
+
+        if (s_shopCardTexture == null)
+        {
+            s_shopCardTexture = Resources.Load<Texture2D>(ShopCardResourcePath);
+        }
+
+        if (s_inventoryCardTexture == null)
+        {
+            s_inventoryCardTexture = Resources.Load<Texture2D>(InventoryCardResourcePath);
+        }
+
+        if (s_joinGameCardTexture != null)
+        {
+            _startButton.style.backgroundImage = new StyleBackground(s_joinGameCardTexture);
+            _startButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        }
+
+        if (_shopButton != null && s_shopCardTexture != null)
+        {
+            _shopButton.style.backgroundImage = new StyleBackground(s_shopCardTexture);
+            _shopButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        }
+
+        if (_inventoryButton != null && s_inventoryCardTexture != null)
+        {
+            _inventoryButton.style.backgroundImage = new StyleBackground(s_inventoryCardTexture);
+            _inventoryButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        }
+    }
+
+    private void UpdateHoverLabelFade()
+    {
+        if (_menuHoverLabel == null)
+        {
+            return;
+        }
+
+        float nextOpacity = Mathf.MoveTowards(_currentHoverLabelOpacity, _targetHoverLabelOpacity, Time.unscaledDeltaTime * MenuHoverLabelFadeSpeed);
+        if (Mathf.Approximately(nextOpacity, _currentHoverLabelOpacity))
+        {
+            return;
+        }
+
+        _currentHoverLabelOpacity = nextOpacity;
+
+        if (_currentHoverLabelOpacity <= 0.0001f)
+        {
+            _menuHoverLabel.text = _pendingHoverLabelText;
+        }
+
+        _menuHoverLabel.style.opacity = _currentHoverLabelOpacity;
+    }
+
+    private static void ApplyButtonHoverVisual(UIToolkitButton button, bool hovered)
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        Color borderColor = hovered ? new Color(1f, 1f, 1f, 0.95f) : GetDefaultButtonBorderColor(button.name);
+        Color backgroundColor = hovered ? GetHoveredButtonBackgroundColor(button.name) : GetDefaultButtonBackgroundColor(button.name);
+
+        button.style.borderLeftColor = borderColor;
+        button.style.borderRightColor = borderColor;
+        button.style.borderTopColor = borderColor;
+        button.style.borderBottomColor = borderColor;
+        button.style.backgroundColor = backgroundColor;
+    }
+
+    private static Color GetDefaultButtonBorderColor(string buttonName)
+    {
+        return buttonName switch
+        {
+            "start-button" => new Color(239f / 255f, 186f / 255f, 101f / 255f, 0.84f),
+            "shop-button" => new Color(84f / 255f, 223f / 255f, 83f / 255f, 0.72f),
+            "inventory-button" => new Color(240f / 255f, 101f / 255f, 111f / 255f, 0.72f),
+            "spectate-button" => new Color(154f / 255f, 124f / 255f, 1f, 0.5f),
+            "settings-button" => new Color(1f, 1f, 1f, 0.18f),
+            "graphics-low-button" => new Color(1f, 1f, 1f, 0f),
+            "graphics-medium-button" => new Color(1f, 1f, 1f, 0f),
+            _ => new Color(1f, 1f, 1f, 0.2f),
+        };
+    }
+
+    private static Color GetDefaultButtonBackgroundColor(string buttonName)
+    {
+        return buttonName switch
+        {
+            "start-button" => new Color(0f, 0f, 0f, 0.08f),
+            "shop-button" => new Color(16f / 255f, 24f / 255f, 20f / 255f, 0.9f),
+            "inventory-button" => new Color(26f / 255f, 14f / 255f, 16f / 255f, 0.9f),
+            "spectate-button" => new Color(18f / 255f, 18f / 255f, 20f / 255f, 0.88f),
+            "settings-button" => new Color(8f / 255f, 12f / 255f, 18f / 255f, 0.9f),
+            "graphics-low-button" => new Color(58f / 255f, 92f / 255f, 44f / 255f, 0.95f),
+            "graphics-medium-button" => new Color(67f / 255f, 84f / 255f, 122f / 255f, 0.95f),
+            _ => new Color(0.1f, 0.1f, 0.1f, 0.9f),
+        };
+    }
+
+    private static Color GetHoveredButtonBackgroundColor(string buttonName)
+    {
+        return buttonName switch
+        {
+            "start-button" => new Color(0f, 0f, 0f, 0.02f),
+            "shop-button" => new Color(20f / 255f, 30f / 255f, 24f / 255f, 0.96f),
+            "inventory-button" => new Color(31f / 255f, 18f / 255f, 21f / 255f, 0.96f),
+            "spectate-button" => new Color(24f / 255f, 22f / 255f, 30f / 255f, 0.95f),
+            "settings-button" => new Color(16f / 255f, 18f / 255f, 24f / 255f, 0.95f),
+            "graphics-low-button" => new Color(78f / 255f, 118f / 255f, 62f / 255f, 0.98f),
+            "graphics-medium-button" => new Color(86f / 255f, 103f / 255f, 142f / 255f, 0.98f),
+            _ => new Color(0.16f, 0.16f, 0.16f, 0.95f),
+        };
     }
 
     private void ApplyGraphicsQuality(string qualityName)

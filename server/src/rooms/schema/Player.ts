@@ -51,4 +51,5 @@ export class Player extends Schema {
     @type("boolean") isBeingCarried: boolean = false;
     @type("string") carriedPlayerSessionId: string = "";
     @type("string") carrierSessionId: string = "";
+    @type("boolean") isEliminated: boolean = false;
 }
