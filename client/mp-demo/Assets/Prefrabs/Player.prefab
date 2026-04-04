@@ -190,6 +190,8 @@ MonoBehaviour:
   sprintSpeed: 34
   _injuredMoveSpeed: 1.75
   _crouchMoveSpeed: 2
+  _crouchRunSlowdownDuration: 3
+  _crouchRunEnterMinSpeed: 4
   autoSprintDelay: 3
   drag: 45
   gravity: 20

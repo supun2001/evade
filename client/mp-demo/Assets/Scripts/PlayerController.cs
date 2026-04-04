@@ -28,6 +28,9 @@ public class PlayerController : MonoBehaviour
     public float sprintSpeed = 7f;
     [SerializeField] private float _injuredMoveSpeed = 1.75f;
     [SerializeField] private float _crouchMoveSpeed = 2f;
+    [SerializeField, Min(0.01f)] private float _crouchRunHoldDuration = 3f;
+    [SerializeField, Min(0.01f)] private float _crouchRunAnimationDuration = 0.4f;
+    [SerializeField, Min(0f)] private float _crouchRunEnterMinSpeed = 4f;
     public float autoSprintDelay = 5f;
     public float drag = 0.1f;
     public float gravity = 25f;
@@ -227,6 +230,10 @@ public class PlayerController : MonoBehaviour
     private float _verticalVelocity = 0f;
     private Vector3 _horizontalVelocity = Vector3.zero;
     private float _runHeldTime = 0f;
+    private float _crouchRunTimer;
+    private float _crouchRunAnimationTimer;
+    private float _crouchRunStartMoveSpeed;
+    private bool _isCrouchRunning;
     private float _speedBoostMultiplier = 1f;
     private float _speedBoostExpiresAt = -1f;
     private float _jumpBoostMultiplier = 1f;
@@ -655,9 +662,14 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateAutoSprint()
     {
-        if (IsInjured() || IsCrouching() || _isCarryingPlayer || _isBeingCarried)
+        if (IsInjured() || (IsCrouching() && !_isCrouchRunning) || _isCarryingPlayer || _isBeingCarried)
         {
             _runHeldTime = 0f;
+            return;
+        }
+
+        if (_isCrouchRunning)
+        {
             return;
         }
 
@@ -3408,6 +3420,15 @@ public class PlayerController : MonoBehaviour
             return baseSpeed * GetActiveSpeedBoostMultiplier();
         }
 
+        if (_isCrouchRunning)
+        {
+            float crouchRunProgress = _crouchRunHoldDuration <= 0.01f
+                ? 1f
+                : 1f - Mathf.Clamp01(_crouchRunTimer / _crouchRunHoldDuration);
+            baseSpeed = Mathf.Lerp(_crouchRunStartMoveSpeed, _crouchMoveSpeed, crouchRunProgress);
+            return baseSpeed * GetActiveSpeedBoostMultiplier();
+        }
+
         if (IsCrouching())
         {
             baseSpeed = _crouchMoveSpeed;
@@ -3788,6 +3809,16 @@ public class PlayerController : MonoBehaviour
         return _isCrouching;
     }
 
+    public bool IsCrouchRunning()
+    {
+        return _isCrouchRunning;
+    }
+
+    public bool IsCrouchRunAnimationActive()
+    {
+        return _crouchRunAnimationTimer > 0f;
+    }
+
     private bool IsInjured()
     {
         return _playerAnimation != null && _playerAnimation.IsInjuredActive;
@@ -3795,12 +3826,62 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateCrouchState()
     {
-        _isCrouching =
+        bool crouchPressedThisFrame = Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame;
+        bool crouchHeld = Keyboard.current != null && Keyboard.current.cKey.isPressed;
+        bool canStartCrouchRun = crouchPressedThisFrame
+            && !IsInjured()
+            && !_isCarryingPlayer
+            && !_isBeingCarried
+            && IsGrounded()
+            && GetHorizontalSpeed() >= Mathf.Max(_crouchMoveSpeed, _crouchRunEnterMinSpeed);
+
+        if (canStartCrouchRun)
+        {
+            float uncrouchedMoveSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
+            _crouchRunStartMoveSpeed = Mathf.Max(uncrouchedMoveSpeed, GetHorizontalSpeed());
+            _crouchRunTimer = Mathf.Max(0.01f, _crouchRunHoldDuration);
+            _crouchRunAnimationTimer = Mathf.Max(0.01f, _crouchRunAnimationDuration);
+            _isCrouchRunning = true;
+        }
+
+        if (_isCrouchRunning)
+        {
+            if (!crouchHeld)
+            {
+                _isCrouchRunning = false;
+                _crouchRunTimer = 0f;
+                _crouchRunAnimationTimer = 0f;
+                _isCrouching = false;
+                _crouchRunStartMoveSpeed = 0f;
+                return;
+            }
+
+            _crouchRunTimer = Mathf.Max(0f, _crouchRunTimer - Time.deltaTime);
+            _crouchRunAnimationTimer = Mathf.Max(0f, _crouchRunAnimationTimer - Time.deltaTime);
+            if (_crouchRunTimer <= 0f)
+            {
+                _isCrouchRunning = false;
+                _crouchRunTimer = 0f;
+                _crouchRunAnimationTimer = 0f;
+                _crouchRunStartMoveSpeed = 0f;
+            }
+        }
+
+        bool shouldCrouch =
             !IsInjured()
             && !_isCarryingPlayer
             && !_isBeingCarried
-            && Keyboard.current != null
-            && Keyboard.current.cKey.isPressed;
+            && (crouchHeld || _isCrouchRunning);
+
+        _isCrouching = shouldCrouch;
+
+        if (!_isCrouching)
+        {
+            _isCrouchRunning = false;
+            _crouchRunTimer = 0f;
+            _crouchRunAnimationTimer = 0f;
+            _crouchRunStartMoveSpeed = 0f;
+        }
     }
 
     private void UpdateWallRunState()

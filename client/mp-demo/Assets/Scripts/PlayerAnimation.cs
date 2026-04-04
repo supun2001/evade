@@ -16,6 +16,8 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private float _landingGroundedBuffer = 0.05f;
     [SerializeField] private float _injuredReleaseBlendDuration = 0.16f;
     [SerializeField] private float _crouchReleaseBlendDuration = 0.12f;
+    [SerializeField] private float _crouchRunEnterTransitionDuration = 0.06f;
+    [SerializeField] private float _crouchRunExitTransitionDuration = 0.16f;
     [SerializeField] private float _wallRunAnimationExitBuffer = 0.04f;
     [SerializeField] private float _networkAnimationBlendSpeed = 18f;
     [SerializeField] private float _networkAnimationReleaseSpeed = 32f;
@@ -37,6 +39,7 @@ public class PlayerAnimation : MonoBehaviour
     private const string IN_AIR_STATE = "Base Layer.InAir";
     private const string IDLE_RUN_STATE = "Base Layer.Idle/Run";
     private const string CROUCH_STATE = "Base Layer.Crouch";
+    private const string CROUCH_RUNNING_STATE = "Base Layer.CrouchRunning";
     private const string CARRYING_ME_STATE = "Base Layer.Carrying";
     private const string CARRYING_IDLE_STATE = "Base Layer.CarryingIdle";
     private const string CARRYING_RUN_STATE = "Base Layer.CarryingRun";
@@ -319,8 +322,9 @@ public class PlayerAnimation : MonoBehaviour
         bool isBeingCarriedActive = IsBeingCarriedActive;
         bool isInjuredActive = IsInjuredActive && !isCarryingActive && !isBeingCarriedActive;
         bool isCrouchingActive = IsCrouchingActive && !isCarryingActive && !isBeingCarriedActive;
+        bool isCrouchRunningActive = !_useNetworkAnimationState && _playerController != null && _playerController.IsCrouchRunAnimationActive();
         targetAnimator.SetBool(_injuredHash, isInjuredActive);
-        targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive);
+        targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive && !isCrouchRunningActive);
 
         if (isBeingCarriedActive)
         {
@@ -345,6 +349,31 @@ public class PlayerAnimation : MonoBehaviour
 
         if (ApplyCarryRecoveryState(targetAnimator, isGrounded, verticalSpeed, isInjuredActive, isCrouchingActive))
         {
+            return;
+        }
+
+        if (isGrounded && isCrouchRunningActive)
+        {
+            CrossFadeIfNeeded(targetAnimator, CROUCH_RUNNING_STATE, _crouchRunEnterTransitionDuration);
+            return;
+        }
+
+        if (isGrounded && isCrouchingActive)
+        {
+            float crouchTransitionDuration = targetAnimator.GetCurrentAnimatorStateInfo(0).IsName(CROUCH_RUNNING_STATE)
+                ? _crouchRunExitTransitionDuration
+                : 0.05f;
+            CrossFadeIfNeeded(targetAnimator, CROUCH_STATE, crouchTransitionDuration);
+            return;
+        }
+
+        AnimatorStateInfo currentState = targetAnimator.GetCurrentAnimatorStateInfo(0);
+        if (currentState.IsName(CROUCH_RUNNING_STATE))
+        {
+            string recoveryState = isGrounded
+                ? IDLE_RUN_STATE
+                : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
+            CrossFadeIfNeeded(targetAnimator, recoveryState, _crouchRunExitTransitionDuration);
             return;
         }
 
@@ -685,7 +714,7 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         string recoveryState = isGrounded
-            ? IDLE_RUN_STATE
+            ? (isCrouchingActive ? CROUCH_STATE : IDLE_RUN_STATE)
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.06f);
