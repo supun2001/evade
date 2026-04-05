@@ -71,7 +71,6 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _downedControllerRadius = 0.7f;
     [SerializeField] private Vector3 _downedControllerCenter = new Vector3(0f, 0.82f, 0f);
     [SerializeField] private float _downedControllerBlend = 12f;
-    [SerializeField] private bool _enableDebugInjureHotkey = true;
 
     [Header("Injured Interaction Prompt")]
     [SerializeField] private float _injuredInteractionPromptDistance = 5f;
@@ -448,7 +447,6 @@ public class PlayerController : MonoBehaviour
 
         _jumpedThisFrame = false;
         HandlePauseMenuToggle();
-        HandleDebugInjureHotkey();
         UpdateForcedCameraViewState();
         UpdateCrouchState();
         UpdateDownedCollisionShape();
@@ -534,18 +532,6 @@ public class PlayerController : MonoBehaviour
             _preferredViewMode = nextView;
             SetCameraView(nextView);
         }
-    }
-
-    private void HandleDebugInjureHotkey()
-    {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        if (!_enableDebugInjureHotkey || _isPauseMenuOpen || Keyboard.current == null || !Keyboard.current.fKey.wasPressedThisFrame)
-        {
-            return;
-        }
-
-        SetDebugInjuredState(!IsInjured());
-#endif
     }
 
     private void HandleInjuredInteractionInput()

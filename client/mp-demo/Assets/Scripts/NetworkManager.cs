@@ -18,6 +18,12 @@ public struct PlayerSpawnPointConfig
     public Vector3 position;
 }
 
+[Serializable]
+public struct NextbotPatrolPointConfig
+{
+    public Vector3 position;
+}
+
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
@@ -49,6 +55,19 @@ public class NetworkManager : MonoBehaviour
         new PlayerSpawnPointConfig { position = new Vector3(0f, 0f, -6f) },
         new PlayerSpawnPointConfig { position = new Vector3(2f, 0f, -6f) },
         new PlayerSpawnPointConfig { position = new Vector3(-2f, 0f, -6f) },
+    };
+    [Tooltip("Server-authoritative patrol points that idle nextbots will roam between across the map.")]
+    [SerializeField] private List<NextbotPatrolPointConfig> nextbotPatrolPoints = new()
+    {
+        new NextbotPatrolPointConfig { position = new Vector3(-10f, 0f, -10f) },
+        new NextbotPatrolPointConfig { position = new Vector3(0f, 0f, -10f) },
+        new NextbotPatrolPointConfig { position = new Vector3(10f, 0f, -10f) },
+        new NextbotPatrolPointConfig { position = new Vector3(-10f, 0f, 0f) },
+        new NextbotPatrolPointConfig { position = new Vector3(0f, 0f, 0f) },
+        new NextbotPatrolPointConfig { position = new Vector3(10f, 0f, 0f) },
+        new NextbotPatrolPointConfig { position = new Vector3(-10f, 0f, 10f) },
+        new NextbotPatrolPointConfig { position = new Vector3(0f, 0f, 10f) },
+        new NextbotPatrolPointConfig { position = new Vector3(10f, 0f, 10f) },
     };
     [Header("Round Timing")]
     [Tooltip("How long the intermission lasts before the round starts.")]
@@ -387,6 +406,18 @@ public class NetworkManager : MonoBehaviour
             });
         }
 
+        List<object> serializedPatrolPoints = new List<object>();
+        for (int i = 0; i < nextbotPatrolPoints.Count; i++)
+        {
+            Vector3 point = nextbotPatrolPoints[i].position;
+            serializedPatrolPoints.Add(new Dictionary<string, object>
+            {
+                ["x"] = point.x,
+                ["y"] = point.y,
+                ["z"] = point.z,
+            });
+        }
+
         List<object> serializedNextbotIds = BuildSerializedNextbotIds();
         List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
 
@@ -396,6 +427,7 @@ public class NetworkManager : MonoBehaviour
             ["nextbotIds"] = serializedNextbotIds,
             ["nextbotConfigs"] = serializedNextbotConfigs,
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
+            ["nextbotPatrolPoints"] = serializedPatrolPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
         };

@@ -10,6 +10,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _roomStatePositionLerpSpeed = 12f;
     [SerializeField] private float _roomStateRotationLerpSpeed = 14f;
     [SerializeField] private float _roomStateSnapDistance = 1.1f;
+    [SerializeField] private float _roomStateChaseResyncDistance = 12f;
 
     [Header("Follow")]
     [SerializeField] private float _moveSpeed = 10f;
@@ -198,8 +199,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (useRoomStateAuthority)
         {
-            UpdateFromRoomState(assignedNextbotState);
-            return true;
+            return UpdateFromRoomState(assignedNextbotState);
         }
 
         if (_useRoomStateAuthority && roomState != null)
@@ -331,21 +331,20 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
     }
 
-    private void UpdateFromRoomState(NextbotState nextbotState)
+    private bool UpdateFromRoomState(NextbotState nextbotState)
     {
         bool isActive = nextbotState != null && nextbotState.isActive;
         SetServerVisualState(isActive);
 
-        ClearTarget();
-        StopAgent();
-        _isJumping = false;
-        _jumpVelocity = Vector3.zero;
-        _isTraversingOffMeshLink = false;
-
         if (!isActive || nextbotState == null)
         {
+            ClearTarget();
+            StopAgent();
+            _isJumping = false;
+            _jumpVelocity = Vector3.zero;
+            _isTraversingOffMeshLink = false;
             _hasAppliedRoomState = false;
-            return;
+            return true;
         }
 
         Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
@@ -354,6 +353,35 @@ public class NextbotFollowPlayer : MonoBehaviour
             targetPosition.y = groundedTargetPosition.y;
         }
         Quaternion targetRotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
+
+        if (TryGetServerAssignedTarget(nextbotState.targetSessionId, out Transform targetTransform, out PlayerController targetController))
+        {
+            if (!_hasAppliedRoomState || Vector3.Distance(transform.position, targetPosition) >= Mathf.Max(_roomStateSnapDistance, _roomStateChaseResyncDistance))
+            {
+                transform.position = targetPosition;
+                transform.rotation = targetRotation;
+                if (_navMeshAgent != null && _navMeshAgent.enabled)
+                {
+                    EnsureAgentOnNavMesh();
+                    if (_navMeshAgent.isOnNavMesh)
+                    {
+                        _navMeshAgent.Warp(targetPosition);
+                        _navMeshAgent.nextPosition = targetPosition;
+                    }
+                }
+            }
+
+            _hasAppliedRoomState = true;
+            EnableAgentDrivenChase();
+            AssignTarget(targetTransform, targetController);
+            return false;
+        }
+
+        ClearTarget();
+        StopAgent();
+        _isJumping = false;
+        _jumpVelocity = Vector3.zero;
+        _isTraversingOffMeshLink = false;
 
         if (!_hasAppliedRoomState)
         {
@@ -364,7 +392,7 @@ public class NextbotFollowPlayer : MonoBehaviour
                 _navMeshAgent.nextPosition = targetPosition;
             }
             _hasAppliedRoomState = true;
-            return;
+            return true;
         }
 
         float positionError = Vector3.Distance(transform.position, targetPosition);
@@ -376,7 +404,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             {
                 _navMeshAgent.nextPosition = targetPosition;
             }
-            return;
+            return true;
         }
 
         float positionBlend = 1f - Mathf.Exp(-_roomStatePositionLerpSpeed * Time.deltaTime);
@@ -387,6 +415,8 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             _navMeshAgent.nextPosition = transform.position;
         }
+
+        return true;
     }
 
     private MyRoomState GetRoomState()
@@ -413,6 +443,11 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void RefreshTargetIfNeeded()
     {
+        if (_roomStateAuthorityActive)
+        {
+            return;
+        }
+
         if (!_followNearestPlayer)
         {
             return;
@@ -650,6 +685,45 @@ public class NextbotFollowPlayer : MonoBehaviour
         _targetLockedUntil = 0f;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
+    }
+
+    private bool TryGetServerAssignedTarget(string targetSessionId, out Transform targetTransform, out PlayerController targetController)
+    {
+        targetTransform = null;
+        targetController = null;
+
+        if (string.IsNullOrWhiteSpace(targetSessionId))
+        {
+            return false;
+        }
+
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null || !networkManager.TryGetPlayerObject(targetSessionId, out GameObject playerObject) || playerObject == null)
+        {
+            return false;
+        }
+
+        targetController = playerObject.GetComponent<PlayerController>();
+        if (targetController == null || !targetController.enabled || targetController.IsInjuredOrHitReacting())
+        {
+            return false;
+        }
+
+        targetTransform = targetController.transform;
+        return targetTransform != null;
+    }
+
+    private void EnableAgentDrivenChase()
+    {
+        if (_navMeshAgent == null || !_navMeshAgent.enabled)
+        {
+            return;
+        }
+
+        EnsureAgentOnNavMesh();
+        _navMeshAgent.updatePosition = true;
+        _navMeshAgent.updateRotation = false;
+        _navMeshAgent.isStopped = false;
     }
 
     private void UpdateMovement()

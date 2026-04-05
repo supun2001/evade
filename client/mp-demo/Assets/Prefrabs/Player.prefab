@@ -228,7 +228,6 @@ MonoBehaviour:
   _downedControllerRadius: 0.85
   _downedControllerCenter: {x: 0, y: 1.92, z: 0}
   _downedControllerBlend: 12
-  _enableDebugInjureHotkey: 1
   _injuredInteractionPromptDistance: 5
   _injuredInteractionPromptHeightTolerance: 1.75
   _reviveHoldDuration: 2.5

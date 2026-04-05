@@ -132,6 +132,7 @@ MonoBehaviour:
   _roomStatePositionLerpSpeed: 12
   _roomStateRotationLerpSpeed: 14
   _roomStateSnapDistance: 1.1
+  _roomStateChaseResyncDistance: 12
   _moveSpeed: 25
   _acceleration: 18
   _rotationSpeed: 10
@@ -153,20 +154,20 @@ MonoBehaviour:
     m_Bits: 64
   _eyeHeight: 1.25
   _targetEyeHeight: 1
-  _navMeshSnapDistance: 8
+  _navMeshSnapDistance: 20
   _useOffMeshLinks: 1
-  _offMeshLinkDuration: 0.35
+  _offMeshLinkDuration: 0.25
   _offMeshLinkArcHeight: 1.2
   _allowLedgeJump: 1
-  _jumpForwardSpeed: 8
-  _jumpUpwardSpeed: 5
-  _maxJumpDistance: 6
-  _maxJumpUpHeight: 2.5
-  _maxJumpDownHeight: 8
-  _landingSnapDistance: 1.5
-  _edgeJumpMinDrop: 0.75
+  _jumpForwardSpeed: 12
+  _jumpUpwardSpeed: 7
+  _maxJumpDistance: 12
+  _maxJumpUpHeight: 4
+  _maxJumpDownHeight: 12
+  _landingSnapDistance: 2.5
+  _edgeJumpMinDrop: 0.2
   _edgeStuckVelocity: 0.2
-  _lockToStartingHeight: 1
+  _lockToStartingHeight: 0
   _gravity: 20
   _hitDistance: 1.6
   _hitCooldown: 1.25
@@ -192,7 +193,7 @@ NavMeshAgent:
   m_Enabled: 1
   m_AgentTypeID: 0
   m_Radius: 0.55
-  m_Speed: 10
+  m_Speed: 25
   m_Acceleration: 18
   avoidancePriority: 50
   m_AngularSpeed: 450
