@@ -4,6 +4,7 @@ import { Player } from "./schema/Player";
 import { NextbotState } from "./schema/NextbotState";
 
 const NEXTBOTS_ENABLED = true;
+const MAX_ACTIVE_NEXTBOTS = 5;
 const DEFAULT_NEXTBOT_SPAWN_POINTS = [
   { x: 6.45, y: 0, z: -2.38 },
   { x: -6.45, y: 0, z: 2.38 },
@@ -1172,7 +1173,7 @@ export class MyRoom extends Room<MyRoomState> {
   private resolveNextbotIds(options: any): string[] {
     const candidateIds = options?.nextbotIds;
     if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
-      return DEFAULT_NEXTBOT_IDS;
+      return DEFAULT_NEXTBOT_IDS.slice(0, MAX_ACTIVE_NEXTBOTS);
     }
 
     const parsedIds = candidateIds
@@ -1180,10 +1181,33 @@ export class MyRoom extends Room<MyRoomState> {
       .filter((id) => id.length > 0);
 
     if (parsedIds.length === 0) {
-      return DEFAULT_NEXTBOT_IDS;
+      return DEFAULT_NEXTBOT_IDS.slice(0, MAX_ACTIVE_NEXTBOTS);
     }
 
-    return parsedIds;
+    const uniqueIds: string[] = [];
+    const seenIds = new Set<string>();
+    for (let index = 0; index < parsedIds.length; index++) {
+      const id = parsedIds[index];
+      if (seenIds.has(id)) {
+        continue;
+      }
+
+      seenIds.add(id);
+      uniqueIds.push(id);
+    }
+
+    if (uniqueIds.length <= MAX_ACTIVE_NEXTBOTS) {
+      return uniqueIds;
+    }
+
+    for (let index = uniqueIds.length - 1; index > 0; index--) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      const currentId = uniqueIds[index];
+      uniqueIds[index] = uniqueIds[swapIndex];
+      uniqueIds[swapIndex] = currentId;
+    }
+
+    return uniqueIds.slice(0, MAX_ACTIVE_NEXTBOTS);
   }
 
   private resolveNextbotMoveSpeeds(options: any, nextbotIds: string[]): Map<string, number> {

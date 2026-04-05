@@ -48,3 +48,31 @@ MonoBehaviour:
     tint: {r: 1, g: 1, b: 1, a: 1}
     speed: 20
     loopPitch: 1
+  - nextbotId: Scooby
+    displayName: Scooby
+    iconTexture: {fileID: 2800000, guid: f6bba114ddc5b41e396eb2d842915833, type: 3}
+    loopClip: {fileID: 8300000, guid: bd7f171c04c0c45dc9d472a672ec01f2, type: 3}
+    tint: {r: 1, g: 1, b: 1, a: 1}
+    speed: 20
+    loopPitch: 1
+  - nextbotId: Tyler
+    displayName: Tyler
+    iconTexture: {fileID: 2800000, guid: 76ee5a197844a4925ba0c503110bf881, type: 3}
+    loopClip: {fileID: 8300000, guid: 4a9079e93558a421b91b687e84aa50bf, type: 3}
+    tint: {r: 1, g: 1, b: 1, a: 1}
+    speed: 20
+    loopPitch: 1
+  - nextbotId: SB
+    displayName: SB
+    iconTexture: {fileID: 2800000, guid: 08169ad282fe74a5b8c446a834d15884, type: 3}
+    loopClip: {fileID: 8300000, guid: 4c768e433fa6b4f71b8de84df7a2fe13, type: 3}
+    tint: {r: 1, g: 1, b: 1, a: 1}
+    speed: 20
+    loopPitch: 1
+  - nextbotId: Sm
+    displayName: Sm
+    iconTexture: {fileID: 2800000, guid: 49b110bf48b05401494d3d79c024dc6c, type: 3}
+    loopClip: {fileID: 8300000, guid: 81824e5261fdf45608cfdfcc741b1caa, type: 3}
+    tint: {r: 1, g: 1, b: 1, a: 1}
+    speed: 20
+    loopPitch: 1
