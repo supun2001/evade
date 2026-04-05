@@ -140,4 +140,7 @@ public Player() { }
 
 	[Type(41, "number")]
 	public float jumpBoostTimeRemaining = default(float);
+
+	[Type(42, "boolean")]
+	public bool isSpectator = default(bool);
 	}

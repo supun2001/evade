@@ -56,4 +56,5 @@ export class Player extends Schema {
     @type("number") speedBoostTimeRemaining: number = 0;
     @type("number") jumpBoostMultiplier: number = 1;
     @type("number") jumpBoostTimeRemaining: number = 0;
+    @type("boolean") isSpectator: boolean = false;
 }

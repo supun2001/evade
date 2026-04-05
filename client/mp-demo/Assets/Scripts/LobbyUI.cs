@@ -46,6 +46,8 @@ public class LobbyUI : MonoBehaviour
     private SliderInt _graphicsVolumeSlider;
     private bool _settingsPopupVisible;
     private bool _menuEventsBound;
+    private bool _pendingSpectateJoin;
+    private bool _isSpectatingFromMenu;
     private readonly List<UIToolkitButton> _hoverButtons = new();
     private readonly Dictionary<UIToolkitButton, Vector3> _buttonCurrentScales = new();
     private readonly Dictionary<UIToolkitButton, Vector3> _buttonTargetScales = new();
@@ -94,9 +96,18 @@ public class LobbyUI : MonoBehaviour
 
     private void Update()
     {
+        if (_isSpectatingFromMenu && menuPanel != null && !menuPanel.activeSelf)
+        {
+            SetLocalPlayerSpectating(true);
+        }
+
         if (NetworkManager.Instance != null && !string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId))
         {
-            if (menuPanel.activeSelf)
+            if (_pendingSpectateJoin)
+            {
+                ActivateSpectateMode();
+            }
+            else if (menuPanel.activeSelf)
             {
                 AutoStartJoinedRoom();
             }
@@ -129,15 +140,19 @@ public class LobbyUI : MonoBehaviour
 
     private void SwitchToMenu()
     {
+        _pendingSpectateJoin = false;
+        _isSpectatingFromMenu = false;
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
             NetworkManager.Instance.SendReadyState(false);
+            NetworkManager.Instance.SendSpectatorState(true);
         }
 
         menuPanel.SetActive(true);
         RefreshMenuUiBindings();
         hasAutoReadiedCurrentRoom = false;
         SetLocalPlayerInput(false);
+        SetLocalPlayerSpectating(false);
         SetStartButtonEnabled(true);
         
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
@@ -151,12 +166,19 @@ public class LobbyUI : MonoBehaviour
 
     private void AutoStartJoinedRoom()
     {
+        if (_pendingSpectateJoin || _isSpectatingFromMenu)
+        {
+            ActivateSpectateMode();
+            return;
+        }
+
         menuPanel.SetActive(false);
 
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(false);
 
         if (!hasAutoReadiedCurrentRoom && NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
+            NetworkManager.Instance.SendSpectatorState(false);
             NetworkManager.Instance.SendReadyState(true);
             hasAutoReadiedCurrentRoom = true;
         }
@@ -167,7 +189,7 @@ public class LobbyUI : MonoBehaviour
     #region Button Clicks
     private void OnLobbyStateChange(MyRoomState state, bool isFirstState)
     {
-        if (state.isGameStarted && menuPanel.activeSelf)
+        if (state.isGameStarted && menuPanel.activeSelf && !_pendingSpectateJoin && !_isSpectatingFromMenu)
         {
             Debug.Log("LobbyUI: Room is already in-game. Starting for late joiner...");
             OnGameStarted();
@@ -260,14 +282,18 @@ public class LobbyUI : MonoBehaviour
 
     public void OnGameStarted()
     {
+        _pendingSpectateJoin = false;
+        _isSpectatingFromMenu = false;
         if (menuPanel != null) menuPanel.SetActive(false);
         hasAutoReadiedCurrentRoom = true;
 
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
+            NetworkManager.Instance.SendSpectatorState(false);
             NetworkManager.Instance.SendReadyState(true);
         }
 
+        SetLocalPlayerSpectating(false);
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(false);
         
         // Lock cursor for gameplay
@@ -427,11 +453,33 @@ public class LobbyUI : MonoBehaviour
     {
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
-            Debug.LogWarning("LobbyUI: Already in a room. Ignoring Start request.");
+            OnGameStarted();
             return;
         }
 
         OnStartClicked();
+    }
+
+    private async void HandleSpectateButtonClicked()
+    {
+        _pendingSpectateJoin = true;
+
+        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
+        {
+            ActivateSpectateMode();
+            return;
+        }
+
+        string error = await NetworkManager.Instance.JoinOrCreateGame();
+        if (string.IsNullOrEmpty(error))
+        {
+            SaveAndSyncSkin();
+            ActivateSpectateMode();
+            return;
+        }
+
+        _pendingSpectateJoin = false;
+        ShowNotification($"Spectate Failed: {error}");
     }
 
     private void SetStartButtonEnabled(bool enabled)
@@ -503,14 +551,34 @@ public class LobbyUI : MonoBehaviour
     {
         BindComingSoonAction(_shopButton);
         BindComingSoonAction(_inventoryButton);
-        BindPlaceholderAction(_spectateButton);
+        BindSpectateAction();
     }
 
     private void UnbindPlaceholderActions()
     {
         UnbindComingSoonAction(_shopButton);
         UnbindComingSoonAction(_inventoryButton);
-        UnbindPlaceholderAction(_spectateButton);
+        UnbindSpectateAction();
+    }
+
+    private void BindSpectateAction()
+    {
+        if (_spectateButton == null)
+        {
+            return;
+        }
+
+        _spectateButton.clicked += HandleSpectateButtonClicked;
+    }
+
+    private void UnbindSpectateAction()
+    {
+        if (_spectateButton == null)
+        {
+            return;
+        }
+
+        _spectateButton.clicked -= HandleSpectateButtonClicked;
     }
 
     private void BindComingSoonAction(UIToolkitButton button)
@@ -978,6 +1046,93 @@ public class LobbyUI : MonoBehaviour
                 input.InputEnabled = enabled;
             }
         }
+    }
+
+    private void SetLocalPlayerSpectating(bool enabled)
+    {
+        GameObject localPlayer = GameObject.Find("LocalPlayer");
+        if (localPlayer == null)
+        {
+            return;
+        }
+
+        PlayerController controller = localPlayer.GetComponent<PlayerController>();
+        if (controller == null)
+        {
+            return;
+        }
+
+        PlayerLocomotionInput input = localPlayer.GetComponent<PlayerLocomotionInput>();
+
+        if (enabled)
+        {
+            if (input != null)
+            {
+                input.InputEnabled = true;
+            }
+
+            if (!controller.IsSpectating())
+            {
+                controller.EnterSpectateMode();
+            }
+        }
+        else
+        {
+            if (input != null)
+            {
+                input.InputEnabled = false;
+            }
+
+            if (controller.IsSpectating())
+            {
+                controller.ExitSpectateMode();
+            }
+        }
+    }
+
+    private void ActivateSpectateMode()
+    {
+        _pendingSpectateJoin = false;
+        _isSpectatingFromMenu = true;
+        hasAutoReadiedCurrentRoom = false;
+
+        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
+        {
+            NetworkManager.Instance.SendSpectatorState(true);
+            NetworkManager.Instance.SendReadyState(false);
+        }
+
+        if (menuPanel != null)
+        {
+            menuPanel.SetActive(false);
+        }
+
+        if (lobbyCamera != null)
+        {
+            lobbyCamera.gameObject.SetActive(false);
+        }
+
+        SetLocalPlayerInput(true);
+        SetLocalPlayerSpectating(true);
+
+        UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+        UnityEngine.Cursor.visible = false;
+    }
+
+    public void HandleStartGameSignal()
+    {
+        if (_pendingSpectateJoin || _isSpectatingFromMenu)
+        {
+            ActivateSpectateMode();
+            return;
+        }
+
+        if (menuPanel != null && menuPanel.activeSelf && !hasAutoReadiedCurrentRoom)
+        {
+            return;
+        }
+
+        OnGameStarted();
     }
 
 

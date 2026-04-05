@@ -135,12 +135,21 @@ public class NetworkManager : MonoBehaviour
 
     private void OnPlayerAdded(string id, Player player)
     {
+        if (players.ContainsKey(id))
+        {
+            return;
+        }
+
+        bool isLocal = id == room.SessionId;
+        if (player != null && player.isSpectator && !isLocal)
+        {
+            return;
+        }
+
         Debug.Log($"Player added: {id}");
         Vector3 pos = new Vector3(player.x, player.y, player.z);
         GameObject obj = Instantiate(playerPrefab, pos, Quaternion.identity);
-        
-        bool isLocal = id == room.SessionId;
-        
+
         NetworkPlayer np = obj.GetComponent<NetworkPlayer>();
         if (np == null) np = obj.AddComponent<NetworkPlayer>();
         np.Initialize(player, isLocal);
@@ -186,7 +195,53 @@ public class NetworkManager : MonoBehaviour
 
     private void OnStateChange(MyRoomState state, bool isFirstState)
     {
-        // Occurs when the room state is updated
+        ReconcilePlayerRepresentations(state);
+    }
+
+    private void ReconcilePlayerRepresentations(MyRoomState state)
+    {
+        if (state?.players == null || room == null)
+        {
+            return;
+        }
+
+        List<string> existingSessionIds = new List<string>(players.Keys);
+        for (int i = 0; i < existingSessionIds.Count; i++)
+        {
+            string sessionId = existingSessionIds[i];
+            bool hasStatePlayer = state.players.TryGetValue(sessionId, out Player syncedPlayer) && syncedPlayer != null;
+            bool isLocal = string.Equals(sessionId, room.SessionId, StringComparison.Ordinal);
+            bool shouldExist = hasStatePlayer && (!syncedPlayer.isSpectator || isLocal);
+
+            if (!shouldExist && players.TryGetValue(sessionId, out GameObject existingObject))
+            {
+                if (existingObject != null)
+                {
+                    Destroy(existingObject);
+                }
+
+                players.Remove(sessionId);
+            }
+        }
+
+        foreach (string sessionId in state.players.Keys)
+        {
+            if (!state.players.TryGetValue(sessionId, out Player syncedPlayer) || syncedPlayer == null)
+            {
+                continue;
+            }
+
+            bool isLocal = string.Equals(sessionId, room.SessionId, StringComparison.Ordinal);
+            if (syncedPlayer.isSpectator && !isLocal)
+            {
+                continue;
+            }
+
+            if (!players.ContainsKey(sessionId))
+            {
+                OnPlayerAdded(sessionId, syncedPlayer);
+            }
+        }
     }
 
     public void SendPlayerUpdate(
@@ -286,6 +341,12 @@ public class NetworkManager : MonoBehaviour
     {
         if (room == null) return;
         room.Send("playerReady", isReady);
+    }
+
+    public void SendSpectatorState(bool isSpectating)
+    {
+        if (room == null) return;
+        room.Send("playerSpectating", isSpectating);
     }
 
     public void SendReviveRequest(string targetSessionId)
@@ -573,7 +634,7 @@ public class NetworkManager : MonoBehaviour
             LobbyUI lobby = FindObjectOfType<LobbyUI>();
             if (lobby != null)
             {
-                lobby.OnGameStarted();
+                lobby.HandleStartGameSignal();
             }
 
             if (!_hasReceivedRoundPhaseFromServer)

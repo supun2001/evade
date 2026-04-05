@@ -17,6 +17,14 @@ public class PlayerController : MonoBehaviour
         ThirdPerson
     }
 
+    private struct SpectateTarget
+    {
+        public string Key;
+        public string Label;
+        public Transform Transform;
+        public bool IsNextbot;
+    }
+
     #region Class Variables
     [Header("Components")]
     [SerializeField] private CharacterController _characterController;
@@ -123,6 +131,14 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _zoomFieldOfView = 35f;
     [SerializeField] private float _zoomSmoothSpeed = 10f;
 
+    [Header("Spectate")]
+    [SerializeField] private Vector3 _spectatePlayerOffset = new Vector3(0f, 2.1f, -4.75f);
+    [SerializeField] private Vector3 _spectateNextbotOffset = new Vector3(0f, 2.4f, -5.5f);
+    [SerializeField] private float _spectateCameraMoveSpeed = 10f;
+    [SerializeField] private float _spectateCameraRotateSpeed = 12f;
+    [SerializeField] private float _spectateTargetRefreshInterval = 0.35f;
+    [SerializeField] private string _spectateCameraName = "SpecCamera";
+
     [Header("Sprint Arms")]
     [SerializeField] private string _leftArmBoneName = "arm-left";
     [SerializeField] private string _rightArmBoneName = "arm-right";
@@ -202,6 +218,8 @@ public class PlayerController : MonoBehaviour
     private Transform _cameraTransform;
     private Transform _gameplayCameraTransform;
     private Camera _gameplayCamera;
+    private Camera _spectateCamera;
+    private Transform _spectateCameraTransform;
     private PlayerAnimation _playerAnimation;
     private Transform _injuredVisualRoot;
     private UIDocument _playerHudDocument;
@@ -232,6 +250,8 @@ public class PlayerController : MonoBehaviour
     private AudioSource _footstepAudioSource;
     private AudioSource _pickupAudioSource;
     private AudioSource _hurtAudioSource;
+    private AudioListener _gameplayAudioListener;
+    private AudioListener _spectateAudioListener;
     private Coroutine _pickupAudioStopCoroutine;
     
     private Vector2 _cameraRotation = Vector2.zero;
@@ -373,6 +393,13 @@ public class PlayerController : MonoBehaviour
     private float _lastAppliedRemoteHitReactionSeed = float.NaN;
     private int _rampLayer = -1;
     private float _lastRampTouchTime = float.NegativeInfinity;
+    private bool _isSpectating;
+    private string _spectateTargetKey;
+    private float _nextSpectateRefreshTime;
+    private readonly System.Collections.Generic.List<SpectateTarget> _spectateTargets = new();
+    private bool _spectateCharacterControllerWasEnabled;
+    private bool _spectateVisualRootWasActive = true;
+    private static readonly Vector3 SpectatorHiddenPosition = new Vector3(0f, -500f, 0f);
     #endregion
 
     #region Setup
@@ -387,10 +414,15 @@ public class PlayerController : MonoBehaviour
         _cinemachineCamera = GetComponentInChildren<CinemachineCamera>(true);
         _gameplayCamera = FindGameplayCamera();
         _gameplayCameraTransform = _gameplayCamera != null ? _gameplayCamera.transform : null;
+        _spectateCamera = FindSpectateCamera();
+        _spectateCameraTransform = _spectateCamera != null ? _spectateCamera.transform : null;
         _playerHudDocument = GetComponentInChildren<UIDocument>(true);
         _cinemachineBrain = _gameplayCamera != null ? _gameplayCamera.GetComponent<CinemachineBrain>() : null;
+        _gameplayAudioListener = _gameplayCamera != null ? _gameplayCamera.GetComponent<AudioListener>() : null;
+        _spectateAudioListener = _spectateCamera != null ? _spectateCamera.GetComponent<AudioListener>() : null;
         _defaultNearClipPlane = _gameplayCamera != null ? _gameplayCamera.nearClipPlane : 0.3f;
         _defaultFieldOfView = _gameplayCamera != null ? _gameplayCamera.fieldOfView : 60f;
+        SetSpectateCameraActive(false);
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
         CacheArmTransforms();
@@ -443,10 +475,17 @@ public class PlayerController : MonoBehaviour
 
     #region Update
     private void Update() {
-        if (!_playerLocomotionInput.InputEnabled) return;
-
         _jumpedThisFrame = false;
         HandlePauseMenuToggle();
+
+        if (_isSpectating)
+        {
+            UpdateSpectateMode();
+            return;
+        }
+
+        if (!_playerLocomotionInput.InputEnabled) return;
+
         UpdateForcedCameraViewState();
         UpdateCrouchState();
         UpdateDownedCollisionShape();
@@ -515,6 +554,30 @@ public class PlayerController : MonoBehaviour
         {
             SetPauseMenuVisible(!_isPauseMenuOpen);
         }
+    }
+
+    private void UpdateSpectateMode()
+    {
+        SetLocalSpectatorBodyVisible(false);
+        UpdateSpectateTargetsIfNeeded();
+        HandleSpectateTargetCyclingInput();
+        UpdateSpectateLook();
+        UpdateSpectateCameraFollow();
+        UpdateSpeedHud();
+        UpdateCrosshairVisibility();
+        UpdateNextbotWarningIndicator();
+    }
+
+    private void UpdateSpectateLook()
+    {
+        if (_playerLocomotionInput == null)
+        {
+            return;
+        }
+
+        Vector2 lookInput = _playerLocomotionInput.LookInput;
+        _cameraRotation.x += lookSenseH * lookInput.x;
+        _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, -lookLimitV, lookLimitV);
     }
 
     private void HandleViewToggle()
@@ -629,6 +692,14 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateForcedCameraViewState(bool forceImmediate = false)
     {
+        if (_isSpectating)
+        {
+            SetThirdPersonCameraActive(false);
+            SetSpectateCameraActive(true);
+            SetLocalSpectatorBodyVisible(false);
+            return;
+        }
+
         bool shouldForceThirdPerson = ShouldForceThirdPersonView();
 
         if (shouldForceThirdPerson)
@@ -688,6 +759,11 @@ public class PlayerController : MonoBehaviour
 
     private void LateUpdate() {
         if (_isPauseMenuOpen)
+        {
+            return;
+        }
+
+        if (_isSpectating)
         {
             return;
         }
@@ -1202,6 +1278,15 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        if (_isSpectating)
+        {
+            SpectateTarget? activeTarget = GetActiveSpectateTarget();
+            _speedLabel.text = activeTarget.HasValue
+                ? $"Spectating {activeTarget.Value.Label}"
+                : "Spectating";
+            return;
+        }
+
         _speedLabel.text = $"Speed {GetHorizontalSpeed():0.0}";
     }
 
@@ -1245,7 +1330,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        if (_isPauseMenuOpen || IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried)
+        if (_isSpectating || _isPauseMenuOpen || IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried)
         {
             SetInjuredInteractionPromptVisible(false);
             return;
@@ -1271,7 +1356,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        bool shouldShowCrosshair = !_isPauseMenuOpen && !IsInjuredOrHitReacting();
+        bool shouldShowCrosshair = !_isSpectating && !_isPauseMenuOpen && !IsInjuredOrHitReacting();
         _crosshairDotElement.style.display = shouldShowCrosshair ? DisplayStyle.Flex : DisplayStyle.None;
     }
 
@@ -1286,7 +1371,8 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        if (_isPauseMenuOpen
+        if (_isSpectating
+            || _isPauseMenuOpen
             || _gameplayCamera == null
             || _playerHudDocument == null
             || !TryGetNearestActiveNextbotPosition(out Vector3 nextbotPosition))
@@ -1826,7 +1912,8 @@ public class PlayerController : MonoBehaviour
         SetPauseMenuDisplay(visible);
         RefreshPauseMenuSettingsUi();
 
-        UnityEngine.Cursor.lockState = visible ? CursorLockMode.None : CursorLockMode.Locked;
+        bool shouldLockCursor = !visible;
+        UnityEngine.Cursor.lockState = shouldLockCursor ? CursorLockMode.Locked : CursorLockMode.None;
         UnityEngine.Cursor.visible = visible;
     }
 
@@ -1935,17 +2022,61 @@ public class PlayerController : MonoBehaviour
         Camera[] cameras = GetComponentsInChildren<Camera>(true);
         foreach (Camera childCamera in cameras)
         {
-            if (childCamera != _playerCamera)
+            if (childCamera == null || childCamera == _playerCamera)
+            {
+                continue;
+            }
+
+            if (string.Equals(childCamera.gameObject.name, _spectateCameraName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(childCamera.gameObject.tag, "MainCamera", StringComparison.Ordinal) || string.Equals(childCamera.gameObject.name, "Main Camera", StringComparison.Ordinal))
             {
                 return childCamera;
             }
         }
 
+        foreach (Camera childCamera in cameras)
+        {
+            if (childCamera == null || childCamera == _playerCamera)
+            {
+                continue;
+            }
+
+            if (string.Equals(childCamera.gameObject.name, _spectateCameraName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return childCamera;
+        }
+
         return _playerCamera;
+    }
+
+    private Camera FindSpectateCamera()
+    {
+        Camera[] cameras = GetComponentsInChildren<Camera>(true);
+        foreach (Camera childCamera in cameras)
+        {
+            if (childCamera != null && string.Equals(childCamera.gameObject.name, _spectateCameraName, StringComparison.Ordinal))
+            {
+                return childCamera;
+            }
+        }
+
+        return null;
     }
 
     private void SetCameraView(CameraViewMode newViewMode, bool force = false)
     {
+        if (_isSpectating)
+        {
+            newViewMode = CameraViewMode.ThirdPerson;
+        }
+
         if (IsInjured() && newViewMode == CameraViewMode.FirstPerson)
         {
             newViewMode = CameraViewMode.ThirdPerson;
@@ -2161,6 +2292,29 @@ public class PlayerController : MonoBehaviour
         if (_cinemachineBrain != null)
         {
             _cinemachineBrain.enabled = isActive;
+        }
+    }
+
+    private void SetSpectateCameraActive(bool isActive)
+    {
+        if (_spectateCamera != null)
+        {
+            _spectateCamera.enabled = isActive;
+        }
+
+        if (_spectateAudioListener != null)
+        {
+            _spectateAudioListener.enabled = isActive;
+        }
+
+        if (_gameplayCamera != null)
+        {
+            _gameplayCamera.enabled = !isActive;
+        }
+
+        if (_gameplayAudioListener != null)
+        {
+            _gameplayAudioListener.enabled = !isActive;
         }
     }
 
@@ -2542,6 +2696,93 @@ public class PlayerController : MonoBehaviour
         }
 
         SetFirstPersonHeadHidden(firstPerson);
+    }
+
+    private void SetLocalSpectatorBodyVisible(bool visible)
+    {
+        if (_playerAnimation != null && _playerAnimation.VisualRootTransform != null)
+        {
+            if (!visible)
+            {
+                _spectateVisualRootWasActive = _playerAnimation.VisualRootTransform.gameObject.activeSelf;
+                _playerAnimation.VisualRootTransform.gameObject.SetActive(false);
+            }
+            else
+            {
+                _playerAnimation.VisualRootTransform.gameObject.SetActive(_spectateVisualRootWasActive);
+            }
+        }
+
+        if (_localRenderers != null)
+        {
+            for (int i = 0; i < _localRenderers.Length; i++)
+            {
+                Renderer renderer = _localRenderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                renderer.enabled = visible && _defaultRendererEnabledStates[i];
+            }
+        }
+
+        if (_firstPersonHiddenRenderers != null)
+        {
+            for (int i = 0; i < _firstPersonHiddenRenderers.Length; i++)
+            {
+                Renderer renderer = _firstPersonHiddenRenderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                renderer.enabled = visible && _defaultHiddenRendererEnabledStates[i];
+            }
+        }
+
+        if (_firstPersonWallHideRenderers != null)
+        {
+            for (int i = 0; i < _firstPersonWallHideRenderers.Length; i++)
+            {
+                Renderer renderer = _firstPersonWallHideRenderers[i];
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                renderer.enabled = visible && _defaultWallHideRendererEnabledStates[i];
+            }
+        }
+
+        if (_characterController != null)
+        {
+            if (!visible)
+            {
+                _spectateCharacterControllerWasEnabled = _characterController.enabled;
+                _characterController.enabled = false;
+            }
+            else
+            {
+                _characterController.enabled = _spectateCharacterControllerWasEnabled;
+            }
+        }
+    }
+
+    private void MoveSpectatorBodyToHiddenPosition()
+    {
+        Transform targetTransform = _transform != null ? _transform : transform;
+
+        if (_characterController != null)
+        {
+            bool wasEnabled = _characterController.enabled;
+            _characterController.enabled = false;
+            targetTransform.SetPositionAndRotation(SpectatorHiddenPosition, Quaternion.identity);
+            _characterController.enabled = wasEnabled;
+            return;
+        }
+
+        targetTransform.SetPositionAndRotation(SpectatorHiddenPosition, Quaternion.identity);
     }
 
     private void SetFirstPersonHeadHidden(bool hidden)
@@ -3511,6 +3752,53 @@ public class PlayerController : MonoBehaviour
         return _cameraRotation;
     }
 
+    public bool IsSpectating()
+    {
+        return _isSpectating;
+    }
+
+    public void EnterSpectateMode()
+    {
+        _isSpectating = true;
+        _spectateTargetKey = null;
+        _nextSpectateRefreshTime = 0f;
+        _isPauseMenuOpen = false;
+        SetPauseMenuDisplay(false);
+        _preferredViewMode = CameraViewMode.ThirdPerson;
+        SetCameraView(CameraViewMode.ThirdPerson, true);
+        SetThirdPersonCameraActive(false);
+        SetSpectateCameraActive(true);
+        SetLocalRenderMode(true);
+        SetLocalSpectatorBodyVisible(false);
+        MoveSpectatorBodyToHiddenPosition();
+        SetFirstPersonWallClipHidden(false);
+        RefreshSpectateTargets(forceReselect: true);
+        UpdateSpectateCameraFollow(forceSnap: true);
+        UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+        UnityEngine.Cursor.visible = false;
+    }
+
+    public void ExitSpectateMode()
+    {
+        if (!_isSpectating)
+        {
+            return;
+        }
+
+        _isSpectating = false;
+        _spectateTargets.Clear();
+        _spectateTargetKey = null;
+        _nextSpectateRefreshTime = 0f;
+        SetSpectateCameraActive(false);
+        if (_networkPlayer != null)
+        {
+            _networkPlayer.ApplyAuthoritativeRoundReset();
+        }
+        SetLocalSpectatorBodyVisible(true);
+        SetCameraView(_preferredViewMode, true);
+        UpdateForcedCameraViewState(forceImmediate: true);
+    }
+
     public bool DidJumpThisFrame()
     {
         return _jumpedThisFrame;
@@ -3991,6 +4279,230 @@ public class PlayerController : MonoBehaviour
     public bool IsCrouching()
     {
         return _isCrouching;
+    }
+
+    private void HandleSpectateTargetCyclingInput()
+    {
+        bool previousPressed = false;
+        bool nextPressed = false;
+
+        if (Keyboard.current != null)
+        {
+            previousPressed = Keyboard.current.qKey.wasPressedThisFrame || Keyboard.current.leftArrowKey.wasPressedThisFrame;
+            nextPressed = Keyboard.current.eKey.wasPressedThisFrame || Keyboard.current.rightArrowKey.wasPressedThisFrame;
+        }
+
+        if (Gamepad.current != null)
+        {
+            previousPressed |= Gamepad.current.leftShoulder.wasPressedThisFrame || Gamepad.current.dpad.left.wasPressedThisFrame;
+            nextPressed |= Gamepad.current.rightShoulder.wasPressedThisFrame || Gamepad.current.dpad.right.wasPressedThisFrame;
+        }
+
+        if (previousPressed)
+        {
+            CycleSpectateTarget(-1);
+        }
+        else if (nextPressed)
+        {
+            CycleSpectateTarget(1);
+        }
+    }
+
+    private void UpdateSpectateTargetsIfNeeded()
+    {
+        if (Time.unscaledTime < _nextSpectateRefreshTime)
+        {
+            return;
+        }
+
+        RefreshSpectateTargets(forceReselect: false);
+        _nextSpectateRefreshTime = Time.unscaledTime + _spectateTargetRefreshInterval;
+    }
+
+    private void RefreshSpectateTargets(bool forceReselect)
+    {
+        _spectateTargets.Clear();
+
+        NetworkManager networkManager = NetworkManager.Instance;
+        MyRoomState roomState = networkManager != null && networkManager.Room != null ? networkManager.Room.State : null;
+        string localSessionId = networkManager != null ? networkManager.LocalSessionId : string.Empty;
+
+        if (roomState != null && roomState.players != null)
+        {
+            foreach (string sessionId in roomState.players.Keys)
+            {
+                if (string.IsNullOrEmpty(sessionId) || string.Equals(sessionId, localSessionId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!networkManager.TryGetPlayerObject(sessionId, out GameObject playerObject) || playerObject == null)
+                {
+                    continue;
+                }
+
+                _spectateTargets.Add(new SpectateTarget
+                {
+                    Key = $"player:{sessionId}",
+                    Label = $"Player {sessionId.Substring(0, Mathf.Min(4, sessionId.Length))}",
+                    Transform = playerObject.transform,
+                    IsNextbot = false,
+                });
+            }
+        }
+
+        NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < nextbots.Length; i++)
+        {
+            NextbotFollowPlayer nextbot = nextbots[i];
+            if (nextbot == null || !nextbot.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            string nextbotId = string.IsNullOrWhiteSpace(nextbot.NetworkNextbotId) ? $"nextbot_{i}" : nextbot.NetworkNextbotId;
+            _spectateTargets.Add(new SpectateTarget
+            {
+                Key = $"nextbot:{nextbotId}",
+                Label = nextbotId,
+                Transform = nextbot.transform,
+                IsNextbot = true,
+            });
+        }
+
+        _spectateTargets.Sort(CompareSpectateTargets);
+
+        if (_spectateTargets.Count == 0)
+        {
+            _spectateTargetKey = null;
+            return;
+        }
+
+        if (forceReselect || string.IsNullOrEmpty(_spectateTargetKey))
+        {
+            _spectateTargetKey = GetPreferredInitialSpectateTargetKey();
+            return;
+        }
+
+        for (int i = 0; i < _spectateTargets.Count; i++)
+        {
+            if (string.Equals(_spectateTargets[i].Key, _spectateTargetKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        _spectateTargetKey = GetPreferredInitialSpectateTargetKey();
+    }
+
+    private void CycleSpectateTarget(int direction)
+    {
+        if (_spectateTargets.Count == 0 || direction == 0)
+        {
+            return;
+        }
+
+        int currentIndex = 0;
+        for (int i = 0; i < _spectateTargets.Count; i++)
+        {
+            if (string.Equals(_spectateTargets[i].Key, _spectateTargetKey, StringComparison.Ordinal))
+            {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        int nextIndex = (currentIndex + direction) % _spectateTargets.Count;
+        if (nextIndex < 0)
+        {
+            nextIndex += _spectateTargets.Count;
+        }
+
+        _spectateTargetKey = _spectateTargets[nextIndex].Key;
+        UpdateSpectateCameraFollow(forceSnap: true);
+    }
+
+    private void UpdateSpectateCameraFollow(bool forceSnap = false)
+    {
+        if (!_isSpectating || _spectateCameraTransform == null)
+        {
+            return;
+        }
+
+        SpectateTarget? activeTarget = GetActiveSpectateTarget();
+        if (activeTarget == null)
+        {
+            return;
+        }
+
+        SpectateTarget target = activeTarget.Value;
+        if (target.Transform == null)
+        {
+            return;
+        }
+
+        Transform targetTransform = target.Transform;
+        Vector3 targetOffset = target.IsNextbot ? _spectateNextbotOffset : _spectatePlayerOffset;
+        Vector3 lookTarget = targetTransform.position + Vector3.up * (target.IsNextbot ? 1.2f : 1.4f);
+        Quaternion orbitRotation = Quaternion.Euler(_cameraRotation.y, _cameraRotation.x, 0f);
+        Vector3 desiredPosition = lookTarget + orbitRotation * targetOffset;
+        Quaternion desiredRotation = Quaternion.LookRotation((lookTarget - desiredPosition).normalized, Vector3.up);
+
+        SetThirdPersonCameraActive(false);
+        SetSpectateCameraActive(true);
+
+        if (forceSnap)
+        {
+            _spectateCameraTransform.position = desiredPosition;
+            _spectateCameraTransform.rotation = desiredRotation;
+            return;
+        }
+
+        float positionBlend = 1f - Mathf.Exp(-_spectateCameraMoveSpeed * Time.unscaledDeltaTime);
+        float rotationBlend = 1f - Mathf.Exp(-_spectateCameraRotateSpeed * Time.unscaledDeltaTime);
+        _spectateCameraTransform.position = Vector3.Lerp(_spectateCameraTransform.position, desiredPosition, positionBlend);
+        _spectateCameraTransform.rotation = Quaternion.Slerp(_spectateCameraTransform.rotation, desiredRotation, rotationBlend);
+    }
+
+    private SpectateTarget? GetActiveSpectateTarget()
+    {
+        if (_spectateTargets.Count == 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < _spectateTargets.Count; i++)
+        {
+            if (string.Equals(_spectateTargets[i].Key, _spectateTargetKey, StringComparison.Ordinal))
+            {
+                return _spectateTargets[i];
+            }
+        }
+
+        return _spectateTargets[0];
+    }
+
+    private int CompareSpectateTargets(SpectateTarget left, SpectateTarget right)
+    {
+        if (left.IsNextbot != right.IsNextbot)
+        {
+            return left.IsNextbot ? 1 : -1;
+        }
+
+        return string.Compare(left.Label, right.Label, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetPreferredInitialSpectateTargetKey()
+    {
+        for (int i = 0; i < _spectateTargets.Count; i++)
+        {
+            if (!_spectateTargets[i].IsNextbot)
+            {
+                return _spectateTargets[i].Key;
+            }
+        }
+
+        return _spectateTargets[0].Key;
     }
 
     public bool IsCrouchRunning()

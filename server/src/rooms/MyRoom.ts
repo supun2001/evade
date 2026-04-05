@@ -319,6 +319,9 @@ export class MyRoom extends Room<MyRoomState> {
     this.onMessage("playerReady", (client, isReady) => {
       const player = this.state.players.get(client.sessionId);
       if (player) {
+        if (isReady) {
+          player.isSpectator = false;
+        }
         player.isReady = isReady;
 
         // Check if all players are ready
@@ -328,6 +331,32 @@ export class MyRoom extends Room<MyRoomState> {
         });
 
         this.tryStartRoundLoop();
+      }
+    });
+
+    this.onMessage("playerSpectating", (client, isSpectating) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) {
+        return;
+      }
+
+      player.isSpectator = !!isSpectating;
+      if (player.isSpectator) {
+        player.isReady = false;
+        player.isInjured = false;
+        player.isEliminated = false;
+        player.isHitReacting = false;
+        player.hitReactionTimeRemaining = 0;
+        player.hitReactionPitch = 0;
+        player.hitReactionRoll = 0;
+        player.hitReactionSeed = 0;
+        player.isCarrying = false;
+        player.isBeingCarried = false;
+        player.carriedPlayerSessionId = "";
+        player.carrierSessionId = "";
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.velocityZ = 0;
       }
     });
 
@@ -433,10 +462,8 @@ export class MyRoom extends Room<MyRoomState> {
     const player = new Player();
     player.sessionId = client.sessionId;
 
-    // Late joiners are automatically ready after the room flow has started.
-    if (this.currentPhase !== "waiting" || this.hasStartedMatchFlow) {
-      player.isReady = true;
-    }
+    player.isReady = false;
+    player.isSpectator = false;
 
     const joinOrder = this.nextJoinOrder;
     const spawnPosition = this.getPlayerSpawnPosition(client.sessionId);
@@ -856,6 +883,10 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private isScoreEligibleTarget(player: Player, now: number, nextbot: NextbotState) {
+    if (player.isSpectator) {
+      return false;
+    }
+
     if (!player.isReady) {
       return false;
     }
@@ -1291,6 +1322,10 @@ export class MyRoom extends Room<MyRoomState> {
 
     let allReady = true;
     this.state.players.forEach((player) => {
+      if (player.isSpectator) {
+        return;
+      }
+
       if (!player.isReady) {
         allReady = false;
       }
@@ -1311,7 +1346,7 @@ export class MyRoom extends Room<MyRoomState> {
   private getReadyPlayerCount() {
     let readyPlayerCount = 0;
     this.state.players.forEach((player) => {
-      if (player.isReady) {
+      if (player.isReady && !player.isSpectator) {
         readyPlayerCount += 1;
       }
     });

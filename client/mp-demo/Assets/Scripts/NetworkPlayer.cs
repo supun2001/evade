@@ -91,6 +91,11 @@ public class NetworkPlayer : MonoBehaviour
 
         if (isLocal)
         {
+            if (controller != null && controller.IsSpectating())
+            {
+                return;
+            }
+
             if (playerState.isEliminated && controller != null)
             {
                 controller.ApplyNetworkEliminated();

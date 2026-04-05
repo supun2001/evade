@@ -124,6 +124,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _defaultLoopPitch = 1f;
     private float _defaultMoveSpeed = 10f;
 
+    public string NetworkNextbotId => _networkNextbotId;
+
     private void Awake()
     {
         _defaultLoopClip = _loopClip;
