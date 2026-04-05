@@ -9,17 +9,6 @@ const DEFAULT_NEXTBOT_SPAWN_POINTS = [
   { x: -6.45, y: 0, z: 2.38 },
   { x: 0, y: 0, z: 7.5 },
 ];
-const DEFAULT_NEXTBOT_PATROL_POINTS = [
-  { x: -10, y: 0, z: -10 },
-  { x: 0, y: 0, z: -10 },
-  { x: 10, y: 0, z: -10 },
-  { x: -10, y: 0, z: 0 },
-  { x: 0, y: 0, z: 0 },
-  { x: 10, y: 0, z: 0 },
-  { x: -10, y: 0, z: 10 },
-  { x: 0, y: 0, z: 10 },
-  { x: 10, y: 0, z: 10 },
-];
 const DEFAULT_NEXTBOT_IDS = ["nextbot_0", "nextbot_1", "nextbot_2", "nextbot_3", "nextbot_4"];
 const DEFAULT_PLAYER_SPAWN_POINTS = [
   { x: 0, y: 0, z: -6 },
@@ -53,6 +42,8 @@ const NEXTBOT_FRONT_ANGLE_THRESHOLD = 85;
 const NEXTBOT_PATROL_REACHED_DISTANCE = 1.1;
 const NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE = 6;
 const NEXTBOT_PATROL_BOUNDS_PADDING = 2;
+const NEXTBOT_PATROL_SEPARATION_RADIUS = 6;
+const NEXTBOT_PATROL_CANDIDATE_SAMPLES = 40;
 const NEXTBOT_PATROL_WAIT_MIN_MS = 1000;
 const NEXTBOT_PATROL_WAIT_MAX_MS = 2000;
 const PLAYER_REVIVE_DISTANCE = 6;
@@ -171,7 +162,7 @@ export class MyRoom extends Room<MyRoomState> {
   state = new MyRoomState();
   private playerSafeUntil = new Map<string, number>();
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
-  private nextbotPatrolPoints = DEFAULT_NEXTBOT_PATROL_POINTS;
+  private nextbotPatrolPoints: SpawnPoint[] = [];
   private nextbotIds = DEFAULT_NEXTBOT_IDS;
   private nextbotMoveSpeeds = new Map<string, number>();
   private nextbotControllers: NextbotControllerState[] = [];
@@ -985,7 +976,7 @@ export class MyRoom extends Room<MyRoomState> {
     for (let index = 0; index < this.nextbotControllers.length; index++) {
       const controller = this.nextbotControllers[index];
       const spawnPoint = this.getNextbotSpawnPoint(controller.spawnIndex);
-      const patrolTarget = this.getRandomPatrolTarget(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+      const patrolTarget = this.getRandomPatrolTarget(spawnPoint.x, spawnPoint.y, spawnPoint.z, controller);
       controller.patrolTargetX = patrolTarget.x;
       controller.patrolTargetY = patrolTarget.y;
       controller.patrolTargetZ = patrolTarget.z;
@@ -994,7 +985,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private setNextPatrolTargetFromCurrentPosition(controller: NextbotControllerState, nextbot: NextbotState) {
-    const patrolTarget = this.getRandomPatrolTarget(nextbot.x, nextbot.y, nextbot.z);
+    const patrolTarget = this.getRandomPatrolTarget(nextbot.x, nextbot.y, nextbot.z, controller);
     controller.patrolTargetX = patrolTarget.x;
     controller.patrolTargetY = patrolTarget.y;
     controller.patrolTargetZ = patrolTarget.z;
@@ -1006,10 +997,10 @@ export class MyRoom extends Room<MyRoomState> {
       + Math.floor(Math.random() * (NEXTBOT_PATROL_WAIT_MAX_MS - NEXTBOT_PATROL_WAIT_MIN_MS + 1));
   }
 
-  private getRandomPatrolTarget(originX: number, originY: number, originZ: number): SpawnPoint {
+  private getRandomPatrolTarget(originX: number, originY: number, originZ: number, requestingController?: NextbotControllerState): SpawnPoint {
     const patrolAreaPoints = this.nextbotPatrolPoints.length > 0
       ? this.nextbotPatrolPoints
-      : (this.nextbotSpawnPoints.length > 0 ? this.nextbotSpawnPoints : DEFAULT_NEXTBOT_PATROL_POINTS);
+      : this.getAutomaticPatrolAreaPoints();
 
     let minX = Number.POSITIVE_INFINITY;
     let maxX = Number.NEGATIVE_INFINITY;
@@ -1031,23 +1022,99 @@ export class MyRoom extends Room<MyRoomState> {
     minZ -= NEXTBOT_PATROL_BOUNDS_PADDING;
     maxZ += NEXTBOT_PATROL_BOUNDS_PADDING;
 
-    let targetX = originX;
-    let targetZ = originZ;
+    let bestTargetX = originX;
+    let bestTargetZ = originZ;
+    let bestScore = Number.NEGATIVE_INFINITY;
 
-    for (let attempts = 0; attempts < 12; attempts++) {
-      targetX = minX + Math.random() * (maxX - minX);
-      targetZ = minZ + Math.random() * (maxZ - minZ);
-      const travelDistance = Math.hypot(targetX - originX, targetZ - originZ);
-      if (travelDistance >= NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE) {
-        break;
+    for (let attempts = 0; attempts < NEXTBOT_PATROL_CANDIDATE_SAMPLES; attempts++) {
+      const candidateX = minX + Math.random() * (maxX - minX);
+      const candidateZ = minZ + Math.random() * (maxZ - minZ);
+      const travelDistance = Math.hypot(candidateX - originX, candidateZ - originZ);
+      if (travelDistance < NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE) {
+        continue;
+      }
+
+      const separationDistance = this.getPatrolTargetSeparationDistance(candidateX, candidateZ, requestingController);
+      const separationPenalty = separationDistance < NEXTBOT_PATROL_SEPARATION_RADIUS
+        ? (NEXTBOT_PATROL_SEPARATION_RADIUS - separationDistance) * 1000
+        : 0;
+      const score = separationDistance * 10 + travelDistance - separationPenalty;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestTargetX = candidateX;
+        bestTargetZ = candidateZ;
+      }
+    }
+
+    if (!Number.isFinite(bestScore)) {
+      for (let attempts = 0; attempts < 12; attempts++) {
+        const candidateX = minX + Math.random() * (maxX - minX);
+        const candidateZ = minZ + Math.random() * (maxZ - minZ);
+        const travelDistance = Math.hypot(candidateX - originX, candidateZ - originZ);
+        if (travelDistance >= NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE) {
+          bestTargetX = candidateX;
+          bestTargetZ = candidateZ;
+          break;
+        }
       }
     }
 
     return {
-      x: targetX,
+      x: bestTargetX,
       y: avgY || originY,
-      z: targetZ,
+      z: bestTargetZ,
     };
+  }
+
+  private isPatrolTargetSeparated(targetX: number, targetZ: number, requestingController?: NextbotControllerState) {
+    return this.getPatrolTargetSeparationDistance(targetX, targetZ, requestingController) >= NEXTBOT_PATROL_SEPARATION_RADIUS;
+  }
+
+  private getAutomaticPatrolAreaPoints(): SpawnPoint[] {
+    const automaticPoints: SpawnPoint[] = [];
+
+    for (let index = 0; index < this.nextbotSpawnPoints.length; index++) {
+      automaticPoints.push(this.nextbotSpawnPoints[index]);
+    }
+
+    for (let index = 0; index < this.playerSpawnPoints.length; index++) {
+      automaticPoints.push(this.playerSpawnPoints[index]);
+    }
+
+    if (automaticPoints.length > 0) {
+      return automaticPoints;
+    }
+
+    return DEFAULT_NEXTBOT_SPAWN_POINTS;
+  }
+
+  private getPatrolTargetSeparationDistance(targetX: number, targetZ: number, requestingController?: NextbotControllerState) {
+    let closestDistanceSq = Number.POSITIVE_INFINITY;
+
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      if (controller === requestingController) {
+        continue;
+      }
+
+      const patrolDx = controller.patrolTargetX - targetX;
+      const patrolDz = controller.patrolTargetZ - targetZ;
+      closestDistanceSq = Math.min(closestDistanceSq, (patrolDx * patrolDx) + (patrolDz * patrolDz));
+
+      const nextbot = this.getNextbotState(index);
+      if (nextbot != null) {
+        const currentDx = nextbot.x - targetX;
+        const currentDz = nextbot.z - targetZ;
+        closestDistanceSq = Math.min(closestDistanceSq, (currentDx * currentDx) + (currentDz * currentDz));
+      }
+    }
+
+    if (!Number.isFinite(closestDistanceSq)) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    return Math.sqrt(closestDistanceSq);
   }
 
   private resolveNextbotSpawnPoints(options: any): SpawnPoint[] {
@@ -1079,7 +1146,7 @@ export class MyRoom extends Room<MyRoomState> {
   private resolveNextbotPatrolPoints(options: any): SpawnPoint[] {
     const candidatePoints = options?.nextbotPatrolPoints;
     if (!Array.isArray(candidatePoints) || candidatePoints.length === 0) {
-      return DEFAULT_NEXTBOT_PATROL_POINTS;
+      return [];
     }
 
     const parsedPoints = candidatePoints
@@ -1096,7 +1163,7 @@ export class MyRoom extends Room<MyRoomState> {
       .filter((point): point is { x: number; y: number; z: number } => point !== undefined);
 
     if (parsedPoints.length === 0) {
-      return DEFAULT_NEXTBOT_PATROL_POINTS;
+      return [];
     }
 
     return parsedPoints;
