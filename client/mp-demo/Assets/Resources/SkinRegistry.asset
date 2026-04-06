@@ -13,57 +13,13 @@ MonoBehaviour:
   m_Name: SkinRegistry
   m_EditorClassIdentifier: Assembly-CSharp::SkinRegistry
   skins:
-  - skinName: Old Man
-    texture: {fileID: 2800000, guid: 1746b36bcea394ab69a5aeaf8cbea4a2, type: 3}
-    uiPreview: {fileID: 21300000, guid: 56ddabd45b7ae450088dae05ff9c00f0, type: 3}
-  - skinName: African man
-    texture: {fileID: 2800000, guid: eb336da94f4b6476397dde9defb0d706, type: 3}
-    uiPreview: {fileID: 21300000, guid: 752e8f5265b754b8b84bf604e4288bde, type: 3}
-  - skinName: Bold Man
-    texture: {fileID: 2800000, guid: ca014883a4bc646e583c92e7ba17b5c1, type: 3}
-    uiPreview: {fileID: 21300000, guid: 45581b757205a4fe1b33f17c7d2f073a, type: 3}
-  - skinName: Yellow Robot
-    texture: {fileID: 2800000, guid: 9173264057ad549e5956296bec48ed4b, type: 3}
-    uiPreview: {fileID: 21300000, guid: 5b4a0eb07283d41d59ee95c143f9717b, type: 3}
-  - skinName: Young Girl 1
-    texture: {fileID: 2800000, guid: 531bacfdcbc904637a2cf5c5b9b1d0de, type: 3}
-    uiPreview: {fileID: 21300000, guid: 3ed1ee5edc255447494452f41cafce98, type: 3}
-  - skinName: Young Girl 2
-    texture: {fileID: 2800000, guid: 77e0507eeafaa4fef94ba7a4e46765f9, type: 3}
-    uiPreview: {fileID: 21300000, guid: 274335482da20400eaa678ad2b3b8ee0, type: 3}
-  - skinName: Man Robot
-    texture: {fileID: 2800000, guid: 860ca214016194b2da519ff35cdbedf1, type: 3}
-    uiPreview: {fileID: 21300000, guid: 3a5b401b8ae81416ebcdfa3dfcc3d8ac, type: 3}
-  - skinName: Female Robot
-    texture: {fileID: 2800000, guid: 6bbf8dbe6d3cc4ebaa0149d2245ee8f3, type: 3}
-    uiPreview: {fileID: 21300000, guid: 30c6443a9b15c4e4eb9887b8158f8c4a, type: 3}
-  - skinName: Uncle
-    texture: {fileID: 2800000, guid: ede0314e6d1bd4cda9c5fc5f48ae7d40, type: 3}
-    uiPreview: {fileID: 21300000, guid: a15c2f2900ced4406a56c8a59b2d5312, type: 3}
-  - skinName: Policeman
-    texture: {fileID: 2800000, guid: 8d4fb9c10781b45c19eaf3830fb4212e, type: 3}
-    uiPreview: {fileID: 21300000, guid: 0cda191986d244641bcecc87ea30f515, type: 3}
-  - skinName: Farmer
-    texture: {fileID: 2800000, guid: 9d093447fcb534a89b6d0c18acffc66c, type: 3}
-    uiPreview: {fileID: 21300000, guid: f3387179e2ad24906a878e29fa687d91, type: 3}
-  - skinName: Small Hulk
-    texture: {fileID: 2800000, guid: 6fa500a3dce69483caa95c94be9d688e, type: 3}
-    uiPreview: {fileID: 21300000, guid: 7c2f4473d4c8c4d69814a0adeb393e42, type: 3}
-  - skinName: Archer
-    texture: {fileID: 2800000, guid: 67bdf2b79d1ea4dfa8b45c0076753fee, type: 3}
-    uiPreview: {fileID: 21300000, guid: 858d1232eb5fd4bb2a7f3aa812919a2e, type: 3}
-  - skinName: Chinese Girl
-    texture: {fileID: 2800000, guid: c818cf16045074ad6b205beed84993e1, type: 3}
-    uiPreview: {fileID: 21300000, guid: 1f3f55576db2c42d5ab58cb74a9a8cbf, type: 3}
-  - skinName: Zombie
-    texture: {fileID: 2800000, guid: 12edcff4ae59543129b425c3611cca3b, type: 3}
-    uiPreview: {fileID: 21300000, guid: 2f178ec9bce464ba9b74d79f26838347, type: 3}
-  - skinName: Pirate
-    texture: {fileID: 2800000, guid: 605547e5dac8f413d94721c2514f8404, type: 3}
-    uiPreview: {fileID: 21300000, guid: 2d41705f602c646df8c739d18d9fcbf1, type: 3}
-  - skinName: Gentleman
-    texture: {fileID: 2800000, guid: bce0656ac661141ee8d049b79878f221, type: 3}
-    uiPreview: {fileID: 21300000, guid: 8e7de9234a41f4fb297c0a4b907b85a6, type: 3}
-  - skinName: Ninja
-    texture: {fileID: 2800000, guid: 86c082663d9ae426ba57e7944223aeea, type: 3}
-    uiPreview: {fileID: 21300000, guid: 5ad1fba49fb634314928e69700c3c14a, type: 3}
+  - skinName: Green
+    texture: {fileID: 2800000, guid: 81d97dd8ee7594f9685a8048cd07a8e9, type: 3}
+    uiPreview: {fileID: 0}
+    price: 0
+    unlockedByDefault: 1
+  - skinName: Pink
+    texture: {fileID: 2800000, guid: bc714d1b157524af395f0c401da68983, type: 3}
+    uiPreview: {fileID: 0}
+    price: 75
+    unlockedByDefault: 0

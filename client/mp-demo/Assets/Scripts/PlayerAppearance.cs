@@ -39,22 +39,91 @@ public class PlayerAppearance : MonoBehaviour
 
     private void SetSkin(int index)
     {
-        if (skinRegistry == null || index < 0 || index >= skinRegistry.skins.Length) return;
-
-        if (targetRenderers != null)
-        {
-            foreach (var renderer in targetRenderers)
-            {
-                if (renderer != null)
-                {
-                    // Access the .texture property from the SkinEntry struct
-                    renderer.material.mainTexture = skinRegistry.skins[index].texture;
-                }
-            }
-        }
+        ApplySkinToRenderers(skinRegistry, index, GetTargetRenderers());
     }
 
     private void OnDestroy() {
         _playerSchema = null;
+    }
+
+    public Renderer[] GetTargetRenderers()
+    {
+        if (targetRenderers != null && targetRenderers.Length > 0)
+        {
+            List<Renderer> assignedRenderers = new List<Renderer>(targetRenderers.Length);
+            for (int i = 0; i < targetRenderers.Length; i++)
+            {
+                if (targetRenderers[i] != null)
+                {
+                    assignedRenderers.Add(targetRenderers[i]);
+                }
+            }
+
+            if (assignedRenderers.Count > 0)
+            {
+                return assignedRenderers.ToArray();
+            }
+        }
+
+        Renderer[] discoveredRenderers = GetComponentsInChildren<Renderer>(true);
+        List<Renderer> validRenderers = new List<Renderer>(discoveredRenderers.Length);
+        for (int i = 0; i < discoveredRenderers.Length; i++)
+        {
+            Renderer renderer = discoveredRenderers[i];
+            if (renderer == null || renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer)
+            {
+                continue;
+            }
+
+            validRenderers.Add(renderer);
+        }
+
+        targetRenderers = validRenderers.ToArray();
+        return targetRenderers;
+    }
+
+    public static bool ApplySkinToRenderers(SkinRegistry registry, int index, Renderer[] renderers)
+    {
+        if (registry == null || registry.skins == null || index < 0 || index >= registry.skins.Length || renderers == null)
+        {
+            return false;
+        }
+
+        Texture texture = registry.skins[index].texture;
+        if (texture == null)
+        {
+            return false;
+        }
+
+        for (int rendererIndex = 0; rendererIndex < renderers.Length; rendererIndex++)
+        {
+            Renderer renderer = renderers[rendererIndex];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            Material[] materials = renderer.materials;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (material.HasProperty("_BaseMap"))
+                {
+                    material.SetTexture("_BaseMap", texture);
+                }
+
+                if (material.HasProperty("_MainTex"))
+                {
+                    material.SetTexture("_MainTex", texture);
+                }
+            }
+        }
+
+        return true;
     }
 }

@@ -6,10 +6,17 @@ using UnityEngine.UIElements;
 using TMPro;
 using UIButton = UnityEngine.UI.Button;
 using UIImage = UnityEngine.UI.Image;
+using UIToolkitImage = UnityEngine.UIElements.Image;
 using UIToolkitButton = UnityEngine.UIElements.Button;
 
 public class LobbyUI : MonoBehaviour
 {
+    private enum ShopPage
+    {
+        Home,
+        Skins,
+    }
+
     #region Class Variables
     [Header("Menu UI")]
     public GameObject menuPanel;
@@ -24,8 +31,15 @@ public class LobbyUI : MonoBehaviour
     [Header("Skin Selection")]
     public SkinRegistry skinRegistry;
     public UIImage skinPreviewImage;
-    public TextMeshProUGUI skinNameText; 
+    public TextMeshProUGUI skinNameText;
+    [SerializeField] private GameObject shopPreviewPrefab;
+    [SerializeField] private Vector3 shopPreviewModelPosition = new Vector3(0f, -20f, 0f);
+    [SerializeField] private Vector3 shopPreviewModelEuler = new Vector3(0f, 205f, 0f);
+    [SerializeField] private Vector3 shopPreviewCameraPosition = new Vector3(0f, 1.1f, 6.1f);
+    [SerializeField] private Color shopPreviewCameraBackground = new Color(0.03f, 0.05f, 0.06f, 0f);
+    [SerializeField] private float shopPreviewDragSensitivity = 0.35f;
     private int currentSkinIndex = 0;
+    private int _shopSelectedSkinIndex;
     private bool hasAutoReadiedCurrentRoom = false;
     private UIDocument _menuDocument;
     private UIToolkitButton _startButton;
@@ -34,21 +48,49 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _graphicsLowButton;
     private UIToolkitButton _graphicsMediumButton;
     private UIToolkitButton _shopButton;
+    private UIToolkitButton _shopDailyStoreButton;
+    private UIToolkitButton _shopEquipmentButton;
+    private UIToolkitButton _shopSkinsMenuButton;
+    private UIToolkitButton _shopBackButton;
+    private UIToolkitButton _shopCloseButton;
+    private UIToolkitButton _shopActionButton;
+    private UIToolkitButton _shopEmotesButton;
+    private UIToolkitButton _shopRobuxButton;
     private UIToolkitButton _inventoryButton;
     private UIToolkitButton _spectateButton;
     private UIToolkitButton _comingSoonCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
     private Label _comingSoonMessageLabel;
+    private Label _moneyLabel;
+    private Label _shopSelectedSkinLabel;
+    private Label _shopSelectedSkinSubtitle;
+    private Label _shopSelectedPriceLabel;
+    private Label _shopSelectedStateLabel;
+    private VisualElement _menuCenterColumn;
+    private VisualElement _menuRightRail;
+    private VisualElement _walletPill;
     private VisualElement _graphicsSettingsPanel;
     private VisualElement _settingsCard;
     private VisualElement _comingSoonOverlay;
+    private VisualElement _shopOverlay;
+    private VisualElement _shopHomeView;
+    private VisualElement _shopSkinsView;
+    private VisualElement _shopPreviewPanel;
+    private UIToolkitImage _shopPreviewFrame;
     private SliderInt _graphicsVolumeSlider;
     private bool _settingsPopupVisible;
+    private bool _shopVisible;
+    private ShopPage _shopPage = ShopPage.Home;
     private bool _menuEventsBound;
     private bool _pendingSpectateJoin;
     private bool _isSpectatingFromMenu;
     private readonly List<UIToolkitButton> _hoverButtons = new();
+    private readonly List<UIToolkitButton> _shopSkinButtons = new();
+    private readonly List<Label> _shopSkinNameLabels = new();
+    private readonly List<Label> _shopSkinDescriptionLabels = new();
+    private readonly List<Label> _shopSkinStatusLabels = new();
+    private readonly List<Label> _shopSkinPriceLabels = new();
     private readonly Dictionary<UIToolkitButton, Vector3> _buttonCurrentScales = new();
     private readonly Dictionary<UIToolkitButton, Vector3> _buttonTargetScales = new();
     private const string DefaultMenuHoverText = "Pick what you want to do next";
@@ -67,6 +109,19 @@ public class LobbyUI : MonoBehaviour
     private string _pendingHoverLabelText = DefaultMenuHoverText;
     private float _currentHoverLabelOpacity;
     private float _targetHoverLabelOpacity;
+    private const int StartingMoneyAmount = 100;
+    private const string SelectedSkinPlayerPrefsKey = "SelectedSkin";
+    private const string PlayerMoneyPlayerPrefsKey = "PlayerMoney";
+    private const string OwnedSkinPlayerPrefsPrefix = "OwnedSkin_";
+    private const int DefaultOwnedSkinIndex = 0;
+    private RenderTexture _shopPreviewRenderTexture;
+    private Camera _shopPreviewCamera;
+    private GameObject _shopPreviewRoot;
+    private GameObject _shopPreviewInstance;
+    private Renderer[] _shopPreviewRenderers = Array.Empty<Renderer>();
+    private Animator _shopPreviewAnimator;
+    private bool _isDraggingShopPreview;
+    private Vector2 _shopPreviewLastPointerPosition;
     #endregion
 
     #region Class Methods
@@ -85,11 +140,15 @@ public class LobbyUI : MonoBehaviour
 
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
 
-        if (PlayerPrefs.HasKey("SelectedSkin"))
+        EnsureEconomyDefaults();
+        if (PlayerPrefs.HasKey(SelectedSkinPlayerPrefsKey))
         {
-            currentSkinIndex = PlayerPrefs.GetInt("SelectedSkin");
+            currentSkinIndex = PlayerPrefs.GetInt(SelectedSkinPlayerPrefsKey);
         }
+        currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
+        _shopSelectedSkinIndex = currentSkinIndex;
         UpdateSkinUI();
+        UpdateMoneyUI();
 
         if (notificationText != null) notificationText.text = "";
     }
@@ -115,11 +174,13 @@ public class LobbyUI : MonoBehaviour
 
         UpdateHoverLabelFade();
         UpdateMenuButtonScaleAnimation();
+        UpdateShopPreviewAnimation();
     }
     
     private void OnDestroy()
     {
         UnbindMenuEvents();
+        DestroyShopPreviewObjects();
 
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
@@ -284,6 +345,7 @@ public class LobbyUI : MonoBehaviour
     {
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = false;
+        SetShopVisible(false);
         if (menuPanel != null) menuPanel.SetActive(false);
         hasAutoReadiedCurrentRoom = true;
 
@@ -323,6 +385,14 @@ public class LobbyUI : MonoBehaviour
         _graphicsLowButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-low-button");
         _graphicsMediumButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-medium-button");
         _shopButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-button");
+        _shopDailyStoreButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-daily-store-button");
+        _shopEquipmentButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-equipment-button");
+        _shopSkinsMenuButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-skins-menu-button");
+        _shopBackButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-back-button");
+        _shopCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-close-button");
+        _shopActionButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-action-button");
+        _shopEmotesButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-emotes-button");
+        _shopRobuxButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-robux-button");
         _inventoryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("inventory-button");
         _spectateButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("spectate-button");
         _comingSoonCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("coming-soon-close-button");
@@ -330,16 +400,34 @@ public class LobbyUI : MonoBehaviour
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
         _menuHoverLabel = _menuDocument.rootVisualElement?.Q<Label>("menu-hover-label");
         _comingSoonMessageLabel = _menuDocument.rootVisualElement?.Q<Label>("coming-soon-message-label");
+        _moneyLabel = _menuDocument.rootVisualElement?.Q<Label>("money-label");
+        _shopSelectedSkinLabel = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-skin-label");
+        _shopSelectedSkinSubtitle = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-skin-subtitle");
+        _shopSelectedPriceLabel = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-price-label");
+        _shopSelectedStateLabel = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-state-label");
+        _menuCenterColumn = _menuDocument.rootVisualElement?.Q<VisualElement>("menu-center-column");
+        _menuRightRail = _menuDocument.rootVisualElement?.Q<VisualElement>("menu-right-rail");
+        _walletPill = _menuDocument.rootVisualElement?.Q<VisualElement>("wallet-pill");
         _graphicsSettingsPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("graphics-settings-panel");
         _settingsCard = _menuDocument.rootVisualElement?.Q<VisualElement>("settings-card");
         _comingSoonOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("coming-soon-overlay");
+        _shopOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-overlay");
+        _shopHomeView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-home-view");
+        _shopSkinsView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-skins-view");
+        _shopPreviewPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-preview-panel");
+        _shopPreviewFrame = _menuDocument.rootVisualElement?.Q<UIToolkitImage>("shop-preview-frame");
+        CacheShopSkinElements();
         if (_startButton == null)
         {
             Debug.LogWarning("LobbyUI: Start button was not found in MainMenu.uxml.");
         }
 
         _settingsPopupVisible = false;
+        _shopVisible = false;
+        _shopPage = ShopPage.Home;
         SetSettingsPopupVisible(false);
+        SetShopVisible(false);
+        BindShopPreviewEvents();
 
         if (_comingSoonOverlay != null)
         {
@@ -350,6 +438,8 @@ public class LobbyUI : MonoBehaviour
         RefreshGraphicsSettingsUi();
         ApplyMenuArt();
         ResetHoverLabelVisual();
+        UpdateMoneyUI();
+        RefreshShopUi();
     }
 
     private void RefreshMenuUiBindings()
@@ -390,6 +480,26 @@ public class LobbyUI : MonoBehaviour
         if (_graphicsMediumButton != null)
         {
             _graphicsMediumButton.clicked += HandleGraphicsMediumButtonClicked;
+        }
+        if (_shopButton != null)
+        {
+            _shopButton.clicked += HandleShopButtonClicked;
+        }
+        if (_shopSkinsMenuButton != null)
+        {
+            _shopSkinsMenuButton.clicked += HandleShopSkinsMenuButtonClicked;
+        }
+        if (_shopBackButton != null)
+        {
+            _shopBackButton.clicked += HandleShopBackButtonClicked;
+        }
+        if (_shopCloseButton != null)
+        {
+            _shopCloseButton.clicked += HandleShopCloseButtonClicked;
+        }
+        if (_shopActionButton != null)
+        {
+            _shopActionButton.clicked += HandleShopActionButtonClicked;
         }
         if (_graphicsVolumeSlider != null)
         {
@@ -436,6 +546,26 @@ public class LobbyUI : MonoBehaviour
         {
             _graphicsMediumButton.clicked -= HandleGraphicsMediumButtonClicked;
         }
+        if (_shopButton != null)
+        {
+            _shopButton.clicked -= HandleShopButtonClicked;
+        }
+        if (_shopSkinsMenuButton != null)
+        {
+            _shopSkinsMenuButton.clicked -= HandleShopSkinsMenuButtonClicked;
+        }
+        if (_shopBackButton != null)
+        {
+            _shopBackButton.clicked -= HandleShopBackButtonClicked;
+        }
+        if (_shopCloseButton != null)
+        {
+            _shopCloseButton.clicked -= HandleShopCloseButtonClicked;
+        }
+        if (_shopActionButton != null)
+        {
+            _shopActionButton.clicked -= HandleShopActionButtonClicked;
+        }
         if (_graphicsVolumeSlider != null)
         {
             _graphicsVolumeSlider.UnregisterValueChangedCallback(HandleGraphicsVolumeSliderChanged);
@@ -444,6 +574,7 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked -= HandleComingSoonCloseButtonClicked;
         }
+        UnbindShopPreviewEvents();
         UnbindPlaceholderActions();
         UnbindHoverEffects();
         _menuEventsBound = false;
@@ -547,18 +678,63 @@ public class LobbyUI : MonoBehaviour
         HideComingSoonPopup();
     }
 
+    private void HandleShopButtonClicked()
+    {
+        int skinCount = GetSkinCount();
+        if (skinCount <= 0)
+        {
+            ShowNotification("No skins are configured for the shop.");
+            return;
+        }
+
+        _shopSelectedSkinIndex = Mathf.Clamp(currentSkinIndex, 0, skinCount - 1);
+        _shopPage = ShopPage.Home;
+        SetShopVisible(true);
+    }
+
+    private void HandleShopSkinsMenuButtonClicked()
+    {
+        _shopPage = ShopPage.Skins;
+        RefreshShopUi();
+    }
+
+    private void HandleShopBackButtonClicked()
+    {
+        _shopPage = ShopPage.Home;
+        RefreshShopUi();
+    }
+
+    private void HandleShopCloseButtonClicked()
+    {
+        _shopPage = ShopPage.Home;
+        SetShopVisible(false);
+    }
+
+    private void HandleShopActionButtonClicked()
+    {
+        TryPurchaseOrEquipSelectedSkin();
+    }
+
     private void BindPlaceholderActions()
     {
-        BindComingSoonAction(_shopButton);
         BindComingSoonAction(_inventoryButton);
+        BindComingSoonAction(_shopDailyStoreButton);
+        BindComingSoonAction(_shopEquipmentButton);
+        BindComingSoonAction(_shopEmotesButton);
+        BindComingSoonAction(_shopRobuxButton);
         BindSpectateAction();
+        BindShopSkinActions();
     }
 
     private void UnbindPlaceholderActions()
     {
-        UnbindComingSoonAction(_shopButton);
         UnbindComingSoonAction(_inventoryButton);
+        UnbindComingSoonAction(_shopDailyStoreButton);
+        UnbindComingSoonAction(_shopEquipmentButton);
+        UnbindComingSoonAction(_shopEmotesButton);
+        UnbindComingSoonAction(_shopRobuxButton);
         UnbindSpectateAction();
+        UnbindShopSkinActions();
     }
 
     private void BindSpectateAction()
@@ -621,10 +797,155 @@ public class LobbyUI : MonoBehaviour
         button.clicked -= HandlePlaceholderButtonClicked;
     }
 
+    private void BindShopPreviewEvents()
+    {
+        if (_shopPreviewFrame == null)
+        {
+            return;
+        }
+
+        _shopPreviewFrame.RegisterCallback<PointerDownEvent>(HandleShopPreviewPointerDown);
+        _shopPreviewFrame.RegisterCallback<PointerMoveEvent>(HandleShopPreviewPointerMove);
+        _shopPreviewFrame.RegisterCallback<PointerUpEvent>(HandleShopPreviewPointerUp);
+        _shopPreviewFrame.RegisterCallback<PointerLeaveEvent>(HandleShopPreviewPointerLeave);
+    }
+
+    private void UnbindShopPreviewEvents()
+    {
+        if (_shopPreviewFrame == null)
+        {
+            return;
+        }
+
+        _shopPreviewFrame.UnregisterCallback<PointerDownEvent>(HandleShopPreviewPointerDown);
+        _shopPreviewFrame.UnregisterCallback<PointerMoveEvent>(HandleShopPreviewPointerMove);
+        _shopPreviewFrame.UnregisterCallback<PointerUpEvent>(HandleShopPreviewPointerUp);
+        _shopPreviewFrame.UnregisterCallback<PointerLeaveEvent>(HandleShopPreviewPointerLeave);
+    }
+
+    private void HandleShopPreviewPointerDown(PointerDownEvent evt)
+    {
+        if (_shopPreviewFrame == null || !_shopVisible || _shopPreviewInstance == null)
+        {
+            return;
+        }
+
+        _isDraggingShopPreview = true;
+        _shopPreviewLastPointerPosition = new Vector2(evt.position.x, evt.position.y);
+        _shopPreviewFrame.CapturePointer(evt.pointerId);
+        evt.StopPropagation();
+    }
+
+    private void HandleShopPreviewPointerMove(PointerMoveEvent evt)
+    {
+        if (!_isDraggingShopPreview || _shopPreviewInstance == null)
+        {
+            return;
+        }
+
+        Vector2 currentPointerPosition = new Vector2(evt.position.x, evt.position.y);
+        Vector2 pointerDelta = currentPointerPosition - _shopPreviewLastPointerPosition;
+        _shopPreviewLastPointerPosition = currentPointerPosition;
+        _shopPreviewInstance.transform.Rotate(Vector3.up, -pointerDelta.x * shopPreviewDragSensitivity, Space.World);
+
+        if (_shopPreviewCamera != null)
+        {
+            _shopPreviewCamera.Render();
+        }
+
+        evt.StopPropagation();
+    }
+
+    private void HandleShopPreviewPointerUp(PointerUpEvent evt)
+    {
+        ReleaseShopPreviewDrag(evt.pointerId);
+    }
+
+    private void HandleShopPreviewPointerLeave(PointerLeaveEvent evt)
+    {
+        ReleaseShopPreviewDrag(evt.pointerId);
+    }
+
+    private void ReleaseShopPreviewDrag(int pointerId)
+    {
+        _isDraggingShopPreview = false;
+        if (_shopPreviewFrame != null && _shopPreviewFrame.HasPointerCapture(pointerId))
+        {
+            _shopPreviewFrame.ReleasePointer(pointerId);
+        }
+    }
+
+    private void CacheShopSkinElements()
+    {
+        _shopSkinButtons.Clear();
+        _shopSkinNameLabels.Clear();
+        _shopSkinDescriptionLabels.Clear();
+        _shopSkinStatusLabels.Clear();
+        _shopSkinPriceLabels.Clear();
+
+        int skinCount = GetSkinCount();
+        for (int index = 0; index < skinCount; index++)
+        {
+            _shopSkinButtons.Add(_menuDocument.rootVisualElement?.Q<UIToolkitButton>($"shop-skin-card-{index}"));
+            _shopSkinNameLabels.Add(_menuDocument.rootVisualElement?.Q<Label>($"shop-skin-name-{index}"));
+            _shopSkinDescriptionLabels.Add(_menuDocument.rootVisualElement?.Q<Label>($"shop-skin-description-{index}"));
+            _shopSkinStatusLabels.Add(_menuDocument.rootVisualElement?.Q<Label>($"shop-skin-status-{index}"));
+            _shopSkinPriceLabels.Add(_menuDocument.rootVisualElement?.Q<Label>($"shop-skin-price-{index}"));
+        }
+    }
+
+    private void BindShopSkinActions()
+    {
+        for (int index = 0; index < _shopSkinButtons.Count; index++)
+        {
+            UIToolkitButton button = _shopSkinButtons[index];
+            if (button == null)
+            {
+                continue;
+            }
+
+            int capturedIndex = index;
+            EventCallback<ClickEvent> callback = evt => HandleShopSkinCardClicked(capturedIndex);
+            button.userData = callback;
+            button.RegisterCallback<ClickEvent>(callback);
+        }
+    }
+
+    private void UnbindShopSkinActions()
+    {
+        for (int index = 0; index < _shopSkinButtons.Count; index++)
+        {
+            UIToolkitButton button = _shopSkinButtons[index];
+            if (button == null)
+            {
+                continue;
+            }
+
+            if (!(button.userData is EventCallback<ClickEvent> callback))
+            {
+                continue;
+            }
+
+            button.UnregisterCallback<ClickEvent>(callback);
+            button.userData = null;
+        }
+    }
+
+    private void HandleShopSkinCardClicked(int skinIndex)
+    {
+        _shopSelectedSkinIndex = skinIndex;
+        RefreshShopUi();
+    }
+
     private void ConfigureMenuButtonDescriptions()
     {
         SetMenuButtonDescription(_startButton, "Join the current game");
         SetMenuButtonDescription(_shopButton, "Browse the shop");
+        SetMenuButtonDescription(_shopDailyStoreButton, "Browse the daily store");
+        SetMenuButtonDescription(_shopEquipmentButton, "Check equipment");
+        SetMenuButtonDescription(_shopSkinsMenuButton, "Open the character shop");
+        SetMenuButtonDescription(_shopEmotesButton, "Browse emotes");
+        SetMenuButtonDescription(_shopRobuxButton, "Open robux offers");
         SetMenuButtonDescription(_inventoryButton, "Open your inventory");
         SetMenuButtonDescription(_spectateButton, "Watch the current match");
         SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
@@ -650,6 +971,11 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_graphicsLowButton);
         RegisterHoverButton(_graphicsMediumButton);
         RegisterHoverButton(_shopButton);
+        RegisterHoverButton(_shopDailyStoreButton);
+        RegisterHoverButton(_shopEquipmentButton);
+        RegisterHoverButton(_shopSkinsMenuButton);
+        RegisterHoverButton(_shopEmotesButton);
+        RegisterHoverButton(_shopRobuxButton);
         RegisterHoverButton(_inventoryButton);
         RegisterHoverButton(_spectateButton);
     }
@@ -1095,6 +1421,7 @@ public class LobbyUI : MonoBehaviour
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = true;
         hasAutoReadiedCurrentRoom = false;
+        SetShopVisible(false);
 
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
@@ -1158,10 +1485,13 @@ public class LobbyUI : MonoBehaviour
 
     private void SaveAndSyncSkin()
     {
-        PlayerPrefs.SetInt("SelectedSkin", currentSkinIndex);
+        currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
+        PlayerPrefs.SetInt(SelectedSkinPlayerPrefsKey, currentSkinIndex);
         PlayerPrefs.Save();
        
+       _shopSelectedSkinIndex = currentSkinIndex;
        UpdateSkinUI();
+       RefreshShopUi();
 
        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
        {
@@ -1173,7 +1503,7 @@ public class LobbyUI : MonoBehaviour
     {
         if (skinRegistry == null || skinRegistry.skins.Length == 0) return;
 
-       if (currentSkinIndex >= skinRegistry.skins.Length) currentSkinIndex = 0;
+       currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
 
        // Get the current skin entry
        var skinEntry = skinRegistry.skins[currentSkinIndex];
@@ -1199,6 +1529,513 @@ public class LobbyUI : MonoBehaviour
                skinNameText.text = $"Skin {currentSkinIndex + 1}";
            }
        }
+
+       RefreshShopPreviewVisual();
+    }
+
+    private void EnsureEconomyDefaults()
+    {
+        if (!PlayerPrefs.HasKey(PlayerMoneyPlayerPrefsKey))
+        {
+            PlayerPrefs.SetInt(PlayerMoneyPlayerPrefsKey, StartingMoneyAmount);
+        }
+
+        int skinCount = GetSkinCount();
+        for (int index = 0; index < skinCount; index++)
+        {
+            string key = GetOwnedSkinKey(index);
+            if (!PlayerPrefs.HasKey(key))
+            {
+                bool defaultOwned = index == DefaultOwnedSkinIndex
+                    || (skinRegistry != null
+                        && skinRegistry.skins != null
+                        && index < skinRegistry.skins.Length
+                        && skinRegistry.skins[index].unlockedByDefault);
+                PlayerPrefs.SetInt(key, defaultOwned ? 1 : 0);
+            }
+        }
+
+        PlayerPrefs.Save();
+    }
+
+    private int GetPlayerMoney()
+    {
+        return PlayerPrefs.GetInt(PlayerMoneyPlayerPrefsKey, StartingMoneyAmount);
+    }
+
+    private void SetPlayerMoney(int amount)
+    {
+        PlayerPrefs.SetInt(PlayerMoneyPlayerPrefsKey, Mathf.Max(0, amount));
+        PlayerPrefs.Save();
+        UpdateMoneyUI();
+    }
+
+    private void UpdateMoneyUI()
+    {
+        if (_moneyLabel != null)
+        {
+            _moneyLabel.text = $"${GetPlayerMoney()}";
+        }
+    }
+
+    private int GetSkinCount()
+    {
+        return skinRegistry != null && skinRegistry.skins != null ? skinRegistry.skins.Length : 0;
+    }
+
+    private string GetOwnedSkinKey(int skinIndex)
+    {
+        return $"{OwnedSkinPlayerPrefsPrefix}{skinIndex}";
+    }
+
+    private bool IsSkinOwned(int skinIndex)
+    {
+        if (skinIndex < 0 || skinIndex >= GetSkinCount())
+        {
+            return false;
+        }
+
+        return PlayerPrefs.GetInt(GetOwnedSkinKey(skinIndex), skinIndex == DefaultOwnedSkinIndex ? 1 : 0) == 1;
+    }
+
+    private void SetSkinOwned(int skinIndex, bool owned)
+    {
+        if (skinIndex < 0 || skinIndex >= GetSkinCount())
+        {
+            return;
+        }
+
+        PlayerPrefs.SetInt(GetOwnedSkinKey(skinIndex), owned ? 1 : 0);
+        PlayerPrefs.Save();
+    }
+
+    private int GetValidOwnedSkinIndex(int preferredIndex)
+    {
+        int skinCount = GetSkinCount();
+        if (skinCount <= 0)
+        {
+            return 0;
+        }
+
+        if (preferredIndex >= 0 && preferredIndex < skinCount && IsSkinOwned(preferredIndex))
+        {
+            return preferredIndex;
+        }
+
+        for (int index = 0; index < skinCount; index++)
+        {
+            if (IsSkinOwned(index))
+            {
+                return index;
+            }
+        }
+
+        return 0;
+    }
+
+    private void SetShopVisible(bool visible)
+    {
+        _shopVisible = visible;
+        _isDraggingShopPreview = false;
+
+        if (_shopOverlay != null)
+        {
+            _shopOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        if (_menuCenterColumn != null)
+        {
+            _menuCenterColumn.style.display = visible ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        if (_menuRightRail != null)
+        {
+            _menuRightRail.style.display = visible ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        if (_walletPill != null)
+        {
+            _walletPill.style.display = visible ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        if (!visible)
+        {
+            return;
+        }
+
+        SetSettingsPopupVisible(false);
+        _shopSelectedSkinIndex = Mathf.Clamp(_shopSelectedSkinIndex, 0, Mathf.Max(0, GetSkinCount() - 1));
+        RefreshShopUi();
+        EnsureShopPreviewObjects();
+        RefreshShopPreviewVisual();
+    }
+
+    private void RefreshShopUi()
+    {
+        if (skinRegistry == null || skinRegistry.skins == null || skinRegistry.skins.Length == 0)
+        {
+            return;
+        }
+
+        _shopSelectedSkinIndex = Mathf.Clamp(_shopSelectedSkinIndex, 0, skinRegistry.skins.Length - 1);
+        UpdateMoneyUI();
+        bool showingSkinPage = _shopPage == ShopPage.Skins;
+
+        if (_shopHomeView != null)
+        {
+            _shopHomeView.style.display = showingSkinPage ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        if (_shopSkinsView != null)
+        {
+            _shopSkinsView.style.display = showingSkinPage ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        for (int index = 0; index < skinRegistry.skins.Length && index < _shopSkinButtons.Count; index++)
+        {
+            SkinEntry entry = skinRegistry.skins[index];
+            bool owned = IsSkinOwned(index);
+            bool equipped = currentSkinIndex == index;
+            bool selected = _shopSelectedSkinIndex == index;
+
+            if (_shopSkinNameLabels[index] != null)
+            {
+                _shopSkinNameLabels[index].text = string.IsNullOrWhiteSpace(entry.skinName) ? $"Skin {index + 1}" : entry.skinName;
+            }
+
+            if (_shopSkinDescriptionLabels[index] != null)
+            {
+                _shopSkinDescriptionLabels[index].text = owned
+                    ? (equipped ? "Currently equipped" : "Ready to equip")
+                    : "Purchase to unlock";
+            }
+
+            if (_shopSkinStatusLabels[index] != null)
+            {
+                _shopSkinStatusLabels[index].text = equipped ? "Equipped" : (owned ? "Owned" : "Locked");
+                _shopSkinStatusLabels[index].style.color = equipped
+                    ? new Color(255f / 255f, 235f / 255f, 168f / 255f)
+                    : (owned ? new Color(114f / 255f, 228f / 255f, 123f / 255f) : new Color(240f / 255f, 154f / 255f, 173f / 255f));
+            }
+
+            if (_shopSkinPriceLabels[index] != null)
+            {
+                _shopSkinPriceLabels[index].text = entry.price <= 0 ? "FREE" : $"${entry.price}";
+            }
+
+            if (_shopSkinButtons[index] != null)
+            {
+                Color selectedBorderColor = GetShopCardBorderColor(index, selected);
+                _shopSkinButtons[index].style.borderLeftColor = selectedBorderColor;
+                _shopSkinButtons[index].style.borderRightColor = selectedBorderColor;
+                _shopSkinButtons[index].style.borderTopColor = selectedBorderColor;
+                _shopSkinButtons[index].style.borderBottomColor = selectedBorderColor;
+                _shopSkinButtons[index].style.backgroundColor = GetShopCardBackgroundColor(index, selected);
+            }
+        }
+
+        SkinEntry selectedSkin = skinRegistry.skins[_shopSelectedSkinIndex];
+        bool selectedOwned = IsSkinOwned(_shopSelectedSkinIndex);
+        bool selectedEquipped = currentSkinIndex == _shopSelectedSkinIndex;
+        int selectedPrice = Mathf.Max(0, selectedSkin.price);
+        bool canAfford = GetPlayerMoney() >= selectedPrice;
+
+        if (_shopSelectedSkinLabel != null)
+        {
+            _shopSelectedSkinLabel.text = string.IsNullOrWhiteSpace(selectedSkin.skinName) ? $"Skin {_shopSelectedSkinIndex + 1}" : selectedSkin.skinName;
+        }
+
+        if (_shopSelectedSkinSubtitle != null)
+        {
+            _shopSelectedSkinSubtitle.text = selectedOwned
+                ? (selectedEquipped ? "This skin is active on your player." : "You already own this skin.")
+                : (canAfford ? "You can buy this skin right now." : "You need more cash to unlock this skin.");
+        }
+
+        if (_shopSelectedPriceLabel != null)
+        {
+            _shopSelectedPriceLabel.text = selectedPrice <= 0 ? "FREE" : $"${selectedPrice}";
+        }
+
+        if (_shopSelectedStateLabel != null)
+        {
+            _shopSelectedStateLabel.text = selectedEquipped ? "Equipped" : (selectedOwned ? "Owned" : "Locked");
+            _shopSelectedStateLabel.style.color = selectedEquipped
+                ? new Color(255f / 255f, 235f / 255f, 168f / 255f)
+                : (selectedOwned ? new Color(114f / 255f, 228f / 255f, 123f / 255f) : new Color(240f / 255f, 154f / 255f, 173f / 255f));
+        }
+
+        if (_shopActionButton != null)
+        {
+            _shopActionButton.style.display = showingSkinPage ? DisplayStyle.Flex : DisplayStyle.None;
+            if (selectedEquipped)
+            {
+                _shopActionButton.text = "EQUIPPED";
+                _shopActionButton.SetEnabled(false);
+            }
+            else if (selectedOwned)
+            {
+                _shopActionButton.text = "EQUIP";
+                _shopActionButton.SetEnabled(true);
+            }
+            else
+            {
+                _shopActionButton.text = canAfford ? $"BUY ${selectedPrice}" : "NOT ENOUGH CASH";
+                _shopActionButton.SetEnabled(canAfford);
+            }
+        }
+
+        RefreshShopPreviewVisual();
+    }
+
+    private void TryPurchaseOrEquipSelectedSkin()
+    {
+        if (skinRegistry == null || skinRegistry.skins == null || _shopSelectedSkinIndex < 0 || _shopSelectedSkinIndex >= skinRegistry.skins.Length)
+        {
+            return;
+        }
+
+        if (IsSkinOwned(_shopSelectedSkinIndex))
+        {
+            currentSkinIndex = _shopSelectedSkinIndex;
+            SaveAndSyncSkin();
+            ShowNotification($"Equipped {skinRegistry.skins[_shopSelectedSkinIndex].skinName}");
+            return;
+        }
+
+        SkinEntry selectedSkin = skinRegistry.skins[_shopSelectedSkinIndex];
+        int price = Mathf.Max(0, selectedSkin.price);
+        int currentMoney = GetPlayerMoney();
+        if (currentMoney < price)
+        {
+            ShowNotification("Not enough cash for that skin.");
+            RefreshShopUi();
+            return;
+        }
+
+        SetPlayerMoney(currentMoney - price);
+        SetSkinOwned(_shopSelectedSkinIndex, true);
+        currentSkinIndex = _shopSelectedSkinIndex;
+        SaveAndSyncSkin();
+        ShowNotification($"Bought {selectedSkin.skinName} for ${price}");
+    }
+
+    private Color GetShopCardBorderColor(int index, bool selected)
+    {
+        if (selected)
+        {
+            return new Color(1f, 245f / 255f, 216f / 255f, 0.95f);
+        }
+
+        return index == 0
+            ? new Color(110f / 255f, 201f / 255f, 106f / 255f, 0.7f)
+            : new Color(222f / 255f, 123f / 255f, 182f / 255f, 0.7f);
+    }
+
+    private Color GetShopCardBackgroundColor(int index, bool selected)
+    {
+        if (selected)
+        {
+            return index == 0
+                ? new Color(28f / 255f, 41f / 255f, 30f / 255f, 0.96f)
+                : new Color(40f / 255f, 26f / 255f, 35f / 255f, 0.96f);
+        }
+
+        return index == 0
+            ? new Color(18f / 255f, 20f / 255f, 18f / 255f, 0.9f)
+            : new Color(24f / 255f, 17f / 255f, 22f / 255f, 0.9f);
+    }
+
+    private void EnsureShopPreviewObjects()
+    {
+        if (_shopPreviewFrame == null || _shopPreviewRenderTexture != null)
+        {
+            return;
+        }
+
+        _shopPreviewRenderTexture = new RenderTexture(1024, 1024, 16, RenderTextureFormat.ARGB32)
+        {
+            name = "ShopPreviewRT"
+        };
+        _shopPreviewRenderTexture.Create();
+        _shopPreviewFrame.image = _shopPreviewRenderTexture;
+
+        _shopPreviewRoot = new GameObject("ShopPreviewRoot");
+        _shopPreviewRoot.hideFlags = HideFlags.HideAndDontSave;
+        _shopPreviewRoot.transform.position = new Vector3(1000f, -1000f, 1000f);
+
+        GameObject cameraObject = new GameObject("ShopPreviewCamera");
+        cameraObject.hideFlags = HideFlags.HideAndDontSave;
+        cameraObject.transform.SetParent(_shopPreviewRoot.transform, false);
+        cameraObject.transform.localPosition = shopPreviewCameraPosition;
+        cameraObject.transform.LookAt(_shopPreviewRoot.transform.position + Vector3.up * 1.0f);
+        _shopPreviewCamera = cameraObject.AddComponent<Camera>();
+        _shopPreviewCamera.clearFlags = CameraClearFlags.SolidColor;
+        _shopPreviewCamera.backgroundColor = shopPreviewCameraBackground;
+        _shopPreviewCamera.cullingMask = ~0;
+        _shopPreviewCamera.nearClipPlane = 0.01f;
+        _shopPreviewCamera.farClipPlane = 20f;
+        _shopPreviewCamera.fieldOfView = 28f;
+        _shopPreviewCamera.targetTexture = _shopPreviewRenderTexture;
+        _shopPreviewCamera.enabled = false;
+
+        GameObject previewPrefab = shopPreviewPrefab;
+        if (previewPrefab == null && NetworkManager.Instance != null)
+        {
+            previewPrefab = NetworkManager.Instance.playerPrefab;
+        }
+
+        if (previewPrefab == null)
+        {
+            return;
+        }
+
+        _shopPreviewInstance = Instantiate(previewPrefab, _shopPreviewRoot.transform);
+        _shopPreviewInstance.name = "ShopPreviewPlayer";
+        _shopPreviewInstance.transform.localPosition = shopPreviewModelPosition;
+        _shopPreviewInstance.transform.localRotation = Quaternion.Euler(shopPreviewModelEuler);
+        _shopPreviewInstance.transform.localScale = Vector3.one;
+
+        DisablePreviewComponents(_shopPreviewInstance);
+
+        PlayerAppearance previewAppearance = _shopPreviewInstance.GetComponent<PlayerAppearance>();
+        if (previewAppearance != null)
+        {
+            _shopPreviewRenderers = previewAppearance.GetTargetRenderers();
+        }
+        else
+        {
+            _shopPreviewRenderers = _shopPreviewInstance.GetComponentsInChildren<Renderer>(true);
+        }
+
+        _shopPreviewAnimator = _shopPreviewInstance.GetComponentInChildren<Animator>(true);
+        if (_shopPreviewAnimator != null)
+        {
+            _shopPreviewAnimator.enabled = true;
+            _shopPreviewAnimator.speed = 1f;
+            _shopPreviewAnimator.Update(0f);
+        }
+    }
+
+    private void DisablePreviewComponents(GameObject previewObject)
+    {
+        if (previewObject == null)
+        {
+            return;
+        }
+
+        Behaviour[] behaviours = previewObject.GetComponentsInChildren<Behaviour>(true);
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            Behaviour behaviour = behaviours[i];
+            if (behaviour == null || behaviour is Animator)
+            {
+                continue;
+            }
+
+            behaviour.enabled = false;
+        }
+
+        Rigidbody[] rigidbodies = previewObject.GetComponentsInChildren<Rigidbody>(true);
+        for (int i = 0; i < rigidbodies.Length; i++)
+        {
+            if (rigidbodies[i] != null)
+            {
+                rigidbodies[i].isKinematic = true;
+            }
+        }
+
+        Collider[] colliders = previewObject.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null)
+            {
+                colliders[i].enabled = false;
+            }
+        }
+
+        Camera[] cameras = previewObject.GetComponentsInChildren<Camera>(true);
+        for (int i = 0; i < cameras.Length; i++)
+        {
+            if (cameras[i] != null)
+            {
+                cameras[i].gameObject.SetActive(false);
+            }
+        }
+
+        AudioListener[] listeners = previewObject.GetComponentsInChildren<AudioListener>(true);
+        for (int i = 0; i < listeners.Length; i++)
+        {
+            if (listeners[i] != null)
+            {
+                listeners[i].enabled = false;
+            }
+        }
+    }
+
+    private void RefreshShopPreviewVisual()
+    {
+        if (_shopPreviewInstance == null || skinRegistry == null || skinRegistry.skins == null || skinRegistry.skins.Length == 0)
+        {
+            return;
+        }
+
+        int previewSkinIndex = Mathf.Clamp(_shopSelectedSkinIndex, 0, skinRegistry.skins.Length - 1);
+        PlayerAppearance.ApplySkinToRenderers(skinRegistry, previewSkinIndex, _shopPreviewRenderers);
+
+        if (_shopPreviewAnimator != null)
+        {
+            _shopPreviewAnimator.enabled = true;
+            _shopPreviewAnimator.speed = 1f;
+            _shopPreviewAnimator.Update(0f);
+        }
+
+        if (_shopPreviewCamera != null)
+        {
+            _shopPreviewCamera.Render();
+        }
+    }
+
+    private void UpdateShopPreviewAnimation()
+    {
+        if (!_shopVisible || _shopPreviewInstance == null || _shopPreviewAnimator == null)
+        {
+            return;
+        }
+
+        _shopPreviewAnimator.enabled = true;
+        _shopPreviewAnimator.Update(Time.unscaledDeltaTime);
+
+        if (_shopPreviewCamera != null)
+        {
+            _shopPreviewCamera.Render();
+        }
+    }
+
+    private void DestroyShopPreviewObjects()
+    {
+        if (_shopPreviewInstance != null)
+        {
+            Destroy(_shopPreviewInstance);
+        }
+
+        if (_shopPreviewRoot != null)
+        {
+            Destroy(_shopPreviewRoot);
+        }
+
+        if (_shopPreviewRenderTexture != null)
+        {
+            _shopPreviewRenderTexture.Release();
+            Destroy(_shopPreviewRenderTexture);
+        }
+
+        _shopPreviewInstance = null;
+        _shopPreviewRoot = null;
+        _shopPreviewCamera = null;
+        _shopPreviewRenderTexture = null;
+        _shopPreviewRenderers = Array.Empty<Renderer>();
+        _shopPreviewAnimator = null;
     }
     public void ShowNotification(string message, float duration = 3f)
     {

@@ -1198,6 +1198,12 @@ MonoBehaviour:
   skinRegistry: {fileID: 11400000, guid: 3be7701bf166148e1bf5cca16220b916, type: 2}
   skinPreviewImage: {fileID: 1620181188}
   skinNameText: {fileID: 1338034878}
+  shopPreviewPrefab: {fileID: 0}
+  shopPreviewModelPosition: {x: 0, y: -1.15, z: -4}
+  shopPreviewModelEuler: {x: 0, y: 205, z: 0}
+  shopPreviewCameraPosition: {x: 0, y: 1.1, z: 6.1}
+  shopPreviewCameraBackground: {r: 0.03, g: 0.05, b: 0.06, a: 0}
+  shopPreviewDragSensitivity: 0.35
 --- !u!4 &398896794
 Transform:
   m_ObjectHideFlags: 0

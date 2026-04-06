@@ -1,6 +1,10 @@
 <ui:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" noNamespaceSchemaLocation="../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
     <ui:VisualElement name="main-menu-root" style="flex-grow: 1; position: relative; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 18px; background-color: rgba(3, 10, 18, 0.58);">
         <ui:Label name="menu-version-label" text="Version: 46.7.8" style="position: absolute; left: 50%; top: 18px; translate: -50% 0; color: rgba(255, 255, 255, 0.52); font-size: 13px;"/>
+        <ui:VisualElement name="wallet-pill" style="position: absolute; right: 18px; top: 18px; min-width: 168px; padding-left: 16px; padding-right: 16px; padding-top: 10px; padding-bottom: 10px; flex-direction: row; align-items: center; justify-content: space-between; background-color: rgba(14, 22, 18, 0.94); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(233, 195, 113, 0.65); border-right-color: rgba(233, 195, 113, 0.65); border-top-color: rgba(233, 195, 113, 0.65); border-bottom-color: rgba(233, 195, 113, 0.65); border-top-left-radius: 14px; border-top-right-radius: 14px; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px;">
+            <ui:Label text="CASH" style="color: rgba(255, 245, 224, 0.76); font-size: 14px; -unity-font-style: bold; letter-spacing: 1px;"/>
+            <ui:Label name="money-label" text="$100" style="color: rgb(242, 206, 124); font-size: 22px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+        </ui:VisualElement>
         <ui:VisualElement name="menu-center-column" style="flex-grow: 1; align-items: center; justify-content: center; overflow: visible;">
             <ui:VisualElement name="menu-logo-panel" style="padding-left: 34px; padding-right: 34px; padding-top: 20px; padding-bottom: 18px; background-color: rgba(14, 11, 13, 0.82); border-top-left-radius: 20px; border-top-right-radius: 20px; border-bottom-left-radius: 20px; border-bottom-right-radius: 20px;">
                 <ui:Label name="menu-logo-label" text="Runner" style="color: rgb(103, 235, 76); font-size: 78px; -unity-font-style: bold; unity-text-align: middle-center; letter-spacing: 8px;"/>
@@ -23,6 +27,90 @@
         </ui:VisualElement>
         <ui:VisualElement name="menu-right-rail" style="position: absolute; right: 14px; top: 50%; translate: 0 -50%; row-gap: 8px; align-items: stretch; overflow: visible; z-index: 10;">
             <ui:Button name="settings-button" text="SETTINGS" style="width: 118px; height: 56px; color: rgb(255, 255, 255); background-color: rgba(8, 12, 18, 0.9); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(255, 255, 255, 0.18); border-right-color: rgba(255, 255, 255, 0.18); border-top-color: rgba(255, 255, 255, 0.18); border-bottom-color: rgba(255, 255, 255, 0.18); border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; font-size: 15px; -unity-font-style: bold;"/>
+        </ui:VisualElement>
+        <ui:VisualElement name="shop-overlay" style="display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; padding-left: 28px; padding-right: 28px; padding-top: 28px; padding-bottom: 28px; flex-direction: row; align-items: stretch; justify-content: space-between; background-color: rgba(0, 0, 0, 0.72); z-index: 25;">
+            <ui:VisualElement name="shop-left-panel" style="width: 470px; max-width: 43%; padding-left: 18px; padding-right: 18px; padding-top: 18px; padding-bottom: 18px; background-color: rgba(20, 13, 10, 0.88); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(80, 52, 34, 0.96); border-right-color: rgba(80, 52, 34, 0.96); border-top-color: rgba(80, 52, 34, 0.96); border-bottom-color: rgba(80, 52, 34, 0.96); border-top-left-radius: 18px; border-top-right-radius: 18px; border-bottom-left-radius: 18px; border-bottom-right-radius: 18px;">
+                <ui:VisualElement style="padding-left: 22px; padding-right: 22px; padding-top: 16px; padding-bottom: 16px; background-color: rgba(78, 49, 30, 0.88); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
+                    <ui:Label text="SHOP" style="color: rgb(255, 231, 211); font-size: 42px; -unity-font-style: bold; unity-text-align: middle-center; letter-spacing: 2px; -unity-text-outline-width: 1px; -unity-text-outline-color: rgba(38, 18, 7, 0.9);"/>
+                </ui:VisualElement>
+                <ui:VisualElement name="shop-home-view" style="margin-top: 14px; flex-grow: 1; row-gap: 12px;">
+                    <ui:Button name="shop-skins-menu-button" text="" style="height: 92px; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 14px; background-color: rgba(18, 18, 18, 0.84); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(214, 118, 132, 0.78); border-right-color: rgba(214, 118, 132, 0.78); border-top-color: rgba(214, 118, 132, 0.78); border-bottom-color: rgba(214, 118, 132, 0.78); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
+                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                            <ui:Label text="CHARACTER" style="color: rgb(245, 232, 233); font-size: 23px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                            <ui:Label text="AVATAR" style="color: rgb(214, 118, 132); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        </ui:VisualElement>
+                    </ui:Button>
+                    <ui:Button name="shop-daily-store-button" text="" style="height: 92px; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 14px; background-color: rgba(18, 18, 18, 0.84); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(214, 118, 132, 0.78); border-right-color: rgba(214, 118, 132, 0.78); border-top-color: rgba(214, 118, 132, 0.78); border-bottom-color: rgba(214, 118, 132, 0.78); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
+                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                            <ui:Label text="DAILY STORE" style="color: rgb(245, 232, 233); font-size: 23px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                            <ui:Label text="SHOP" style="color: rgb(214, 118, 132); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        </ui:VisualElement>
+                    </ui:Button>
+                    <ui:Button name="shop-equipment-button" text="" style="height: 92px; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 14px; background-color: rgba(18, 18, 18, 0.84); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(120, 142, 220, 0.78); border-right-color: rgba(120, 142, 220, 0.78); border-top-color: rgba(120, 142, 220, 0.78); border-bottom-color: rgba(120, 142, 220, 0.78); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
+                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                            <ui:Label text="EQUIPMENT" style="color: rgb(245, 232, 233); font-size: 23px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                            <ui:Label text="WRENCH" style="color: rgb(120, 142, 220); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        </ui:VisualElement>
+                    </ui:Button>
+                    <ui:Button name="shop-emotes-button" text="" style="height: 92px; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 14px; background-color: rgba(18, 18, 18, 0.84); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(207, 190, 111, 0.78); border-right-color: rgba(207, 190, 111, 0.78); border-top-color: rgba(207, 190, 111, 0.78); border-bottom-color: rgba(207, 190, 111, 0.78); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
+                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                            <ui:Label text="EMOTES" style="color: rgb(245, 232, 233); font-size: 23px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                            <ui:Label text="EMOTE" style="color: rgb(207, 190, 111); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        </ui:VisualElement>
+                    </ui:Button>
+                    <ui:Button name="shop-robux-button" text="" style="height: 92px; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 14px; background-color: rgba(18, 18, 18, 0.84); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(95, 204, 102, 0.78); border-right-color: rgba(95, 204, 102, 0.78); border-top-color: rgba(95, 204, 102, 0.78); border-bottom-color: rgba(95, 204, 102, 0.78); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
+                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                            <ui:Label text="ROBUX" style="color: rgb(245, 232, 233); font-size: 23px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                            <ui:Label text="COIN" style="color: rgb(95, 204, 102); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        </ui:VisualElement>
+                    </ui:Button>
+                </ui:VisualElement>
+                <ui:VisualElement name="shop-skins-view" style="display: none; margin-top: 18px; flex-grow: 1;">
+                    <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center;">
+                        <ui:Label text="CHARACTER SKINS" style="margin-left: 8px; color: rgba(255, 241, 228, 0.82); font-size: 16px; -unity-font-style: bold; letter-spacing: 1px;"/>
+                        <ui:Button name="shop-back-button" text="BACK" style="width: 92px; height: 38px; color: rgb(255, 234, 215); background-color: rgba(59, 40, 30, 0.96); border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; font-size: 14px; -unity-font-style: bold;"/>
+                    </ui:VisualElement>
+                    <ui:VisualElement name="shop-skin-list" style="margin-top: 14px; row-gap: 14px;">
+                        <ui:Button name="shop-skin-card-0" text="" style="height: 128px; padding-left: 18px; padding-right: 18px; padding-top: 16px; padding-bottom: 16px; background-color: rgba(18, 20, 18, 0.9); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(110, 201, 106, 0.7); border-right-color: rgba(110, 201, 106, 0.7); border-top-color: rgba(110, 201, 106, 0.7); border-bottom-color: rgba(110, 201, 106, 0.7); border-top-left-radius: 14px; border-top-right-radius: 14px; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px;">
+                            <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                                <ui:VisualElement style="row-gap: 6px; flex-grow: 1;">
+                                    <ui:Label name="shop-skin-name-0" text="Green" style="color: rgb(243, 244, 229); font-size: 28px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                                    <ui:Label name="shop-skin-description-0" text="Default runner skin" style="color: rgba(232, 240, 229, 0.72); font-size: 14px;"/>
+                                    <ui:Label name="shop-skin-status-0" text="Owned" style="color: rgb(114, 228, 123); font-size: 16px; -unity-font-style: bold;"/>
+                                </ui:VisualElement>
+                                <ui:Label name="shop-skin-price-0" text="$0" style="min-width: 80px; color: rgb(242, 206, 124); font-size: 24px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                            </ui:VisualElement>
+                        </ui:Button>
+                        <ui:Button name="shop-skin-card-1" text="" style="height: 128px; padding-left: 18px; padding-right: 18px; padding-top: 16px; padding-bottom: 16px; background-color: rgba(24, 17, 22, 0.9); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(222, 123, 182, 0.7); border-right-color: rgba(222, 123, 182, 0.7); border-top-color: rgba(222, 123, 182, 0.7); border-bottom-color: rgba(222, 123, 182, 0.7); border-top-left-radius: 14px; border-top-right-radius: 14px; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px;">
+                            <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
+                                <ui:VisualElement style="row-gap: 6px; flex-grow: 1;">
+                                    <ui:Label name="shop-skin-name-1" text="Pink" style="color: rgb(250, 236, 244); font-size: 28px; -unity-font-style: bold; unity-text-align: middle-left;"/>
+                                    <ui:Label name="shop-skin-description-1" text="Bright premium variant" style="color: rgba(244, 232, 240, 0.72); font-size: 14px;"/>
+                                    <ui:Label name="shop-skin-status-1" text="Locked" style="color: rgb(240, 154, 173); font-size: 16px; -unity-font-style: bold;"/>
+                                </ui:VisualElement>
+                                <ui:Label name="shop-skin-price-1" text="$75" style="min-width: 80px; color: rgb(242, 206, 124); font-size: 24px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                            </ui:VisualElement>
+                        </ui:Button>
+                    </ui:VisualElement>
+                    <ui:VisualElement style="margin-top: 18px; padding-left: 16px; padding-right: 16px; padding-top: 16px; padding-bottom: 16px; background-color: rgba(10, 10, 11, 0.38); border-top-left-radius: 14px; border-top-right-radius: 14px; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px;">
+                        <ui:Label name="shop-selected-skin-label" text="Green" style="color: rgb(255, 240, 226); font-size: 24px; -unity-font-style: bold;"/>
+                        <ui:Label name="shop-selected-skin-subtitle" text="Default runner skin" style="margin-top: 4px; color: rgba(255, 238, 229, 0.7); font-size: 15px;"/>
+                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 14px;">
+                            <ui:Label name="shop-selected-price-label" text="$0" style="color: rgb(242, 206, 124); font-size: 26px; -unity-font-style: bold;"/>
+                            <ui:Label name="shop-selected-state-label" text="Owned" style="color: rgb(114, 228, 123); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        </ui:VisualElement>
+                        <ui:Button name="shop-action-button" text="EQUIP" style="height: 56px; margin-top: 16px; color: rgb(22, 13, 7); background-color: rgb(237, 183, 101); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 22px; -unity-font-style: bold;"/>
+                    </ui:VisualElement>
+                </ui:VisualElement>
+                <ui:Button name="shop-close-button" text="EXIT" style="height: 56px; margin-top: 18px; color: rgb(69, 18, 18); background-color: rgb(194, 91, 91); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 22px; -unity-font-style: bold;"/>
+            </ui:VisualElement>
+            <ui:VisualElement name="shop-preview-panel" style="flex-grow: 1; margin-left: 26px; padding-left: 18px; padding-right: 18px; padding-top: 18px; padding-bottom: 18px; background-color: rgba(7, 14, 19, 0.92); border-top-left-radius: 18px; border-top-right-radius: 18px; border-bottom-left-radius: 18px; border-bottom-right-radius: 18px; justify-content: flex-end;">
+                <ui:Label text="Preview" style="margin-left: 10px; color: rgba(255, 255, 255, 0.72); font-size: 16px; -unity-font-style: bold;"/>
+                <ui:Image name="shop-preview-frame" scale-mode="ScaleToFit" style="flex-grow: 1; margin-top: 12px; background-color: rgba(8, 15, 18, 0.22); border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(255,255,255,0.08); border-right-color: rgba(255,255,255,0.08); border-top-color: rgba(255,255,255,0.08); border-bottom-color: rgba(255,255,255,0.08); border-top-left-radius: 18px; border-top-right-radius: 18px; border-bottom-left-radius: 18px; border-bottom-right-radius: 18px;"/>
+                <ui:VisualElement style="position: absolute; right: 34px; bottom: 32px; padding-left: 12px; padding-right: 12px; padding-top: 8px; padding-bottom: 8px; background-color: rgba(8, 12, 16, 0.64); border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;">
+                    <ui:Label text="Drag the preview to rotate." style="color: rgba(255,255,255,0.74); font-size: 13px;"/>
+                </ui:VisualElement>
+            </ui:VisualElement>
         </ui:VisualElement>
         <ui:VisualElement name="graphics-settings-panel" style="display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0.42); z-index: 20;">
             <ui:VisualElement name="settings-card" style="width: 420px; max-width: 90%; padding-left: 24px; padding-right: 24px; padding-top: 22px; padding-bottom: 22px; background-color: rgba(12, 18, 26, 0.97); border-top-left-radius: 18px; border-top-right-radius: 18px; border-bottom-left-radius: 18px; border-bottom-right-radius: 18px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(255,255,255,0.08); border-right-color: rgba(255,255,255,0.08); border-top-color: rgba(255,255,255,0.08); border-bottom-color: rgba(255,255,255,0.08);">
