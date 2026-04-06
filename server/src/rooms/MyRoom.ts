@@ -618,7 +618,7 @@ export class MyRoom extends Room<MyRoomState> {
       if (target != null && this.isScoreEligibleTarget(target, now, nextbot)) {
         nextbot.targetSessionId = target.sessionId;
         const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
-        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed);
+        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, target.y);
         this.tryInjurePlayer(controller, nextbot, target, now);
         continue;
       }
@@ -797,10 +797,16 @@ export class MyRoom extends Room<MyRoomState> {
       x: nextPatrolTarget.x,
       z: nextPatrolTarget.z,
       distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
-    }, deltaSeconds, controller.moveSpeed);
+    }, deltaSeconds, controller.moveSpeed, nextPatrolTarget.y);
   }
 
-  private moveNextbotTowardsPosition(nextbot: NextbotState, target: PredictedTargetPosition, deltaSeconds: number, moveSpeed: number = NEXTBOT_MOVE_SPEED) {
+  private moveNextbotTowardsPosition(
+    nextbot: NextbotState,
+    target: PredictedTargetPosition,
+    deltaSeconds: number,
+    moveSpeed: number = NEXTBOT_MOVE_SPEED,
+    targetY?: number,
+  ) {
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
@@ -819,6 +825,16 @@ export class MyRoom extends Room<MyRoomState> {
     const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, effectiveMoveSpeed * deltaSeconds);
     nextbot.x += (dx / distance) * moveDistance;
     nextbot.z += (dz / distance) * moveDistance;
+
+    if (targetY != null && Number.isFinite(targetY)) {
+      const verticalDelta = targetY - nextbot.y;
+      const maxVerticalStep = effectiveMoveSpeed * deltaSeconds;
+      if (Math.abs(verticalDelta) <= maxVerticalStep) {
+        nextbot.y = targetY;
+      } else {
+        nextbot.y += Math.sign(verticalDelta) * maxVerticalStep;
+      }
+    }
   }
 
   private tryInjurePlayer(controller: NextbotControllerState, nextbot: NextbotState, target: Player, now: number) {

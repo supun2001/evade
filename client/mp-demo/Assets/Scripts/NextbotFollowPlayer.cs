@@ -349,37 +349,18 @@ public class NextbotFollowPlayer : MonoBehaviour
             return true;
         }
 
-        Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
-        if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 groundedTargetPosition))
-        {
-            targetPosition.y = groundedTargetPosition.y;
-        }
+        Vector3 targetPosition = ResolveGroundedRoomStatePosition(nextbotState);
         Quaternion targetRotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
 
         if (TryGetServerAssignedTarget(nextbotState.targetSessionId, out Transform targetTransform, out PlayerController targetController))
         {
-            if (!_hasAppliedRoomState || Vector3.Distance(transform.position, targetPosition) >= Mathf.Max(_roomStateSnapDistance, _roomStateChaseResyncDistance))
-            {
-                transform.position = targetPosition;
-                transform.rotation = targetRotation;
-                if (_navMeshAgent != null && _navMeshAgent.enabled)
-                {
-                    EnsureAgentOnNavMesh();
-                    if (_navMeshAgent.isOnNavMesh)
-                    {
-                        _navMeshAgent.Warp(targetPosition);
-                        _navMeshAgent.nextPosition = targetPosition;
-                    }
-                }
-            }
-
-            _hasAppliedRoomState = true;
-            EnableAgentDrivenChase();
             AssignTarget(targetTransform, targetController);
-            return false;
+        }
+        else
+        {
+            ClearTarget();
         }
 
-        ClearTarget();
         StopAgent();
         _isJumping = false;
         _jumpVelocity = Vector3.zero;
@@ -387,12 +368,8 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!_hasAppliedRoomState)
         {
-            transform.position = targetPosition;
+            ApplyRoomStatePosition(targetPosition);
             transform.rotation = targetRotation;
-            if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
-            {
-                _navMeshAgent.nextPosition = targetPosition;
-            }
             _hasAppliedRoomState = true;
             return true;
         }
@@ -400,12 +377,8 @@ public class NextbotFollowPlayer : MonoBehaviour
         float positionError = Vector3.Distance(transform.position, targetPosition);
         if (positionError >= _roomStateSnapDistance)
         {
-            transform.position = targetPosition;
+            ApplyRoomStatePosition(targetPosition);
             transform.rotation = targetRotation;
-            if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
-            {
-                _navMeshAgent.nextPosition = targetPosition;
-            }
             return true;
         }
 
@@ -419,6 +392,44 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return true;
+    }
+
+    private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
+    {
+        Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
+        float upwardProbeDistance = Mathf.Max(1f, _navMeshSnapDistance * 0.5f);
+        Vector3 elevatedProbePosition = targetPosition + Vector3.up * upwardProbeDistance;
+
+        // Probe from above first so positions inside ramp volumes prefer the walkable ramp surface.
+        if (TryGetNearestNavMeshPosition(elevatedProbePosition, out Vector3 elevatedTargetPosition)
+            && elevatedTargetPosition.y >= targetPosition.y - 0.05f)
+        {
+            return elevatedTargetPosition;
+        }
+
+        if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 groundedTargetPosition))
+        {
+            return groundedTargetPosition;
+        }
+
+        return targetPosition;
+    }
+
+    private void ApplyRoomStatePosition(Vector3 targetPosition)
+    {
+        transform.position = targetPosition;
+
+        if (_navMeshAgent == null || !_navMeshAgent.enabled)
+        {
+            return;
+        }
+
+        EnsureAgentOnNavMesh();
+        if (_navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.Warp(targetPosition);
+            _navMeshAgent.nextPosition = targetPosition;
+        }
     }
 
     private MyRoomState GetRoomState()
@@ -713,19 +724,6 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         targetTransform = targetController.transform;
         return targetTransform != null;
-    }
-
-    private void EnableAgentDrivenChase()
-    {
-        if (_navMeshAgent == null || !_navMeshAgent.enabled)
-        {
-            return;
-        }
-
-        EnsureAgentOnNavMesh();
-        _navMeshAgent.updatePosition = true;
-        _navMeshAgent.updateRotation = false;
-        _navMeshAgent.isStopped = false;
     }
 
     private void UpdateMovement()
