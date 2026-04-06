@@ -1,7 +1,13 @@
 <linker>
+    <!-- Colyseus SDK uses reflection; preserve fully to avoid runtime errors -->
     <assembly fullname="Colyseus.SDK" preserve="all"/>
-    <assembly fullname="UnityEngine" preserve="all"/>
-    <assembly fullname="System" preserve="all"/>
-    <assembly fullname="mscorlib" preserve="all"/>
+    <!-- Your own game scripts; preserve fully -->
     <assembly fullname="Assembly-CSharp" preserve="all"/>
+    <!-- Allow stripping of unused Unity subsystems -->
+    <assembly fullname="UnityEngine" preserve="nothing">
+        <namespace fullname="UnityEngine" preserve="nothing"/>
+    </assembly>
+    <!-- Allow stripping of unused System types -->
+    <assembly fullname="System" preserve="nothing"/>
+    <assembly fullname="mscorlib" preserve="nothing"/>
 </linker>
