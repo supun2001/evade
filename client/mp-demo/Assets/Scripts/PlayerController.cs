@@ -2832,8 +2832,10 @@ public class PlayerController : MonoBehaviour
         float deltaTime = Time.deltaTime;
         bool treatAsAirborne = !isGrounded || _verticalVelocity > 0.01f;
 
-        Vector3 cameraForward = _transform.forward;
-        Vector3 cameraRight = _transform.right;
+        float movementBasisYaw = GetMovementBasisYaw();
+        Quaternion movementBasisRotation = Quaternion.Euler(0f, movementBasisYaw, 0f);
+        Vector3 cameraForward = movementBasisRotation * Vector3.forward;
+        Vector3 cameraRight = movementBasisRotation * Vector3.right;
         
         Vector3 cameraForwardXZ = new Vector3(cameraForward.x, 0f, cameraForward.z).normalized;
         Vector3 cameraRightXZ = new Vector3(cameraRight.x, 0f, cameraRight.z).normalized;
@@ -2879,13 +2881,34 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateInjuredFacing()
     {
-        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+        Vector2 movementInput = GetInjuredFacingInput();
         if (movementInput.sqrMagnitude > 0.0001f)
         {
             _injuredFacingYaw = NormalizeSignedAngle(Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f);
         }
 
         UpdateVisualFacingYaw(_injuredFacingYaw);
+    }
+
+    private Vector2 GetInjuredFacingInput()
+    {
+        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+        if (movementInput.sqrMagnitude <= 0.0001f)
+        {
+            return Vector2.zero;
+        }
+
+        Vector3 worldMovementDirection = GetPlanarMovementDirection(movementInput);
+        if (worldMovementDirection.sqrMagnitude <= 0.0001f)
+        {
+            return Vector2.zero;
+        }
+
+        Vector3 localMovementDirection = _transform.InverseTransformDirection(worldMovementDirection);
+        Vector2 localPlanarDirection = new Vector2(localMovementDirection.x, localMovementDirection.z);
+        return localPlanarDirection.sqrMagnitude > 0.0001f
+            ? localPlanarDirection.normalized
+            : Vector2.zero;
     }
 
     private void UpdateCrouchFacing()
@@ -4783,11 +4806,30 @@ public class PlayerController : MonoBehaviour
 
     private Vector3 GetPlanarMovementDirection(Vector2 movementInput)
     {
-        Vector3 forward = _transform.forward;
-        Vector3 right = _transform.right;
+        float movementBasisYaw = GetMovementBasisYaw();
+        Quaternion movementBasisRotation = Quaternion.Euler(0f, movementBasisYaw, 0f);
+        Vector3 forward = movementBasisRotation * Vector3.forward;
+        Vector3 right = movementBasisRotation * Vector3.right;
         Vector3 forwardXZ = new Vector3(forward.x, 0f, forward.z).normalized;
         Vector3 rightXZ = new Vector3(right.x, 0f, right.z).normalized;
         return (forwardXZ * movementInput.y + rightXZ * movementInput.x).normalized;
+    }
+
+    private float GetMovementBasisYaw()
+    {
+        float movementBasisYaw = _transform.eulerAngles.y;
+        if (IsInjured() && !_isBeingCarried)
+        {
+            movementBasisYaw += _cameraRotation.x;
+
+            bool lookBackHeld = Keyboard.current != null && Keyboard.current.rKey.isPressed;
+            if (lookBackHeld)
+            {
+                movementBasisYaw += 180f;
+            }
+        }
+
+        return movementBasisYaw;
     }
 
     private bool TryGetWallRunContact(out int wallSide, out Vector3 wallNormal)

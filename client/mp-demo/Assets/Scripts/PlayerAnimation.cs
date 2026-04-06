@@ -560,9 +560,10 @@ public class PlayerAnimation : MonoBehaviour
     {
         if (_useNetworkAnimationState || _playerController == null)
         {
-            if (fallbackInput.sqrMagnitude > 0.0001f)
+            float networkMoveAmount = Mathf.Clamp01(fallbackInput.magnitude);
+            if (networkMoveAmount > 0.0001f)
             {
-                _injuredMoveAmount = 1f;
+                _injuredMoveAmount = networkMoveAmount;
                 _injuredReleaseTimer = _injuredReleaseBlendDuration;
             }
             else
@@ -573,9 +574,12 @@ public class PlayerAnimation : MonoBehaviour
             return new Vector2(0f, _injuredMoveAmount);
         }
 
-        if (fallbackInput.sqrMagnitude > 0.0001f)
+        float injuredSpeedFactor = Mathf.Clamp01(
+            _playerController.GetHorizontalSpeed() / Mathf.Max(_playerController.GetInjuredMoveSpeed(), 0.01f));
+
+        if (injuredSpeedFactor > 0.0001f)
         {
-            _injuredMoveAmount = 1f;
+            _injuredMoveAmount = injuredSpeedFactor;
             _injuredReleaseTimer = _injuredReleaseBlendDuration;
         }
         else
