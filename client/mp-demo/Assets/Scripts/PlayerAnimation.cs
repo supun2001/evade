@@ -62,7 +62,6 @@ public class PlayerAnimation : MonoBehaviour
     private bool _isInjured;
     private float _injuredMoveAmount;
     private float _injuredReleaseTimer;
-    private Vector2 _injuredMoveDirection = Vector2.up;
     private float _crouchMoveAmount;
     private float _crouchReleaseTimer;
     private Vector2 _crouchMoveDirection = Vector2.up;
@@ -404,7 +403,6 @@ public class PlayerAnimation : MonoBehaviour
         {
             _injuredMoveAmount = 0f;
             _injuredReleaseTimer = 0f;
-            _injuredMoveDirection = Vector2.up;
         }
 
         if (!IsCrouchingActive)
@@ -560,38 +558,32 @@ public class PlayerAnimation : MonoBehaviour
 
     private Vector2 GetInjuredAnimationInput(Vector2 fallbackInput, float deltaTime)
     {
-        Vector2 fallbackDirection = fallbackInput.sqrMagnitude > 0.0001f
-            ? fallbackInput.normalized
-            : _injuredMoveDirection;
-
         if (_useNetworkAnimationState || _playerController == null)
         {
             if (fallbackInput.sqrMagnitude > 0.0001f)
             {
                 _injuredMoveAmount = 1f;
                 _injuredReleaseTimer = _injuredReleaseBlendDuration;
-                _injuredMoveDirection = fallbackDirection;
             }
             else
             {
                 _injuredMoveAmount = GetInjuredReleaseAmount(deltaTime);
             }
 
-            return Vector2.ClampMagnitude(_injuredMoveDirection * _injuredMoveAmount, 1f);
+            return new Vector2(0f, _injuredMoveAmount);
         }
 
         if (fallbackInput.sqrMagnitude > 0.0001f)
         {
             _injuredMoveAmount = 1f;
             _injuredReleaseTimer = _injuredReleaseBlendDuration;
-            _injuredMoveDirection = fallbackDirection;
         }
         else
         {
             _injuredMoveAmount = GetInjuredReleaseAmount(deltaTime);
         }
 
-        return Vector2.ClampMagnitude(_injuredMoveDirection * _injuredMoveAmount, 1f);
+        return new Vector2(0f, _injuredMoveAmount);
     }
 
     private float GetInjuredReleaseAmount(float deltaTime)

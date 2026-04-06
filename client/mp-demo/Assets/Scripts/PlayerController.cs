@@ -291,6 +291,7 @@ public class PlayerController : MonoBehaviour
     private Vector3 _nextbotHitImpactVelocity = Vector3.zero;
     private float _nextbotHitImpactTimer;
     private float _nextbotHitReactionSeed;
+    private float _injuredFacingYaw = 180f;
 
     private CameraViewMode _currentViewMode;
     private CameraViewMode _preferredViewMode;
@@ -2878,14 +2879,13 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateInjuredFacing()
     {
-        Vector2 facingInput = GetDirectionalVisualFacingInput();
-        if (facingInput.sqrMagnitude > 0.0001f)
+        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
+        if (movementInput.sqrMagnitude > 0.0001f)
         {
-            UpdateDirectionalVisualFacing(facingInput);
-            return;
+            _injuredFacingYaw = NormalizeSignedAngle(Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f);
         }
 
-        UpdateVisualFacingFromMouse();
+        UpdateVisualFacingYaw(_injuredFacingYaw);
     }
 
     private void UpdateCrouchFacing()
@@ -2914,9 +2914,7 @@ public class PlayerController : MonoBehaviour
         }
 
         float localYaw = Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f;
-        float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
-        Quaternion targetLocalRotation = Quaternion.Euler(0f, localYaw, 0f) * _injuredVisualRootBaseLocalRotation;
-        _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+        UpdateVisualFacingYaw(localYaw);
     }
 
     private void UpdateVisualFacingFromMouse()
@@ -2929,6 +2927,18 @@ public class PlayerController : MonoBehaviour
         }
 
         float targetLocalYaw = GetMouseDrivenVisualYaw();
+        UpdateVisualFacingYaw(targetLocalYaw);
+    }
+
+    private void UpdateVisualFacingYaw(float targetLocalYaw)
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
         float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
         Quaternion targetLocalRotation = Quaternion.Euler(0f, targetLocalYaw, 0f) * _injuredVisualRootBaseLocalRotation;
         _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
@@ -3237,18 +3247,13 @@ public class PlayerController : MonoBehaviour
 
         if (IsInjured() && !_isBeingCarried)
         {
-            Vector2 facingInput = GetDirectionalVisualFacingInput();
-            if (facingInput.sqrMagnitude > 0.0001f)
-            {
-                return NormalizeSignedAngle(Mathf.Atan2(facingInput.x, facingInput.y) * Mathf.Rad2Deg + 180f);
-            }
-
-            return GetMouseDrivenVisualYaw();
+            return NormalizeSignedAngle(_injuredFacingYaw);
         }
 
-        if ((IsCrouching() || _isCarryingPlayer) && !_isBeingCarried)
+        if ((IsInjured() || IsCrouching() || _isCarryingPlayer) && !_isBeingCarried)
         {
-            return GetMouseDrivenVisualYaw();
+            Quaternion relativeFacing = Quaternion.Inverse(_injuredVisualRootBaseLocalRotation) * _injuredVisualRoot.localRotation;
+            return NormalizeSignedAngle(relativeFacing.eulerAngles.y);
         }
 
         Quaternion relativeRotation = Quaternion.Inverse(_injuredVisualRootBaseLocalRotation) * _injuredVisualRoot.localRotation;
