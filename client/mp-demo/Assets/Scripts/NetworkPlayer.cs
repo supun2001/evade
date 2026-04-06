@@ -248,6 +248,11 @@ public class NetworkPlayer : MonoBehaviour
             return;
         }
 
+        if (controller != null)
+        {
+            controller.EnsureRemoteFullBodyVisible();
+        }
+
         _remoteVelocity = new Vector3(playerState.velocityX, playerState.velocityY, playerState.velocityZ);
         Vector3 extrapolatedOffset = new Vector3(_remoteVelocity.x, 0f, _remoteVelocity.z) * sendInterval;
         targetPos = new Vector3(playerState.x, playerState.y, playerState.z) + extrapolatedOffset;

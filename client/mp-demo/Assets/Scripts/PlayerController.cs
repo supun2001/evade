@@ -2878,13 +2878,14 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateInjuredFacing()
     {
-        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
-        if (movementInput.sqrMagnitude <= 0.0001f)
+        Vector2 facingInput = GetDirectionalVisualFacingInput();
+        if (facingInput.sqrMagnitude > 0.0001f)
         {
+            UpdateDirectionalVisualFacing(facingInput);
             return;
         }
 
-        UpdateDirectionalVisualFacing(movementInput);
+        UpdateVisualFacingFromMouse();
     }
 
     private void UpdateCrouchFacing()
@@ -2895,7 +2896,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        UpdateDirectionalVisualFacing(_playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero);
+        UpdateVisualFacingFromMouse();
     }
 
     private void UpdateDirectionalVisualFacing(Vector2 movementInput)
@@ -2916,6 +2917,51 @@ public class PlayerController : MonoBehaviour
         float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
         Quaternion targetLocalRotation = Quaternion.Euler(0f, localYaw, 0f) * _injuredVisualRootBaseLocalRotation;
         _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+    }
+
+    private void UpdateVisualFacingFromMouse()
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        float targetLocalYaw = GetMouseDrivenVisualYaw();
+        float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
+        Quaternion targetLocalRotation = Quaternion.Euler(0f, targetLocalYaw, 0f) * _injuredVisualRootBaseLocalRotation;
+        _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+    }
+
+    private float GetMouseDrivenVisualYaw()
+    {
+        float cameraYawOffset = _cameraRotation.x;
+        bool lookBackHeld = Keyboard.current != null && Keyboard.current.rKey.isPressed;
+        if (lookBackHeld)
+        {
+            cameraYawOffset += 180f;
+        }
+
+        return NormalizeSignedAngle(cameraYawOffset + 180f);
+    }
+
+    private Vector2 GetDirectionalVisualFacingInput()
+    {
+        Vector3 planarVelocity = _horizontalVelocity;
+        planarVelocity.y = 0f;
+
+        if (planarVelocity.sqrMagnitude > 0.0001f)
+        {
+            Vector3 localVelocity = _transform.InverseTransformDirection(planarVelocity);
+            Vector2 localPlanarVelocity = new Vector2(localVelocity.x, localVelocity.z);
+            if (localPlanarVelocity.sqrMagnitude > 0.0001f)
+            {
+                return localPlanarVelocity.normalized;
+            }
+        }
+
+        return _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
     }
 
     private void UpdateNextbotHitReactionVisual()
@@ -3145,6 +3191,8 @@ public class PlayerController : MonoBehaviour
 
     public void ApplyRemoteVisualState(Vector2 movementInput, bool injured, bool crouching)
     {
+        EnsureRemoteFullBodyVisible();
+
         if (_isBeingCarried)
         {
             ResetInjuredVisualRootRotation();
@@ -3163,6 +3211,21 @@ public class PlayerController : MonoBehaviour
         UpdateDownedVisualRootPosition();
     }
 
+    public void EnsureRemoteFullBodyVisible()
+    {
+        if (_playerAnimation != null && _playerAnimation.VisualRootTransform != null)
+        {
+            GameObject visualRootObject = _playerAnimation.VisualRootTransform.gameObject;
+            if (visualRootObject != null && !visualRootObject.activeSelf)
+            {
+                visualRootObject.SetActive(true);
+            }
+        }
+
+        SetLocalRenderMode(false);
+        SetFirstPersonWallClipHidden(false);
+    }
+
     public float GetVisualYaw()
     {
         CacheInjuredVisualRoot();
@@ -3172,10 +3235,20 @@ public class PlayerController : MonoBehaviour
             return 180f;
         }
 
-        Vector2 movementInput = _playerLocomotionInput != null ? _playerLocomotionInput.MovementInput : Vector2.zero;
-        if ((IsInjured() || IsCrouching() || _isCarryingPlayer) && !_isBeingCarried && movementInput.sqrMagnitude > 0.0001f)
+        if (IsInjured() && !_isBeingCarried)
         {
-            return NormalizeSignedAngle(Mathf.Atan2(movementInput.x, movementInput.y) * Mathf.Rad2Deg + 180f);
+            Vector2 facingInput = GetDirectionalVisualFacingInput();
+            if (facingInput.sqrMagnitude > 0.0001f)
+            {
+                return NormalizeSignedAngle(Mathf.Atan2(facingInput.x, facingInput.y) * Mathf.Rad2Deg + 180f);
+            }
+
+            return GetMouseDrivenVisualYaw();
+        }
+
+        if ((IsCrouching() || _isCarryingPlayer) && !_isBeingCarried)
+        {
+            return GetMouseDrivenVisualYaw();
         }
 
         Quaternion relativeRotation = Quaternion.Inverse(_injuredVisualRootBaseLocalRotation) * _injuredVisualRoot.localRotation;

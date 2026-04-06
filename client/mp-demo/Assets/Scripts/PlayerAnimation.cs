@@ -40,7 +40,7 @@ public class PlayerAnimation : MonoBehaviour
     private const string IDLE_RUN_STATE = "Base Layer.Idle/Run";
     private const string CROUCH_STATE = "Base Layer.Crouch";
     private const string CROUCH_RUNNING_STATE = "Base Layer.CrouchRunning";
-    private const string CARRYING_ME_STATE = "Base Layer.Carrying";
+    private const string CARRYING_ME_STATE = "Base Layer.CarryingMe";
     private const string CARRYING_IDLE_STATE = "Base Layer.CarryingIdle";
     private const string CARRYING_RUN_STATE = "Base Layer.CarryingRun";
 
@@ -62,8 +62,10 @@ public class PlayerAnimation : MonoBehaviour
     private bool _isInjured;
     private float _injuredMoveAmount;
     private float _injuredReleaseTimer;
+    private Vector2 _injuredMoveDirection = Vector2.up;
     private float _crouchMoveAmount;
     private float _crouchReleaseTimer;
+    private Vector2 _crouchMoveDirection = Vector2.up;
     private float _wallRunAnimationHoldTimer;
     private string _lastWallRunState = WALL_SLIDE_LEFT_STATE;
     private Vector2 _lastAppliedAnimationInput;
@@ -402,12 +404,14 @@ public class PlayerAnimation : MonoBehaviour
         {
             _injuredMoveAmount = 0f;
             _injuredReleaseTimer = 0f;
+            _injuredMoveDirection = Vector2.up;
         }
 
         if (!IsCrouchingActive)
         {
             _crouchMoveAmount = 0f;
             _crouchReleaseTimer = 0f;
+            _crouchMoveDirection = Vector2.up;
         }
 
         Vector2 input = _useNetworkAnimationState
@@ -556,32 +560,38 @@ public class PlayerAnimation : MonoBehaviour
 
     private Vector2 GetInjuredAnimationInput(Vector2 fallbackInput, float deltaTime)
     {
+        Vector2 fallbackDirection = fallbackInput.sqrMagnitude > 0.0001f
+            ? fallbackInput.normalized
+            : _injuredMoveDirection;
+
         if (_useNetworkAnimationState || _playerController == null)
         {
             if (fallbackInput.sqrMagnitude > 0.0001f)
             {
                 _injuredMoveAmount = 1f;
                 _injuredReleaseTimer = _injuredReleaseBlendDuration;
+                _injuredMoveDirection = fallbackDirection;
             }
             else
             {
                 _injuredMoveAmount = GetInjuredReleaseAmount(deltaTime);
             }
 
-            return new Vector2(0f, _injuredMoveAmount);
+            return Vector2.ClampMagnitude(_injuredMoveDirection * _injuredMoveAmount, 1f);
         }
 
         if (fallbackInput.sqrMagnitude > 0.0001f)
         {
             _injuredMoveAmount = 1f;
             _injuredReleaseTimer = _injuredReleaseBlendDuration;
+            _injuredMoveDirection = fallbackDirection;
         }
         else
         {
             _injuredMoveAmount = GetInjuredReleaseAmount(deltaTime);
         }
 
-        return new Vector2(0f, _injuredMoveAmount);
+        return Vector2.ClampMagnitude(_injuredMoveDirection * _injuredMoveAmount, 1f);
     }
 
     private float GetInjuredReleaseAmount(float deltaTime)
@@ -603,17 +613,22 @@ public class PlayerAnimation : MonoBehaviour
 
     private Vector2 GetCrouchAnimationInput(Vector2 fallbackInput, float deltaTime)
     {
+        Vector2 fallbackDirection = fallbackInput.sqrMagnitude > 0.0001f
+            ? fallbackInput.normalized
+            : _crouchMoveDirection;
+
         if (fallbackInput.sqrMagnitude > 0.0001f)
         {
             _crouchMoveAmount = 1f;
             _crouchReleaseTimer = _crouchReleaseBlendDuration;
+            _crouchMoveDirection = fallbackDirection;
         }
         else
         {
             _crouchMoveAmount = GetCrouchReleaseAmount(deltaTime);
         }
 
-        return new Vector2(0f, _crouchMoveAmount);
+        return Vector2.ClampMagnitude(_crouchMoveDirection * _crouchMoveAmount, 1f);
     }
 
     private float GetCrouchReleaseAmount(float deltaTime)
