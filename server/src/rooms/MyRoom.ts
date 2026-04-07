@@ -29,7 +29,7 @@ const NEXTBOT_UNREACHABLE_TIMEOUT_MS = 1800;
 const NEXTBOT_PREDICTION_TIME = 0.28;
 const NEXTBOT_MAX_CHASE_RANGE = 70;
 const NEXTBOT_ACQUIRE_RANGE = 80;
-const NEXTBOT_MAX_VERTICAL_DELTA = 8;
+const NEXTBOT_MAX_VERTICAL_DELTA = 12;
 const NEXTBOT_STALE_TARGET_TIMEOUT_MS = 1500;
 const NEXTBOT_DISTANCE_SCORE_BASE = 120;
 const NEXTBOT_VISIBLE_PROXY_RANGE = 18;
@@ -824,25 +824,36 @@ export class MyRoom extends Room<MyRoomState> {
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
+    const effectiveMoveSpeed = Number.isFinite(moveSpeed) && moveSpeed > 0 ? moveSpeed : NEXTBOT_MOVE_SPEED;
 
     if (distance <= 0.0001) {
+      this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
       return;
     }
 
     nextbot.rotationY = Math.atan2(dx, dz) * (180 / Math.PI);
 
     if (distance <= NEXTBOT_STOPPING_DISTANCE) {
+      this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
       return;
     }
 
-    const effectiveMoveSpeed = Number.isFinite(moveSpeed) && moveSpeed > 0 ? moveSpeed : NEXTBOT_MOVE_SPEED;
     const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, effectiveMoveSpeed * deltaSeconds);
     nextbot.x += (dx / distance) * moveDistance;
     nextbot.z += (dz / distance) * moveDistance;
 
+    this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+  }
+
+  private moveNextbotVerticallyTowardsTarget(
+    nextbot: NextbotState,
+    targetY: number | undefined,
+    deltaSeconds: number,
+    moveSpeed: number,
+  ) {
     if (targetY != null && Number.isFinite(targetY)) {
       const verticalDelta = targetY - nextbot.y;
-      const maxVerticalStep = effectiveMoveSpeed * deltaSeconds;
+      const maxVerticalStep = moveSpeed * deltaSeconds;
       if (Math.abs(verticalDelta) <= maxVerticalStep) {
         nextbot.y = targetY;
       } else {
