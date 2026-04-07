@@ -1,7 +1,7 @@
 import { randomBytes, createHash } from "crypto";
 import { MongoClient, Collection } from "mongodb";
 
-const DEFAULT_MONGODB_URI = "mongodb://127.0.0.1:27017";
+const DEFAULT_MONGODB_URI = "mongodb+srv://supunhasankauk23034_db_user:nyx3FW0uOdazgzLh@cluster0.xbyqos9.mongodb.net/";
 const DATABASE_NAME = process.env.MONGODB_DB_NAME || "evade";
 const USERS_COLLECTION_NAME = "users";
 

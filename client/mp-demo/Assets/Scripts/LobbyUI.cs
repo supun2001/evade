@@ -2019,8 +2019,21 @@ public class LobbyUI : MonoBehaviour
 
     private void EnsureShopPreviewObjects()
     {
-        if (_shopPreviewFrame == null || _shopPreviewRenderTexture != null)
+        if (_shopPreviewFrame == null)
         {
+            return;
+        }
+
+        if (_shopPreviewRenderTexture != null)
+        {
+            _shopPreviewFrame.image = _shopPreviewRenderTexture;
+
+            if (_shopPreviewCamera != null)
+            {
+                _shopPreviewCamera.targetTexture = _shopPreviewRenderTexture;
+                _shopPreviewCamera.Render();
+            }
+
             return;
         }
 

@@ -62,12 +62,6 @@
                             <ui:Label text="EMOTE" style="color: rgb(207, 190, 111); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
                         </ui:VisualElement>
                     </ui:Button>
-                    <ui:Button name="shop-robux-button" text="" style="height: 92px; padding-left: 18px; padding-right: 18px; padding-top: 14px; padding-bottom: 14px; background-color: rgba(18, 18, 18, 0.84); border-left-width: 2px; border-right-width: 2px; border-top-width: 2px; border-bottom-width: 2px; border-left-color: rgba(95, 204, 102, 0.78); border-right-color: rgba(95, 204, 102, 0.78); border-top-color: rgba(95, 204, 102, 0.78); border-bottom-color: rgba(95, 204, 102, 0.78); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;">
-                        <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; flex-grow: 1;">
-                            <ui:Label text="ROBUX" style="color: rgb(245, 232, 233); font-size: 23px; -unity-font-style: bold; unity-text-align: middle-left;"/>
-                            <ui:Label text="COIN" style="color: rgb(95, 204, 102); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
-                        </ui:VisualElement>
-                    </ui:Button>
                 </ui:VisualElement>
                 <ui:VisualElement name="shop-skins-view" style="display: none; margin-top: 18px; flex-grow: 1;">
                     <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center;">
