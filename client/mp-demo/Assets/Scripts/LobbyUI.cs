@@ -269,11 +269,6 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnCreateClicked()
     {
-        if (!EnsureLoggedInForMatch())
-        {
-            return;
-        }
-
         SetStartButtonEnabled(false);
 
         if (createButton != null) createButton.interactable = false;
@@ -298,11 +293,6 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnStartClicked()
     {
-        if (!EnsureLoggedInForMatch())
-        {
-            return;
-        }
-
         SetStartButtonEnabled(false);
 
         if (createButton != null) createButton.interactable = false;
@@ -330,11 +320,6 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnJoinClicked()
     {
-        if (!EnsureLoggedInForMatch())
-        {
-            return;
-        }
-
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
             Debug.LogWarning("LobbyUI: Already in a room. Ignoring Join request.");
@@ -685,11 +670,6 @@ public class LobbyUI : MonoBehaviour
 
     private async void HandleSpectateButtonClicked()
     {
-        if (!EnsureLoggedInForMatch())
-        {
-            return;
-        }
-
         _pendingSpectateJoin = true;
 
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
@@ -718,18 +698,6 @@ public class LobbyUI : MonoBehaviour
         }
 
         _startButton.SetEnabled(enabled);
-    }
-
-    private bool EnsureLoggedInForMatch()
-    {
-        if (HasLoggedInAccount())
-        {
-            return true;
-        }
-
-        SetLoginPopupVisible(true);
-        ShowNotification("Login first before joining the game.");
-        return false;
     }
 
     private void HandleSettingsButtonClicked()
