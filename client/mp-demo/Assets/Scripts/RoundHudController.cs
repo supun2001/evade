@@ -398,7 +398,7 @@ public class RoundHudController : MonoBehaviour
                 SessionId = sessionId,
                 Player = player,
                 SortPriority = GetPlayerStatePriority(player),
-                DisplayName = GetScoreboardDisplayName(sessionId)
+                DisplayName = GetScoreboardDisplayName(player, sessionId)
             });
         }
 
@@ -552,7 +552,7 @@ public class RoundHudController : MonoBehaviour
         return row;
     }
 
-    private string GetScoreboardDisplayName(string sessionId)
+    private string GetScoreboardDisplayName(Player player, string sessionId)
     {
         if (string.IsNullOrEmpty(sessionId))
         {
@@ -562,6 +562,11 @@ public class RoundHudController : MonoBehaviour
         if (_networkManager != null && string.Equals(sessionId, _networkManager.LocalSessionId, StringComparison.Ordinal))
         {
             return "You";
+        }
+
+        if (player != null && !string.IsNullOrWhiteSpace(player.displayName))
+        {
+            return player.displayName;
         }
 
         int suffixLength = Mathf.Min(4, sessionId.Length);

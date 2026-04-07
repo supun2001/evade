@@ -158,6 +158,19 @@ function readPlayerUpdateBoolean(message: PlayerUpdateMessage, index: number, ke
   return value === true || value === 1;
 }
 
+function sanitizeDisplayName(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  return trimmed.slice(0, 24);
+}
+
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 15;
   state = new MyRoomState();
@@ -461,6 +474,7 @@ export class MyRoom extends Room<MyRoomState> {
     //Create a new player
     const player = new Player();
     player.sessionId = client.sessionId;
+    player.displayName = sanitizeDisplayName(options?.username, `Player ${this.nextJoinOrder}`);
 
     player.isReady = false;
     player.isSpectator = false;
@@ -506,7 +520,7 @@ export class MyRoom extends Room<MyRoomState> {
       downedCount: 0,
       revivesDone: 0,
       joinOrder,
-      displayName: `Player ${joinOrder}`,
+      displayName: player.displayName,
     });
     this.nextJoinOrder += 1;
 

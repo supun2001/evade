@@ -31,6 +31,7 @@ export class Player extends Schema {
 
     // Player Info
     @type("string") sessionId: string = "";
+    @type("string") displayName: string = "";
     @type("number") timestamp: number = 0;
     @type("boolean") isReady: boolean = false;
 

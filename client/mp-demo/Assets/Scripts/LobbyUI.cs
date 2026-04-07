@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
@@ -48,6 +49,10 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _graphicsLowButton;
     private UIToolkitButton _graphicsMediumButton;
     private UIToolkitButton _shopButton;
+    private UIToolkitButton _loginButton;
+    private UIToolkitButton _loginCloseButton;
+    private UIToolkitButton _loginSubmitButton;
+    private UIToolkitButton _registerSubmitButton;
     private UIToolkitButton _shopDailyStoreButton;
     private UIToolkitButton _shopEquipmentButton;
     private UIToolkitButton _shopSkinsMenuButton;
@@ -63,6 +68,8 @@ public class LobbyUI : MonoBehaviour
     private Label _menuHoverLabel;
     private Label _comingSoonMessageLabel;
     private Label _moneyLabel;
+    private Label _accountStatusLabel;
+    private Label _loginMessageLabel;
     private Label _shopSelectedSkinLabel;
     private Label _shopSelectedSkinSubtitle;
     private Label _shopSelectedPriceLabel;
@@ -70,16 +77,22 @@ public class LobbyUI : MonoBehaviour
     private VisualElement _menuCenterColumn;
     private VisualElement _menuRightRail;
     private VisualElement _walletPill;
+    private VisualElement _accountPill;
     private VisualElement _graphicsSettingsPanel;
     private VisualElement _settingsCard;
+    private VisualElement _loginOverlay;
+    private VisualElement _loginCard;
     private VisualElement _comingSoonOverlay;
     private VisualElement _shopOverlay;
     private VisualElement _shopHomeView;
     private VisualElement _shopSkinsView;
     private VisualElement _shopPreviewPanel;
     private UIToolkitImage _shopPreviewFrame;
+    private TextField _loginUsernameField;
+    private TextField _loginPasswordField;
     private SliderInt _graphicsVolumeSlider;
     private bool _settingsPopupVisible;
+    private bool _loginPopupVisible;
     private bool _shopVisible;
     private ShopPage _shopPage = ShopPage.Home;
     private bool _menuEventsBound;
@@ -109,11 +122,8 @@ public class LobbyUI : MonoBehaviour
     private string _pendingHoverLabelText = DefaultMenuHoverText;
     private float _currentHoverLabelOpacity;
     private float _targetHoverLabelOpacity;
-    private const int StartingMoneyAmount = 100;
-    private const string SelectedSkinPlayerPrefsKey = "SelectedSkin";
-    private const string PlayerMoneyPlayerPrefsKey = "PlayerMoney";
-    private const string OwnedSkinPlayerPrefsPrefix = "OwnedSkin_";
     private const int DefaultOwnedSkinIndex = 0;
+    private const string AuthTokenPlayerPrefsKey = "AuthToken";
     private RenderTexture _shopPreviewRenderTexture;
     private Camera _shopPreviewCamera;
     private GameObject _shopPreviewRoot;
@@ -122,6 +132,9 @@ public class LobbyUI : MonoBehaviour
     private Animator _shopPreviewAnimator;
     private bool _isDraggingShopPreview;
     private Vector2 _shopPreviewLastPointerPosition;
+    private string _authToken = string.Empty;
+    private AccountData _accountData;
+    private bool _isAuthRequestInFlight;
     #endregion
 
     #region Class Methods
@@ -140,15 +153,12 @@ public class LobbyUI : MonoBehaviour
 
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
 
-        EnsureEconomyDefaults();
-        if (PlayerPrefs.HasKey(SelectedSkinPlayerPrefsKey))
-        {
-            currentSkinIndex = PlayerPrefs.GetInt(SelectedSkinPlayerPrefsKey);
-        }
         currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
         _shopSelectedSkinIndex = currentSkinIndex;
         UpdateSkinUI();
+        UpdateAccountUi();
         UpdateMoneyUI();
+        _ = TryRestoreAccountSessionAsync();
 
         if (notificationText != null) notificationText.text = "";
     }
@@ -259,6 +269,11 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnCreateClicked()
     {
+        if (!EnsureLoggedInForMatch())
+        {
+            return;
+        }
+
         SetStartButtonEnabled(false);
 
         if (createButton != null) createButton.interactable = false;
@@ -283,6 +298,11 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnStartClicked()
     {
+        if (!EnsureLoggedInForMatch())
+        {
+            return;
+        }
+
         SetStartButtonEnabled(false);
 
         if (createButton != null) createButton.interactable = false;
@@ -310,6 +330,11 @@ public class LobbyUI : MonoBehaviour
 
     public async void OnJoinClicked()
     {
+        if (!EnsureLoggedInForMatch())
+        {
+            return;
+        }
+
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
             Debug.LogWarning("LobbyUI: Already in a room. Ignoring Join request.");
@@ -385,6 +410,10 @@ public class LobbyUI : MonoBehaviour
         _graphicsLowButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-low-button");
         _graphicsMediumButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-medium-button");
         _shopButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-button");
+        _loginButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("login-button");
+        _loginCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("login-close-button");
+        _loginSubmitButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("login-submit-button");
+        _registerSubmitButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("register-submit-button");
         _shopDailyStoreButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-daily-store-button");
         _shopEquipmentButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-equipment-button");
         _shopSkinsMenuButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-skins-menu-button");
@@ -401,6 +430,8 @@ public class LobbyUI : MonoBehaviour
         _menuHoverLabel = _menuDocument.rootVisualElement?.Q<Label>("menu-hover-label");
         _comingSoonMessageLabel = _menuDocument.rootVisualElement?.Q<Label>("coming-soon-message-label");
         _moneyLabel = _menuDocument.rootVisualElement?.Q<Label>("money-label");
+        _accountStatusLabel = _menuDocument.rootVisualElement?.Q<Label>("account-status-label");
+        _loginMessageLabel = _menuDocument.rootVisualElement?.Q<Label>("login-message-label");
         _shopSelectedSkinLabel = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-skin-label");
         _shopSelectedSkinSubtitle = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-skin-subtitle");
         _shopSelectedPriceLabel = _menuDocument.rootVisualElement?.Q<Label>("shop-selected-price-label");
@@ -408,14 +439,19 @@ public class LobbyUI : MonoBehaviour
         _menuCenterColumn = _menuDocument.rootVisualElement?.Q<VisualElement>("menu-center-column");
         _menuRightRail = _menuDocument.rootVisualElement?.Q<VisualElement>("menu-right-rail");
         _walletPill = _menuDocument.rootVisualElement?.Q<VisualElement>("wallet-pill");
+        _accountPill = _menuDocument.rootVisualElement?.Q<VisualElement>("account-pill");
         _graphicsSettingsPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("graphics-settings-panel");
         _settingsCard = _menuDocument.rootVisualElement?.Q<VisualElement>("settings-card");
+        _loginOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("login-overlay");
+        _loginCard = _menuDocument.rootVisualElement?.Q<VisualElement>("login-card");
         _comingSoonOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("coming-soon-overlay");
         _shopOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-overlay");
         _shopHomeView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-home-view");
         _shopSkinsView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-skins-view");
         _shopPreviewPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-preview-panel");
         _shopPreviewFrame = _menuDocument.rootVisualElement?.Q<UIToolkitImage>("shop-preview-frame");
+        _loginUsernameField = _menuDocument.rootVisualElement?.Q<TextField>("login-username-field");
+        _loginPasswordField = _menuDocument.rootVisualElement?.Q<TextField>("login-password-field");
         CacheShopSkinElements();
         if (_startButton == null)
         {
@@ -423,11 +459,18 @@ public class LobbyUI : MonoBehaviour
         }
 
         _settingsPopupVisible = false;
+        _loginPopupVisible = false;
         _shopVisible = false;
         _shopPage = ShopPage.Home;
         SetSettingsPopupVisible(false);
+        SetLoginPopupVisible(false);
         SetShopVisible(false);
         BindShopPreviewEvents();
+
+        if (_loginPasswordField != null)
+        {
+            _loginPasswordField.isPasswordField = true;
+        }
 
         if (_comingSoonOverlay != null)
         {
@@ -438,6 +481,7 @@ public class LobbyUI : MonoBehaviour
         RefreshGraphicsSettingsUi();
         ApplyMenuArt();
         ResetHoverLabelVisual();
+        UpdateAccountUi();
         UpdateMoneyUI();
         RefreshShopUi();
     }
@@ -461,9 +505,33 @@ public class LobbyUI : MonoBehaviour
         {
             _settingsButton.clicked += HandleSettingsButtonClicked;
         }
+        if (_loginButton != null)
+        {
+            _loginButton.clicked += HandleLoginButtonClicked;
+        }
+        if (_loginCloseButton != null)
+        {
+            _loginCloseButton.clicked += HandleLoginCloseButtonClicked;
+        }
+        if (_loginSubmitButton != null)
+        {
+            _loginSubmitButton.clicked += HandleLoginSubmitButtonClicked;
+        }
+        if (_registerSubmitButton != null)
+        {
+            _registerSubmitButton.clicked += HandleRegisterSubmitButtonClicked;
+        }
         if (_settingsCloseButton != null)
         {
             _settingsCloseButton.clicked += HandleSettingsCloseButtonClicked;
+        }
+        if (_loginOverlay != null)
+        {
+            _loginOverlay.RegisterCallback<ClickEvent>(HandleLoginOverlayClicked);
+        }
+        if (_loginCard != null)
+        {
+            _loginCard.RegisterCallback<ClickEvent>(HandleLoginCardClicked);
         }
         if (_graphicsSettingsPanel != null)
         {
@@ -526,9 +594,33 @@ public class LobbyUI : MonoBehaviour
         {
             _settingsButton.clicked -= HandleSettingsButtonClicked;
         }
+        if (_loginButton != null)
+        {
+            _loginButton.clicked -= HandleLoginButtonClicked;
+        }
+        if (_loginCloseButton != null)
+        {
+            _loginCloseButton.clicked -= HandleLoginCloseButtonClicked;
+        }
+        if (_loginSubmitButton != null)
+        {
+            _loginSubmitButton.clicked -= HandleLoginSubmitButtonClicked;
+        }
+        if (_registerSubmitButton != null)
+        {
+            _registerSubmitButton.clicked -= HandleRegisterSubmitButtonClicked;
+        }
         if (_settingsCloseButton != null)
         {
             _settingsCloseButton.clicked -= HandleSettingsCloseButtonClicked;
+        }
+        if (_loginOverlay != null)
+        {
+            _loginOverlay.UnregisterCallback<ClickEvent>(HandleLoginOverlayClicked);
+        }
+        if (_loginCard != null)
+        {
+            _loginCard.UnregisterCallback<ClickEvent>(HandleLoginCardClicked);
         }
         if (_graphicsSettingsPanel != null)
         {
@@ -593,6 +685,11 @@ public class LobbyUI : MonoBehaviour
 
     private async void HandleSpectateButtonClicked()
     {
+        if (!EnsureLoggedInForMatch())
+        {
+            return;
+        }
+
         _pendingSpectateJoin = true;
 
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
@@ -623,6 +720,18 @@ public class LobbyUI : MonoBehaviour
         _startButton.SetEnabled(enabled);
     }
 
+    private bool EnsureLoggedInForMatch()
+    {
+        if (HasLoggedInAccount())
+        {
+            return true;
+        }
+
+        SetLoginPopupVisible(true);
+        ShowNotification("Login first before joining the game.");
+        return false;
+    }
+
     private void HandleSettingsButtonClicked()
     {
         SetSettingsPopupVisible(!_settingsPopupVisible);
@@ -631,6 +740,48 @@ public class LobbyUI : MonoBehaviour
     private void HandleSettingsCloseButtonClicked()
     {
         SetSettingsPopupVisible(false);
+    }
+
+    private void HandleLoginButtonClicked()
+    {
+        if (HasLoggedInAccount())
+        {
+            LogoutAccount();
+            return;
+        }
+
+        SetSettingsPopupVisible(false);
+        SetLoginPopupVisible(true);
+    }
+
+    private void HandleLoginCloseButtonClicked()
+    {
+        SetLoginPopupVisible(false);
+    }
+
+    private void HandleLoginOverlayClicked(ClickEvent evt)
+    {
+        if (evt == null || _loginOverlay == null || evt.target != _loginOverlay)
+        {
+            return;
+        }
+
+        SetLoginPopupVisible(false);
+    }
+
+    private void HandleLoginCardClicked(ClickEvent evt)
+    {
+        evt?.StopPropagation();
+    }
+
+    private async void HandleLoginSubmitButtonClicked()
+    {
+        await SubmitLoginAsync(false);
+    }
+
+    private async void HandleRegisterSubmitButtonClicked()
+    {
+        await SubmitLoginAsync(true);
     }
 
     private void HandleSettingsOverlayClicked(ClickEvent evt)
@@ -941,6 +1092,7 @@ public class LobbyUI : MonoBehaviour
     {
         SetMenuButtonDescription(_startButton, "Join the current game");
         SetMenuButtonDescription(_shopButton, "Browse the shop");
+        SetMenuButtonDescription(_loginButton, "Login and save your cash");
         SetMenuButtonDescription(_shopDailyStoreButton, "Browse the daily store");
         SetMenuButtonDescription(_shopEquipmentButton, "Check equipment");
         SetMenuButtonDescription(_shopSkinsMenuButton, "Open the character shop");
@@ -968,6 +1120,7 @@ public class LobbyUI : MonoBehaviour
         _hoverButtons.Clear();
         RegisterHoverButton(_startButton);
         RegisterHoverButton(_settingsButton);
+        RegisterHoverButton(_loginButton);
         RegisterHoverButton(_graphicsLowButton);
         RegisterHoverButton(_graphicsMediumButton);
         RegisterHoverButton(_shopButton);
@@ -1346,6 +1499,41 @@ public class LobbyUI : MonoBehaviour
         }
     }
 
+    private void SetLoginPopupVisible(bool visible)
+    {
+        _loginPopupVisible = visible;
+
+        if (_loginOverlay != null)
+        {
+            _loginOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            _loginOverlay.pickingMode = visible ? PickingMode.Position : PickingMode.Ignore;
+            if (visible)
+            {
+                _loginOverlay.BringToFront();
+            }
+        }
+
+        if (!visible)
+        {
+            return;
+        }
+
+        if (_loginUsernameField != null && string.IsNullOrWhiteSpace(_loginUsernameField.value))
+        {
+            _loginUsernameField.value = string.Empty;
+        }
+
+        if (_loginPasswordField != null)
+        {
+            _loginPasswordField.value = string.Empty;
+        }
+
+        if (_loginMessageLabel != null)
+        {
+            _loginMessageLabel.text = "Login or create an account to save your cash and skins.";
+        }
+    }
+
     private static string FormatGraphicsQualityName(string qualityName)
     {
         if (string.IsNullOrEmpty(qualityName))
@@ -1486,8 +1674,6 @@ public class LobbyUI : MonoBehaviour
     private void SaveAndSyncSkin()
     {
         currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
-        PlayerPrefs.SetInt(SelectedSkinPlayerPrefsKey, currentSkinIndex);
-        PlayerPrefs.Save();
        
        _shopSelectedSkinIndex = currentSkinIndex;
        UpdateSkinUI();
@@ -1533,41 +1719,9 @@ public class LobbyUI : MonoBehaviour
        RefreshShopPreviewVisual();
     }
 
-    private void EnsureEconomyDefaults()
-    {
-        if (!PlayerPrefs.HasKey(PlayerMoneyPlayerPrefsKey))
-        {
-            PlayerPrefs.SetInt(PlayerMoneyPlayerPrefsKey, StartingMoneyAmount);
-        }
-
-        int skinCount = GetSkinCount();
-        for (int index = 0; index < skinCount; index++)
-        {
-            string key = GetOwnedSkinKey(index);
-            if (!PlayerPrefs.HasKey(key))
-            {
-                bool defaultOwned = index == DefaultOwnedSkinIndex
-                    || (skinRegistry != null
-                        && skinRegistry.skins != null
-                        && index < skinRegistry.skins.Length
-                        && skinRegistry.skins[index].unlockedByDefault);
-                PlayerPrefs.SetInt(key, defaultOwned ? 1 : 0);
-            }
-        }
-
-        PlayerPrefs.Save();
-    }
-
     private int GetPlayerMoney()
     {
-        return PlayerPrefs.GetInt(PlayerMoneyPlayerPrefsKey, StartingMoneyAmount);
-    }
-
-    private void SetPlayerMoney(int amount)
-    {
-        PlayerPrefs.SetInt(PlayerMoneyPlayerPrefsKey, Mathf.Max(0, amount));
-        PlayerPrefs.Save();
-        UpdateMoneyUI();
+        return _accountData != null ? Mathf.Max(0, _accountData.money) : 0;
     }
 
     private void UpdateMoneyUI()
@@ -1583,11 +1737,6 @@ public class LobbyUI : MonoBehaviour
         return skinRegistry != null && skinRegistry.skins != null ? skinRegistry.skins.Length : 0;
     }
 
-    private string GetOwnedSkinKey(int skinIndex)
-    {
-        return $"{OwnedSkinPlayerPrefsPrefix}{skinIndex}";
-    }
-
     private bool IsSkinOwned(int skinIndex)
     {
         if (skinIndex < 0 || skinIndex >= GetSkinCount())
@@ -1595,18 +1744,20 @@ public class LobbyUI : MonoBehaviour
             return false;
         }
 
-        return PlayerPrefs.GetInt(GetOwnedSkinKey(skinIndex), skinIndex == DefaultOwnedSkinIndex ? 1 : 0) == 1;
-    }
-
-    private void SetSkinOwned(int skinIndex, bool owned)
-    {
-        if (skinIndex < 0 || skinIndex >= GetSkinCount())
+        if (_accountData == null || _accountData.ownedSkinIndices == null || _accountData.ownedSkinIndices.Length == 0)
         {
-            return;
+            return skinIndex == DefaultOwnedSkinIndex;
         }
 
-        PlayerPrefs.SetInt(GetOwnedSkinKey(skinIndex), owned ? 1 : 0);
-        PlayerPrefs.Save();
+        for (int index = 0; index < _accountData.ownedSkinIndices.Length; index++)
+        {
+            if (_accountData.ownedSkinIndices[index] == skinIndex)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private int GetValidOwnedSkinIndex(int preferredIndex)
@@ -1658,12 +1809,18 @@ public class LobbyUI : MonoBehaviour
             _walletPill.style.display = visible ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
+        if (_accountPill != null)
+        {
+            _accountPill.style.display = visible ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
         if (!visible)
         {
             return;
         }
 
         SetSettingsPopupVisible(false);
+        SetLoginPopupVisible(false);
         _shopSelectedSkinIndex = Mathf.Clamp(_shopSelectedSkinIndex, 0, Mathf.Max(0, GetSkinCount() - 1));
         RefreshShopUi();
         EnsureShopPreviewObjects();
@@ -1738,7 +1895,7 @@ public class LobbyUI : MonoBehaviour
         bool selectedOwned = IsSkinOwned(_shopSelectedSkinIndex);
         bool selectedEquipped = currentSkinIndex == _shopSelectedSkinIndex;
         int selectedPrice = Mathf.Max(0, selectedSkin.price);
-        bool canAfford = GetPlayerMoney() >= selectedPrice;
+        bool canAfford = HasLoggedInAccount() && GetPlayerMoney() >= selectedPrice;
 
         if (_shopSelectedSkinLabel != null)
         {
@@ -1747,7 +1904,9 @@ public class LobbyUI : MonoBehaviour
 
         if (_shopSelectedSkinSubtitle != null)
         {
-            _shopSelectedSkinSubtitle.text = selectedOwned
+            _shopSelectedSkinSubtitle.text = !HasLoggedInAccount()
+                ? "Login to save money and buy skins from the store."
+                : selectedOwned
                 ? (selectedEquipped ? "This skin is active on your player." : "You already own this skin.")
                 : (canAfford ? "You can buy this skin right now." : "You need more cash to unlock this skin.");
         }
@@ -1773,6 +1932,11 @@ public class LobbyUI : MonoBehaviour
                 _shopActionButton.text = "EQUIPPED";
                 _shopActionButton.SetEnabled(false);
             }
+            else if (!HasLoggedInAccount())
+            {
+                _shopActionButton.text = "LOGIN REQUIRED";
+                _shopActionButton.SetEnabled(false);
+            }
             else if (selectedOwned)
             {
                 _shopActionButton.text = "EQUIP";
@@ -1788,36 +1952,43 @@ public class LobbyUI : MonoBehaviour
         RefreshShopPreviewVisual();
     }
 
-    private void TryPurchaseOrEquipSelectedSkin()
+    private async void TryPurchaseOrEquipSelectedSkin()
     {
         if (skinRegistry == null || skinRegistry.skins == null || _shopSelectedSkinIndex < 0 || _shopSelectedSkinIndex >= skinRegistry.skins.Length)
         {
             return;
         }
 
+        if (!HasLoggedInAccount())
+        {
+            SetLoginPopupVisible(true);
+            ShowNotification("Login first to use the shop.");
+            return;
+        }
+
         if (IsSkinOwned(_shopSelectedSkinIndex))
         {
-            currentSkinIndex = _shopSelectedSkinIndex;
-            SaveAndSyncSkin();
+            AccountResponse equipResponse = await AccountApiClient.EquipSkinAsync(GetAccountApiBaseUrl(), _authToken, _shopSelectedSkinIndex);
+            if (equipResponse == null || !equipResponse.ok || equipResponse.account == null)
+            {
+                ShowNotification(string.IsNullOrWhiteSpace(equipResponse?.error) ? "Failed to equip skin." : equipResponse.error);
+                return;
+            }
+
+            ApplyAccountData(equipResponse.account);
             ShowNotification($"Equipped {skinRegistry.skins[_shopSelectedSkinIndex].skinName}");
             return;
         }
 
-        SkinEntry selectedSkin = skinRegistry.skins[_shopSelectedSkinIndex];
-        int price = Mathf.Max(0, selectedSkin.price);
-        int currentMoney = GetPlayerMoney();
-        if (currentMoney < price)
+        AccountResponse purchaseResponse = await AccountApiClient.PurchaseSkinAsync(GetAccountApiBaseUrl(), _authToken, _shopSelectedSkinIndex);
+        if (purchaseResponse == null || !purchaseResponse.ok || purchaseResponse.account == null)
         {
-            ShowNotification("Not enough cash for that skin.");
-            RefreshShopUi();
+            ShowNotification(string.IsNullOrWhiteSpace(purchaseResponse?.error) ? "Failed to buy skin." : purchaseResponse.error);
             return;
         }
 
-        SetPlayerMoney(currentMoney - price);
-        SetSkinOwned(_shopSelectedSkinIndex, true);
-        currentSkinIndex = _shopSelectedSkinIndex;
-        SaveAndSyncSkin();
-        ShowNotification($"Bought {selectedSkin.skinName} for ${price}");
+        ApplyAccountData(purchaseResponse.account);
+        ShowNotification($"Bought {skinRegistry.skins[_shopSelectedSkinIndex].skinName}");
     }
 
     private Color GetShopCardBorderColor(int index, bool selected)
@@ -2037,6 +2208,180 @@ public class LobbyUI : MonoBehaviour
         _shopPreviewRenderers = Array.Empty<Renderer>();
         _shopPreviewAnimator = null;
     }
+
+    private bool HasLoggedInAccount()
+    {
+        return !string.IsNullOrWhiteSpace(_authToken) && _accountData != null;
+    }
+
+    private string GetAccountApiBaseUrl()
+    {
+        if (NetworkManager.Instance == null || string.IsNullOrWhiteSpace(NetworkManager.Instance.serverUrl))
+        {
+            return "http://localhost:2567";
+        }
+
+        string url = NetworkManager.Instance.serverUrl.Trim();
+        if (url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "https://" + url.Substring("wss://".Length);
+        }
+
+        if (url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "http://" + url.Substring("ws://".Length);
+        }
+
+        return url;
+    }
+
+    private async Task TryRestoreAccountSessionAsync()
+    {
+        string savedToken = PlayerPrefs.GetString(AuthTokenPlayerPrefsKey, string.Empty);
+        if (string.IsNullOrWhiteSpace(savedToken))
+        {
+            ApplyLoggedOutState();
+            return;
+        }
+
+        AccountResponse response = await AccountApiClient.GetAccountAsync(GetAccountApiBaseUrl(), savedToken);
+        if (response == null || !response.ok || response.account == null)
+        {
+            PlayerPrefs.DeleteKey(AuthTokenPlayerPrefsKey);
+            PlayerPrefs.Save();
+            ApplyLoggedOutState();
+            return;
+        }
+
+        _authToken = savedToken;
+        PlayerPrefs.SetString(AuthTokenPlayerPrefsKey, _authToken);
+        PlayerPrefs.Save();
+        ApplyAccountData(response.account);
+    }
+
+    private async Task SubmitLoginAsync(bool register)
+    {
+        if (_isAuthRequestInFlight)
+        {
+            return;
+        }
+
+        string username = _loginUsernameField != null ? _loginUsernameField.value.Trim() : string.Empty;
+        string password = _loginPasswordField != null ? _loginPasswordField.value : string.Empty;
+
+        if (username.Length < 3)
+        {
+            SetLoginMessage("Username must be at least 3 characters.");
+            return;
+        }
+
+        if (password.Trim().Length < 4)
+        {
+            SetLoginMessage("Password must be at least 4 characters.");
+            return;
+        }
+
+        _isAuthRequestInFlight = true;
+        SetLoginButtonsEnabled(false);
+        SetLoginMessage(register ? "Creating your account..." : "Logging in...");
+
+        AccountAuthResponse response = register
+            ? await AccountApiClient.RegisterAsync(GetAccountApiBaseUrl(), username, password)
+            : await AccountApiClient.LoginAsync(GetAccountApiBaseUrl(), username, password);
+
+        _isAuthRequestInFlight = false;
+        SetLoginButtonsEnabled(true);
+
+        if (response == null || !response.ok || response.account == null || string.IsNullOrWhiteSpace(response.token))
+        {
+            SetLoginMessage(string.IsNullOrWhiteSpace(response?.error) ? "Login failed." : response.error);
+            return;
+        }
+
+        _authToken = response.token;
+        PlayerPrefs.SetString(AuthTokenPlayerPrefsKey, _authToken);
+        PlayerPrefs.Save();
+        ApplyAccountData(response.account);
+        SetLoginMessage(register ? "Account created." : "Logged in.");
+        SetLoginPopupVisible(false);
+        ShowNotification($"Logged in as {response.account.username}");
+    }
+
+    private void ApplyAccountData(AccountData account)
+    {
+        _accountData = account;
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.AuthenticatedUsername = account != null ? account.username : string.Empty;
+        }
+        currentSkinIndex = GetValidOwnedSkinIndex(account != null ? account.equippedSkinIndex : DefaultOwnedSkinIndex);
+        _shopSelectedSkinIndex = currentSkinIndex;
+        UpdateAccountUi();
+        UpdateMoneyUI();
+        SaveAndSyncSkin();
+        RefreshShopUi();
+    }
+
+    private void ApplyLoggedOutState()
+    {
+        _accountData = null;
+        _authToken = string.Empty;
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.AuthenticatedUsername = string.Empty;
+        }
+        currentSkinIndex = DefaultOwnedSkinIndex;
+        _shopSelectedSkinIndex = currentSkinIndex;
+        UpdateAccountUi();
+        UpdateMoneyUI();
+        SaveAndSyncSkin();
+        RefreshShopUi();
+    }
+
+    private void LogoutAccount()
+    {
+        PlayerPrefs.DeleteKey(AuthTokenPlayerPrefsKey);
+        PlayerPrefs.Save();
+        ApplyLoggedOutState();
+        ShowNotification("Logged out.");
+    }
+
+    private void UpdateAccountUi()
+    {
+        if (_accountStatusLabel != null)
+        {
+            _accountStatusLabel.text = HasLoggedInAccount()
+                ? $"@{_accountData.username}"
+                : "Guest mode";
+        }
+
+        if (_loginButton != null)
+        {
+            _loginButton.text = HasLoggedInAccount() ? "LOG OUT" : "LOGIN";
+        }
+    }
+
+    private void SetLoginButtonsEnabled(bool enabled)
+    {
+        if (_loginSubmitButton != null)
+        {
+            _loginSubmitButton.SetEnabled(enabled);
+        }
+
+        if (_registerSubmitButton != null)
+        {
+            _registerSubmitButton.SetEnabled(enabled);
+        }
+    }
+
+    private void SetLoginMessage(string message)
+    {
+        if (_loginMessageLabel != null)
+        {
+            _loginMessageLabel.text = message;
+        }
+    }
+
     public void ShowNotification(string message, float duration = 3f)
     {
         if (notificationText == null) return;

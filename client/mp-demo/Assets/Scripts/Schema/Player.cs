@@ -78,69 +78,72 @@ public Player() { }
 	[Type(20, "string")]
 	public string sessionId = default(string);
 
-	[Type(21, "number")]
+	[Type(21, "string")]
+	public string displayName = default(string);
+
+	[Type(22, "number")]
 	public float timestamp = default(float);
 
-		[Type(22, "boolean")]
+		[Type(23, "boolean")]
 		public bool isReady = default(bool);
 
-		[Type(23, "number")]
+		[Type(24, "number")]
 		public float skinIndex = default(float);
 
-	[Type(24, "boolean")]
+	[Type(25, "boolean")]
 	public bool isHitReacting = default(bool);
 
-	[Type(25, "number")]
+	[Type(26, "number")]
 	public float hitReactionTimeRemaining = default(float);
 
-	[Type(26, "number")]
+	[Type(27, "number")]
 	public float hitReactionPitch = default(float);
 
-	[Type(27, "number")]
+	[Type(28, "number")]
 	public float hitReactionRoll = default(float);
 
-	[Type(28, "number")]
+	[Type(29, "number")]
 	public float hitReactionSeed = default(float);
 
-	[Type(29, "number")]
+	[Type(30, "number")]
 	public float hitTriggerId = default(float);
 
-	[Type(30, "number")]
+	[Type(31, "number")]
 	public float hitSourceX = default(float);
 
-	[Type(31, "number")]
+	[Type(32, "number")]
 	public float hitSourceY = default(float);
 
-	[Type(32, "number")]
+	[Type(33, "number")]
 	public float hitSourceZ = default(float);
 
-	[Type(33, "boolean")]
+	[Type(34, "boolean")]
 	public bool isCarrying = default(bool);
 
-	[Type(34, "boolean")]
+	[Type(35, "boolean")]
 	public bool isBeingCarried = default(bool);
 
-	[Type(35, "string")]
+	[Type(36, "string")]
 	public string carriedPlayerSessionId = default(string);
 
-	[Type(36, "string")]
+	[Type(37, "string")]
 	public string carrierSessionId = default(string);
 
-	[Type(37, "boolean")]
+	[Type(38, "boolean")]
 	public bool isEliminated = default(bool);
 
-	[Type(38, "number")]
+	[Type(39, "number")]
 	public float speedBoostMultiplier = 1f;
 
-	[Type(39, "number")]
+	[Type(40, "number")]
 	public float speedBoostTimeRemaining = default(float);
 
-	[Type(40, "number")]
+	[Type(41, "number")]
 	public float jumpBoostMultiplier = 1f;
 
-	[Type(41, "number")]
+	[Type(42, "number")]
 	public float jumpBoostTimeRemaining = default(float);
 
-	[Type(42, "boolean")]
+	[Type(43, "boolean")]
 	public bool isSpectator = default(bool);
 	}

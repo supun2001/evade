@@ -78,6 +78,7 @@ public class NetworkManager : MonoBehaviour
     public string roomName = "my_room";
     public GameObject playerPrefab; 
     public string currentRoomId { get; private set; } 
+    public string AuthenticatedUsername { get; set; } = string.Empty;
 
     private ColyseusClient client;
     private ColyseusRoom<MyRoomState> room;
@@ -414,7 +415,7 @@ public class NetworkManager : MonoBehaviour
         InitializeClient();
         try
         {
-            room = await client.JoinById<MyRoomState>(targetRoomId);
+            room = await client.JoinById<MyRoomState>(targetRoomId, BuildRoomOptions());
             OnRoomJoined();
             return null; // Success
         }
@@ -467,6 +468,7 @@ public class NetworkManager : MonoBehaviour
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
+            ["username"] = string.IsNullOrWhiteSpace(AuthenticatedUsername) ? "Player" : AuthenticatedUsername,
         };
     }
 
