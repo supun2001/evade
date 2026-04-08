@@ -10,7 +10,7 @@ using UnityEngine.UIElements;
 public class RoundHudController : MonoBehaviour
 {
     private const string MainMenuMusicResourcePath = "SFX/MainMenu";
-    private const string IntermissionMusicResourcePath = "SFX/Intermission";
+    private const string IntermissionMusicResourcePath = "SFX/InGame";
     private const string InGameMusicResourcePath = "SFX/InGame";
     private const string RoundStartSfxResourcePath = "SFX/RoundStart";
     private const string SkinRegistryResourcePath = "SkinRegistry";
