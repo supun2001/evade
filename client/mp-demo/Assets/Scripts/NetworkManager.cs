@@ -56,6 +56,9 @@ public class NetworkManager : MonoBehaviour
         new PlayerSpawnPointConfig { position = new Vector3(2f, 0f, -6f) },
         new PlayerSpawnPointConfig { position = new Vector3(-2f, 0f, -6f) },
     };
+    [SerializeField] private float spawnGroundProbeHeight = 30f;
+    [SerializeField] private float spawnGroundProbeDistance = 120f;
+    [SerializeField] private float spawnGroundOffset = 0.15f;
     [Tooltip("Optional patrol hints for idle nextbots. Leave empty to auto-roam using the overall spawn area.")]
     [SerializeField] private List<NextbotPatrolPointConfig> nextbotPatrolPoints = new();
     [Header("Round Timing")]
@@ -148,7 +151,7 @@ public class NetworkManager : MonoBehaviour
         }
 
         Debug.Log($"Player added: {id}");
-        Vector3 pos = new Vector3(player.x, player.y, player.z);
+        Vector3 pos = ResolveGroundedSpawnPosition(new Vector3(player.x, player.y, player.z));
         GameObject obj = Instantiate(playerPrefab, pos, Quaternion.identity);
 
         NetworkPlayer np = obj.GetComponent<NetworkPlayer>();
@@ -449,11 +452,12 @@ public class NetworkManager : MonoBehaviour
         for (int i = 0; i < playerSpawnPoints.Count; i++)
         {
             Vector3 point = playerSpawnPoints[i].position;
+            Vector3 groundedPoint = ResolveGroundedSpawnPosition(point);
             serializedPlayerSpawnPoints.Add(new Dictionary<string, object>
             {
-                ["x"] = point.x,
-                ["y"] = point.y,
-                ["z"] = point.z,
+                ["x"] = groundedPoint.x,
+                ["y"] = groundedPoint.y,
+                ["z"] = groundedPoint.z,
             });
         }
 
@@ -532,8 +536,20 @@ public class NetworkManager : MonoBehaviour
         }
 
         int spawnIndex = GetStableSpawnIndex(LocalSessionId, playerSpawnPoints.Count);
-        spawnPosition = playerSpawnPoints[spawnIndex].position;
+        spawnPosition = ResolveGroundedSpawnPosition(playerSpawnPoints[spawnIndex].position);
         return true;
+    }
+
+    private Vector3 ResolveGroundedSpawnPosition(Vector3 desiredPosition)
+    {
+        Vector3 rayOrigin = desiredPosition + Vector3.up * Mathf.Max(1f, spawnGroundProbeHeight);
+        float rayDistance = Mathf.Max(10f, spawnGroundProbeDistance);
+        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return hit.point + Vector3.up * spawnGroundOffset;
+        }
+
+        return desiredPosition;
     }
 
     private static int GetStableSpawnIndex(string sessionId, int spawnPointCount)
