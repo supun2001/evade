@@ -9,19 +9,37 @@ using System.Collections;
 [Serializable]
 public struct NextbotSpawnPointConfig
 {
+    public Transform anchor;
     public Vector3 position;
+
+    public Vector3 GetWorldPosition()
+    {
+        return anchor != null ? anchor.position : position;
+    }
 }
 
 [Serializable]
 public struct PlayerSpawnPointConfig
 {
+    public Transform anchor;
     public Vector3 position;
+
+    public Vector3 GetWorldPosition()
+    {
+        return anchor != null ? anchor.position : position;
+    }
 }
 
 [Serializable]
 public struct NextbotPatrolPointConfig
 {
+    public Transform anchor;
     public Vector3 position;
+
+    public Vector3 GetWorldPosition()
+    {
+        return anchor != null ? anchor.position : position;
+    }
 }
 
 public class NetworkManager : MonoBehaviour
@@ -59,6 +77,7 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private float spawnGroundProbeHeight = 30f;
     [SerializeField] private float spawnGroundProbeDistance = 120f;
     [SerializeField] private float spawnGroundOffset = 0.15f;
+    [SerializeField] private LayerMask spawnGroundLayers = ~0;
     [Tooltip("Optional patrol hints for idle nextbots. Leave empty to auto-roam using the overall spawn area.")]
     [SerializeField] private List<NextbotPatrolPointConfig> nextbotPatrolPoints = new();
     [Header("Round Timing")]
@@ -439,21 +458,35 @@ public class NetworkManager : MonoBehaviour
         List<object> serializedSpawnPoints = new List<object>();
         for (int i = 0; i < nextbotSpawnPoints.Count; i++)
         {
-            Vector3 point = nextbotSpawnPoints[i].position;
+            Vector3 point = nextbotSpawnPoints[i].GetWorldPosition();
+            Vector3 groundedPoint = ResolveGroundedSpawnPosition(point);
             serializedSpawnPoints.Add(new Dictionary<string, object>
             {
-                ["x"] = point.x,
-                ["y"] = point.y,
-                ["z"] = point.z,
+                ["x"] = groundedPoint.x,
+                ["y"] = groundedPoint.y,
+                ["z"] = groundedPoint.z,
             });
         }
 
         List<object> serializedPlayerSpawnPoints = new List<object>();
         for (int i = 0; i < playerSpawnPoints.Count; i++)
         {
-            Vector3 point = playerSpawnPoints[i].position;
+            Vector3 point = playerSpawnPoints[i].GetWorldPosition();
             Vector3 groundedPoint = ResolveGroundedSpawnPosition(point);
             serializedPlayerSpawnPoints.Add(new Dictionary<string, object>
+            {
+                ["x"] = groundedPoint.x,
+                ["y"] = groundedPoint.y,
+                ["z"] = groundedPoint.z,
+            });
+        }
+
+        List<object> serializedNextbotPatrolPoints = new List<object>();
+        for (int i = 0; i < nextbotPatrolPoints.Count; i++)
+        {
+            Vector3 point = nextbotPatrolPoints[i].GetWorldPosition();
+            Vector3 groundedPoint = ResolveGroundedSpawnPosition(point);
+            serializedNextbotPatrolPoints.Add(new Dictionary<string, object>
             {
                 ["x"] = groundedPoint.x,
                 ["y"] = groundedPoint.y,
@@ -467,6 +500,7 @@ public class NetworkManager : MonoBehaviour
         return new Dictionary<string, object>
         {
             ["nextbotSpawnPoints"] = serializedSpawnPoints,
+            ["nextbotPatrolPoints"] = serializedNextbotPatrolPoints,
             ["nextbotIds"] = serializedNextbotIds,
             ["nextbotConfigs"] = serializedNextbotConfigs,
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
@@ -536,7 +570,7 @@ public class NetworkManager : MonoBehaviour
         }
 
         int spawnIndex = GetStableSpawnIndex(LocalSessionId, playerSpawnPoints.Count);
-        spawnPosition = ResolveGroundedSpawnPosition(playerSpawnPoints[spawnIndex].position);
+        spawnPosition = ResolveGroundedSpawnPosition(playerSpawnPoints[spawnIndex].GetWorldPosition());
         return true;
     }
 
@@ -544,12 +578,41 @@ public class NetworkManager : MonoBehaviour
     {
         Vector3 rayOrigin = desiredPosition + Vector3.up * Mathf.Max(1f, spawnGroundProbeHeight);
         float rayDistance = Mathf.Max(10f, spawnGroundProbeDistance);
-        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, ~0, QueryTriggerInteraction.Ignore))
+        int layerMask = GetSpawnGroundLayerMask();
+        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, layerMask, QueryTriggerInteraction.Ignore))
         {
             return hit.point + Vector3.up * spawnGroundOffset;
         }
 
+        int walkableLayer = LayerMask.NameToLayer("Walkable");
+        if (walkableLayer >= 0)
+        {
+            int walkableMask = 1 << walkableLayer;
+            if (Physics.SphereCast(rayOrigin, 0.35f, Vector3.down, out hit, rayDistance, walkableMask, QueryTriggerInteraction.Ignore))
+            {
+                return hit.point + Vector3.up * spawnGroundOffset;
+            }
+        }
+
         return desiredPosition;
+    }
+
+    private int GetSpawnGroundLayerMask()
+    {
+        int configuredMask = spawnGroundLayers.value;
+        int walkableLayer = LayerMask.NameToLayer("Walkable");
+        if (walkableLayer >= 0)
+        {
+            int walkableMask = 1 << walkableLayer;
+            bool usesEverything = configuredMask == ~0;
+            bool usesNothing = configuredMask == 0;
+            if (usesEverything || usesNothing)
+            {
+                return walkableMask;
+            }
+        }
+
+        return configuredMask != 0 ? configuredMask : ~0;
     }
 
     private static int GetStableSpawnIndex(string sessionId, int spawnPointCount)

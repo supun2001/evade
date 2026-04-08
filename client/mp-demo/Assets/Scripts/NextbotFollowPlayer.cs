@@ -39,6 +39,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     [Header("NavMesh")]
     [SerializeField] private float _navMeshSnapDistance = 8f;
+    [SerializeField] private string _walkableAreaName = "Walkable";
     [SerializeField] private bool _useOffMeshLinks = true;
     [SerializeField] private float _offMeshLinkDuration = 0.35f;
     [SerializeField] private float _offMeshLinkArcHeight = 1.2f;
@@ -123,6 +124,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private AudioClip _defaultLoopClip;
     private float _defaultLoopPitch = 1f;
     private float _defaultMoveSpeed = 10f;
+    private int _walkableAreaMask = NavMesh.AllAreas;
 
     public string NetworkNextbotId => _networkNextbotId;
 
@@ -324,10 +326,9 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         _navMeshAgent.updatePosition = !isActive;
-        _navMeshAgent.isStopped = isActive;
-
         if (_navMeshAgent.isOnNavMesh)
         {
+            _navMeshAgent.isStopped = isActive;
             _navMeshAgent.ResetPath();
             _navMeshAgent.nextPosition = transform.position;
         }
@@ -1502,6 +1503,17 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        int walkableAreaIndex = NavMesh.GetAreaFromName(_walkableAreaName);
+        if (walkableAreaIndex >= 0)
+        {
+            _walkableAreaMask = 1 << walkableAreaIndex;
+            _navMeshAgent.areaMask = _walkableAreaMask;
+        }
+        else
+        {
+            _walkableAreaMask = _navMeshAgent.areaMask;
+        }
+
         _agentVisualOffset = _navMeshAgent.baseOffset;
     }
 
@@ -1522,7 +1534,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool TryGetNearestNavMeshPosition(Vector3 worldPosition, out Vector3 navMeshPosition)
     {
-        int areaMask = _navMeshAgent != null ? _navMeshAgent.areaMask : NavMesh.AllAreas;
+        int areaMask = _navMeshAgent != null ? _navMeshAgent.areaMask : _walkableAreaMask;
         if (NavMesh.SamplePosition(worldPosition, out NavMeshHit hit, _navMeshSnapDistance, areaMask))
         {
             navMeshPosition = hit.position;
