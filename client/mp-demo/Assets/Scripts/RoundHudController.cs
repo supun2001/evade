@@ -11,7 +11,7 @@ public class RoundHudController : MonoBehaviour
 {
     private const string MainMenuMusicResourcePath = "SFX/MainMenu";
     private const string IntermissionMusicResourcePath = "SFX/Intermission";
-    private const string InGameMusicResourcePath = "SFX/InGameMusic";
+    private const string InGameMusicResourcePath = "SFX/InGame";
     private const string RoundStartSfxResourcePath = "SFX/RoundStart";
     private const string SkinRegistryResourcePath = "SkinRegistry";
 

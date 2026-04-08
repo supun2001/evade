@@ -13,9 +13,18 @@ AudioImporter:
     conversionMode: 0
     preloadAudioData: 0
   platformSettingOverrides:
-    WebGL:
+    Standalone:
       serializedVersion: 2
       loadType: 0
+      sampleRateSetting: 1
+      sampleRateOverride: 44100
+      compressionFormat: 1
+      quality: 0.5
+      conversionMode: 0
+      preloadAudioData: 0
+    WebGL:
+      serializedVersion: 2
+      loadType: 1
       sampleRateSetting: 2
       sampleRateOverride: 44100
       compressionFormat: 7

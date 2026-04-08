@@ -127,6 +127,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4f8ac8173af485daa8544c56da89bd5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NextbotFollowPlayer
+  _useRoomStateAuthority: 1
+  _networkNextbotId: nextbot_0
+  _roomStatePositionLerpSpeed: 12
+  _roomStateRotationLerpSpeed: 14
+  _roomStateSnapDistance: 1.1
+  _roomStateChaseResyncDistance: 12
   _moveSpeed: 10
   _acceleration: 18
   _rotationSpeed: 10
@@ -149,6 +155,7 @@ MonoBehaviour:
   _eyeHeight: 1.25
   _targetEyeHeight: 1
   _navMeshSnapDistance: 8
+  _walkableAreaName: Walkable
   _useOffMeshLinks: 1
   _offMeshLinkDuration: 0.35
   _offMeshLinkArcHeight: 1.2
@@ -163,6 +170,23 @@ MonoBehaviour:
   _edgeStuckVelocity: 0.2
   _lockToStartingHeight: 1
   _gravity: 20
+  _groundCheckLayers:
+    serializedVersion: 2
+    m_Bits: 755
+  _groundProbeStartHeight: 3
+  _groundProbeDistance: 8
+  _groundSnapOffset: 0.02
+  _groundRiseSmoothTime: 0.08
+  _groundDropSmoothTime: 0.03
+  _groundHardSnapDistance: 0.35
+  _groundDropSnapDistance: 0.08
+  _roomStateGroundProbeHeight: 5
+  _roomStateGroundMaxRise: 1.5
+  _roomStateGroundMaxDrop: 10
+  _roomStateCollisionLayers:
+    serializedVersion: 2
+    m_Bits: 755
+  _roomStateCollisionSkinWidth: 0.05
   _hitDistance: 1.6
   _hitCooldown: 1.25
   _faceTargetPlayer: 0
