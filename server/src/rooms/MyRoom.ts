@@ -47,6 +47,9 @@ const NEXTBOT_PATROL_SEPARATION_RADIUS = 6;
 const NEXTBOT_PATROL_CANDIDATE_SAMPLES = 40;
 const NEXTBOT_PATROL_WAIT_MIN_MS = 1000;
 const NEXTBOT_PATROL_WAIT_MAX_MS = 2000;
+const NEXTBOT_OBSTACLE_PADDING = 0.7;
+const NEXTBOT_OBSTACLE_HEIGHT_PADDING = 1.5;
+const NEXTBOT_MAX_ALLOWED_ASCENT = 0.35;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 const PLAYER_INJURY_SYNC_GRACE_MS = 600;
@@ -85,6 +88,7 @@ const PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING = 28;
 
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
+type ObstacleRect = { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number };
 type RoundPhase = "waiting" | "intermission" | "round";
 type ScoredTarget = {
   player: Player;
@@ -96,6 +100,7 @@ type NextbotControllerState = {
   id: string;
   moveSpeed: number;
   spawnIndex: number;
+  groundedY: number;
   patrolTargetX: number;
   patrolTargetY: number;
   patrolTargetZ: number;
@@ -177,6 +182,7 @@ export class MyRoom extends Room<MyRoomState> {
   private playerSafeUntil = new Map<string, number>();
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
   private nextbotPatrolPoints: SpawnPoint[] = [];
+  private nextbotObstacles: ObstacleRect[] = [];
   private nextbotIds = DEFAULT_NEXTBOT_IDS;
   private nextbotMoveSpeeds = new Map<string, number>();
   private nextbotControllers: NextbotControllerState[] = [];
@@ -197,6 +203,7 @@ export class MyRoom extends Room<MyRoomState> {
   onCreate(options: any) {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
     this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(options);
+    this.nextbotObstacles = this.resolveNextbotObstacles(options);
     this.nextbotIds = this.resolveNextbotIds(options);
     this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
     this.playerSpawnPoints = this.resolvePlayerSpawnPoints(options);
@@ -632,7 +639,7 @@ export class MyRoom extends Room<MyRoomState> {
       if (target != null && this.isScoreEligibleTarget(target, now, nextbot)) {
         nextbot.targetSessionId = target.sessionId;
         const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
-        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, target.y);
+        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, controller.groundedY);
         this.tryInjurePlayer(controller, nextbot, target, now);
         continue;
       }
@@ -666,6 +673,7 @@ export class MyRoom extends Room<MyRoomState> {
         id: botId,
         moveSpeed: this.getConfiguredNextbotMoveSpeed(botId),
         spawnIndex: index,
+        groundedY: spawnPoint.y,
         patrolTargetX: spawnPoint.x,
         patrolTargetY: spawnPoint.y,
         patrolTargetZ: spawnPoint.z,
@@ -695,6 +703,7 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot.isActive = false;
       controller.currentTargetSessionId = "";
       controller.nextInjuryAt = 0;
+      controller.groundedY = spawnPoint.y;
       controller.patrolTargetX = spawnPoint.x;
       controller.patrolTargetY = spawnPoint.y;
       controller.patrolTargetZ = spawnPoint.z;
@@ -811,7 +820,7 @@ export class MyRoom extends Room<MyRoomState> {
       x: nextPatrolTarget.x,
       z: nextPatrolTarget.z,
       distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
-    }, deltaSeconds, controller.moveSpeed, nextPatrolTarget.y);
+    }, deltaSeconds, controller.moveSpeed, controller.groundedY);
   }
 
   private moveNextbotTowardsPosition(
@@ -839,10 +848,67 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, effectiveMoveSpeed * deltaSeconds);
-    nextbot.x += (dx / distance) * moveDistance;
-    nextbot.z += (dz / distance) * moveDistance;
+    const desiredMoveX = (dx / distance) * moveDistance;
+    const desiredMoveZ = (dz / distance) * moveDistance;
+    const resolvedMove = this.resolveNextbotObstacleAwareMove(nextbot, target, desiredMoveX, desiredMoveZ, targetY);
+    nextbot.x += resolvedMove.x;
+    nextbot.z += resolvedMove.z;
+    if (Math.hypot(resolvedMove.x, resolvedMove.z) > 0.0001) {
+      nextbot.rotationY = Math.atan2(resolvedMove.x, resolvedMove.z) * (180 / Math.PI);
+    }
 
     this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+  }
+
+  private resolveNextbotObstacleAwareMove(
+    nextbot: NextbotState,
+    target: PredictedTargetPosition,
+    desiredMoveX: number,
+    desiredMoveZ: number,
+    targetY?: number,
+  ) {
+    if (this.nextbotObstacles.length === 0) {
+      return { x: desiredMoveX, z: desiredMoveZ };
+    }
+
+    const currentX = nextbot.x;
+    const currentZ = nextbot.z;
+    const desiredDistance = Math.hypot(desiredMoveX, desiredMoveZ);
+    if (desiredDistance <= 0.0001) {
+      return { x: 0, z: 0 };
+    }
+
+    const candidates = [
+      { x: desiredMoveX, z: desiredMoveZ },
+      { x: desiredMoveX, z: 0 },
+      { x: 0, z: desiredMoveZ },
+    ];
+
+    const tangentX = -desiredMoveZ / desiredDistance * Math.max(Math.abs(desiredMoveX), Math.abs(desiredMoveZ));
+    const tangentZ = desiredMoveX / desiredDistance * Math.max(Math.abs(desiredMoveX), Math.abs(desiredMoveZ));
+    candidates.push({ x: tangentX, z: tangentZ });
+    candidates.push({ x: -tangentX, z: -tangentZ });
+
+    let bestMove = { x: 0, z: 0 };
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (const candidate of candidates) {
+      const nextX = currentX + candidate.x;
+      const nextZ = currentZ + candidate.z;
+      if (this.wouldNextbotMoveHitObstacle(currentX, currentZ, nextX, nextZ, nextbot.y, targetY)) {
+        continue;
+      }
+
+      const remainingDistance = Math.hypot(target.x - nextX, target.z - nextZ);
+      const movementPenalty = Math.hypot(candidate.x, candidate.z) * -0.05;
+      const score = remainingDistance + movementPenalty;
+      if (score < bestScore) {
+        bestScore = score;
+        bestMove = candidate;
+      }
+    }
+
+    return bestMove;
   }
 
   private moveNextbotVerticallyTowardsTarget(
@@ -853,6 +919,10 @@ export class MyRoom extends Room<MyRoomState> {
   ) {
     if (targetY != null && Number.isFinite(targetY)) {
       const verticalDelta = targetY - nextbot.y;
+      if (verticalDelta > NEXTBOT_MAX_ALLOWED_ASCENT) {
+        return;
+      }
+
       const maxVerticalStep = moveSpeed * deltaSeconds;
       if (Math.abs(verticalDelta) <= maxVerticalStep) {
         nextbot.y = targetY;
@@ -1079,17 +1149,12 @@ export class MyRoom extends Room<MyRoomState> {
     let maxX = Number.NEGATIVE_INFINITY;
     let minZ = Number.POSITIVE_INFINITY;
     let maxZ = Number.NEGATIVE_INFINITY;
-    let avgY = 0;
-
     for (const point of patrolAreaPoints) {
       minX = Math.min(minX, point.x);
       maxX = Math.max(maxX, point.x);
       minZ = Math.min(minZ, point.z);
       maxZ = Math.max(maxZ, point.z);
-      avgY += point.y;
     }
-
-    avgY /= Math.max(1, patrolAreaPoints.length);
     minX -= NEXTBOT_PATROL_BOUNDS_PADDING;
     maxX += NEXTBOT_PATROL_BOUNDS_PADDING;
     minZ -= NEXTBOT_PATROL_BOUNDS_PADDING;
@@ -1135,7 +1200,7 @@ export class MyRoom extends Room<MyRoomState> {
 
     return {
       x: bestTargetX,
-      y: avgY || originY,
+      y: originY,
       z: bestTargetZ,
     };
   }
@@ -1240,6 +1305,138 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     return parsedPoints;
+  }
+
+  private resolveNextbotObstacles(options: any): ObstacleRect[] {
+    const candidateObstacles = options?.nextbotObstacles;
+    if (!Array.isArray(candidateObstacles) || candidateObstacles.length === 0) {
+      return [];
+    }
+
+    return candidateObstacles
+      .map((obstacle) => {
+        const minX = Number(obstacle?.minX);
+        const maxX = Number(obstacle?.maxX);
+        const minY = Number(obstacle?.minY);
+        const maxY = Number(obstacle?.maxY);
+        const minZ = Number(obstacle?.minZ);
+        const maxZ = Number(obstacle?.maxZ);
+        if (!Number.isFinite(minX)
+          || !Number.isFinite(maxX)
+          || !Number.isFinite(minY)
+          || !Number.isFinite(maxY)
+          || !Number.isFinite(minZ)
+          || !Number.isFinite(maxZ)
+          || minX >= maxX
+          || minY >= maxY
+          || minZ >= maxZ) {
+          return undefined;
+        }
+
+        return { minX, maxX, minY, maxY, minZ, maxZ };
+      })
+      .filter((obstacle): obstacle is ObstacleRect => obstacle !== undefined);
+  }
+
+  private wouldNextbotMoveHitObstacle(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    currentY: number,
+    targetY?: number,
+  ) {
+    for (const obstacle of this.nextbotObstacles) {
+      if (!this.isObstacleRelevantForNextbotHeight(obstacle, currentY, targetY)) {
+        continue;
+      }
+
+      const inflatedObstacle = {
+        minX: obstacle.minX - NEXTBOT_OBSTACLE_PADDING,
+        maxX: obstacle.maxX + NEXTBOT_OBSTACLE_PADDING,
+        minZ: obstacle.minZ - NEXTBOT_OBSTACLE_PADDING,
+        maxZ: obstacle.maxZ + NEXTBOT_OBSTACLE_PADDING,
+      };
+
+      const startInside = this.isPointInsideObstacle2D(startX, startZ, inflatedObstacle);
+      if (!startInside && this.doesSegmentIntersectObstacle2D(startX, startZ, endX, endZ, inflatedObstacle)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isObstacleRelevantForNextbotHeight(obstacle: ObstacleRect, currentY: number, targetY?: number) {
+    const minY = Math.min(currentY, targetY ?? currentY) - 0.5;
+    const maxY = Math.max(currentY, targetY ?? currentY) + NEXTBOT_OBSTACLE_HEIGHT_PADDING;
+    return obstacle.maxY >= minY && obstacle.minY <= maxY;
+  }
+
+  private isPointInsideObstacle2D(x: number, z: number, obstacle: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+    return x >= obstacle.minX && x <= obstacle.maxX && z >= obstacle.minZ && z <= obstacle.maxZ;
+  }
+
+  private doesSegmentIntersectObstacle2D(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    obstacle: { minX: number; maxX: number; minZ: number; maxZ: number },
+  ) {
+    if (this.isPointInsideObstacle2D(endX, endZ, obstacle)) {
+      return true;
+    }
+
+    const edges = [
+      [obstacle.minX, obstacle.minZ, obstacle.maxX, obstacle.minZ],
+      [obstacle.maxX, obstacle.minZ, obstacle.maxX, obstacle.maxZ],
+      [obstacle.maxX, obstacle.maxZ, obstacle.minX, obstacle.maxZ],
+      [obstacle.minX, obstacle.maxZ, obstacle.minX, obstacle.minZ],
+    ];
+
+    for (const [edgeStartX, edgeStartZ, edgeEndX, edgeEndZ] of edges) {
+      if (this.doSegmentsIntersect2D(startX, startZ, endX, endZ, edgeStartX, edgeStartZ, edgeEndX, edgeEndZ)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private doSegmentsIntersect2D(
+    aStartX: number,
+    aStartZ: number,
+    aEndX: number,
+    aEndZ: number,
+    bStartX: number,
+    bStartZ: number,
+    bEndX: number,
+    bEndZ: number,
+  ) {
+    const orientation = (px: number, pz: number, qx: number, qz: number, rx: number, rz: number) =>
+      (qz - pz) * (rx - qx) - (qx - px) * (rz - qz);
+    const onSegment = (px: number, pz: number, qx: number, qz: number, rx: number, rz: number) =>
+      qx >= Math.min(px, rx)
+      && qx <= Math.max(px, rx)
+      && qz >= Math.min(pz, rz)
+      && qz <= Math.max(pz, rz);
+
+    const o1 = orientation(aStartX, aStartZ, aEndX, aEndZ, bStartX, bStartZ);
+    const o2 = orientation(aStartX, aStartZ, aEndX, aEndZ, bEndX, bEndZ);
+    const o3 = orientation(bStartX, bStartZ, bEndX, bEndZ, aStartX, aStartZ);
+    const o4 = orientation(bStartX, bStartZ, bEndX, bEndZ, aEndX, aEndZ);
+
+    if ((o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0)) {
+      return true;
+    }
+
+    if (o1 === 0 && onSegment(aStartX, aStartZ, bStartX, bStartZ, aEndX, aEndZ)) return true;
+    if (o2 === 0 && onSegment(aStartX, aStartZ, bEndX, bEndZ, aEndX, aEndZ)) return true;
+    if (o3 === 0 && onSegment(bStartX, bStartZ, aStartX, aStartZ, bEndX, bEndZ)) return true;
+    if (o4 === 0 && onSegment(bStartX, bStartZ, aEndX, aEndZ, bEndX, bEndZ)) return true;
+
+    return false;
   }
 
   private resolveNextbotIds(options: any): string[] {

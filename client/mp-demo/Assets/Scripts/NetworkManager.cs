@@ -42,6 +42,17 @@ public struct NextbotPatrolPointConfig
     }
 }
 
+[Serializable]
+public struct ServerObstacleConfig
+{
+    public float minX;
+    public float maxX;
+    public float minY;
+    public float maxY;
+    public float minZ;
+    public float maxZ;
+}
+
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
@@ -496,6 +507,7 @@ public class NetworkManager : MonoBehaviour
 
         List<object> serializedNextbotIds = BuildSerializedNextbotIds();
         List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
+        List<object> serializedObstacles = BuildSerializedObstacleBounds();
 
         return new Dictionary<string, object>
         {
@@ -503,11 +515,76 @@ public class NetworkManager : MonoBehaviour
             ["nextbotPatrolPoints"] = serializedNextbotPatrolPoints,
             ["nextbotIds"] = serializedNextbotIds,
             ["nextbotConfigs"] = serializedNextbotConfigs,
+            ["nextbotObstacles"] = serializedObstacles,
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
             ["username"] = string.IsNullOrWhiteSpace(AuthenticatedUsername) ? "Player" : AuthenticatedUsername,
         };
+    }
+
+    private static List<object> BuildSerializedObstacleBounds()
+    {
+        List<object> serializedObstacles = new List<object>();
+        Collider[] colliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
+        int walkableLayer = LayerMask.NameToLayer("Walkable");
+
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            Collider collider = colliders[i];
+            if (!ShouldIncludeServerObstacle(collider, walkableLayer))
+            {
+                continue;
+            }
+
+            Bounds bounds = collider.bounds;
+            serializedObstacles.Add(new Dictionary<string, object>
+            {
+                ["minX"] = bounds.min.x,
+                ["maxX"] = bounds.max.x,
+                ["minY"] = bounds.min.y,
+                ["maxY"] = bounds.max.y,
+                ["minZ"] = bounds.min.z,
+                ["maxZ"] = bounds.max.z,
+            });
+        }
+
+        return serializedObstacles;
+    }
+
+    private static bool ShouldIncludeServerObstacle(Collider collider, int walkableLayer)
+    {
+        if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy || collider.isTrigger)
+        {
+            return false;
+        }
+
+        if (walkableLayer >= 0 && collider.gameObject.layer == walkableLayer)
+        {
+            return false;
+        }
+
+        if (collider.GetComponentInParent<PlayerController>() != null
+            || collider.GetComponentInParent<NextbotFollowPlayer>() != null
+            || collider.GetComponentInParent<SpeedBoostPickup>() != null
+            || collider.GetComponentInParent<JumpBoostPickup>() != null)
+        {
+            return false;
+        }
+
+        Bounds bounds = collider.bounds;
+        if (bounds.size.x <= 0.1f || bounds.size.z <= 0.1f || bounds.size.y <= 0.25f)
+        {
+            return false;
+        }
+
+        // Skip very large flat surfaces like ground planes; the server only needs blockers.
+        if (bounds.size.y <= 1.5f && (bounds.size.x >= 25f || bounds.size.z >= 25f))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static List<object> BuildSerializedNextbotIds()

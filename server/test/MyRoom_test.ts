@@ -31,4 +31,41 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(player.sessionId, client1.sessionId);
     assert.strictEqual(room.state.nextbots.size, 5);
   });
+
+  it("keeps nextbots out of configured obstacles", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotObstacles: [
+        { minX: 1, maxX: 3, minY: -1, maxY: 3, minZ: -1, maxZ: 1 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+
+    nextbot!.x = 0;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+
+    roomAny.moveNextbotTowardsPosition(nextbot, { x: 5, z: 0, distance: 5 }, 1, 2, 0);
+
+    const insideObstacle = nextbot!.x >= 1 && nextbot!.x <= 3 && nextbot!.z >= -1 && nextbot!.z <= 1;
+    assert.strictEqual(insideObstacle, false);
+  });
+
+  it("keeps nextbots on their grounded spawn height while chasing", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+
+    nextbot!.x = 0;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+
+    roomAny.nextbotControllers[0].groundedY = 0;
+    roomAny.moveNextbotTowardsPosition(nextbot, { x: 5, z: 0, distance: 5 }, 1, 2, 10);
+
+    assert.strictEqual(nextbot!.y, 0);
+  });
 });

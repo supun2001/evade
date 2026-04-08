@@ -68,6 +68,13 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _groundDropSmoothTime = 0.03f;
     [SerializeField] private float _groundHardSnapDistance = 0.35f;
     [SerializeField] private float _groundDropSnapDistance = 0.08f;
+    [SerializeField] private float _roomStateGroundProbeHeight = 5f;
+    [SerializeField] private float _roomStateGroundMaxRise = 1.5f;
+    [SerializeField] private float _roomStateGroundMaxDrop = 10f;
+
+    [Header("Collision")]
+    [SerializeField] private LayerMask _roomStateCollisionLayers = Physics.DefaultRaycastLayers;
+    [SerializeField] private float _roomStateCollisionSkinWidth = 0.05f;
 
     [Header("Hit")]
     [SerializeField] private float _hitDistance = 1.6f;
@@ -360,6 +367,13 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!isActive || nextbotState == null)
         {
+            if (nextbotState != null)
+            {
+                Vector3 hiddenPosition = ResolveGroundedRoomStatePosition(nextbotState);
+                ApplyRoomStatePosition(hiddenPosition, false);
+                transform.rotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
+            }
+
             ClearTarget();
             StopAgent();
             _isJumping = false;
@@ -388,7 +402,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!_hasAppliedRoomState)
         {
-            ApplyRoomStatePosition(targetPosition);
+            ApplyRoomStatePosition(targetPosition, false);
             transform.rotation = targetRotation;
             _hasAppliedRoomState = true;
             return true;
@@ -397,7 +411,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         float positionError = Vector3.Distance(transform.position, targetPosition);
         if (positionError >= _roomStateSnapDistance)
         {
-            ApplyRoomStatePosition(targetPosition);
+            ApplyRoomStatePosition(targetPosition, false);
             transform.rotation = targetRotation;
             return true;
         }
@@ -420,23 +434,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
     {
         Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
-        float upwardProbeDistance = Mathf.Max(1f, _navMeshSnapDistance * 0.5f);
-        Vector3 elevatedProbePosition = targetPosition + Vector3.up * upwardProbeDistance;
-
-        // Probe from above first so positions inside ramp volumes prefer the walkable ramp surface.
-        if (TryGetNearestNavMeshPosition(elevatedProbePosition, out Vector3 elevatedTargetPosition)
-            && elevatedTargetPosition.y >= targetPosition.y - 0.05f)
+        if (TryGetRoomStateGroundedPosition(targetPosition, out Vector3 groundedTargetPosition))
         {
-            return elevatedTargetPosition;
-        }
-
-        if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 groundedTargetPosition))
-        {
-            if (TryResolveGroundedPosition(groundedTargetPosition, out Vector3 navMeshGroundedPosition))
-            {
-                return navMeshGroundedPosition;
-            }
-
             return groundedTargetPosition;
         }
 
@@ -448,8 +447,13 @@ public class NextbotFollowPlayer : MonoBehaviour
         return targetPosition;
     }
 
-    private void ApplyRoomStatePosition(Vector3 targetPosition)
+    private void ApplyRoomStatePosition(Vector3 targetPosition, bool constrainMovement = true)
     {
+        if (constrainMovement)
+        {
+            targetPosition = ConstrainRoomStateMovement(transform.position, targetPosition);
+        }
+
         targetPosition = SmoothGroundedPosition(transform.position, targetPosition);
         _groundHeightVelocity = 0f;
 
@@ -1607,6 +1611,135 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         navMeshPosition = default;
         return false;
+    }
+
+    private bool TryGetRoomStateGroundedPosition(Vector3 worldPosition, out Vector3 groundedPosition)
+    {
+        if (TryResolveRoomStateGroundFromPhysics(worldPosition, out groundedPosition))
+        {
+            return true;
+        }
+
+        if (TryGetNearestNavMeshPosition(worldPosition, out Vector3 navMeshPosition)
+            && IsAcceptableRoomStateGroundCandidate(worldPosition, navMeshPosition))
+        {
+            groundedPosition = navMeshPosition;
+            groundedPosition.y += _groundSnapOffset;
+            return true;
+        }
+
+        groundedPosition = default;
+        return false;
+    }
+
+    private bool TryResolveRoomStateGroundFromPhysics(Vector3 worldPosition, out Vector3 groundedPosition)
+    {
+        Vector3 rayOrigin = worldPosition + Vector3.up * Mathf.Max(0.1f, _roomStateGroundProbeHeight);
+        float rayDistance = Mathf.Max(0.1f, _roomStateGroundProbeHeight + _groundProbeDistance);
+        int groundMask = _groundCheckLayers.value != 0 ? _groundCheckLayers.value : Physics.DefaultRaycastLayers;
+        int hitCount = Physics.RaycastNonAlloc(
+            rayOrigin,
+            Vector3.down,
+            _groundHitBuffer,
+            rayDistance,
+            groundMask,
+            QueryTriggerInteraction.Ignore);
+
+        RaycastHit bestHit = default;
+        bool foundHit = false;
+        float bestScore = float.PositiveInfinity;
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit hit = _groundHitBuffer[i];
+            if (IsIgnoredGroundHit(hit))
+            {
+                continue;
+            }
+
+            if (!IsAcceptableRoomStateGroundCandidate(worldPosition, hit.point))
+            {
+                continue;
+            }
+
+            float score = Mathf.Abs(hit.point.y - worldPosition.y);
+            if (score < bestScore)
+            {
+                bestHit = hit;
+                bestScore = score;
+                foundHit = true;
+            }
+        }
+
+        if (foundHit)
+        {
+            groundedPosition = worldPosition;
+            groundedPosition.y = bestHit.point.y + _groundSnapOffset;
+            return true;
+        }
+
+        groundedPosition = default;
+        return false;
+    }
+
+    private bool IsAcceptableRoomStateGroundCandidate(Vector3 worldPosition, Vector3 candidatePosition)
+    {
+        float verticalDelta = candidatePosition.y - worldPosition.y;
+        if (verticalDelta > _roomStateGroundMaxRise || verticalDelta < -_roomStateGroundMaxDrop)
+        {
+            return false;
+        }
+
+        float planarDistance = Vector2.Distance(
+            new Vector2(worldPosition.x, worldPosition.z),
+            new Vector2(candidatePosition.x, candidatePosition.z));
+        float maxPlanarSnapDistance = _navMeshAgent != null
+            ? Mathf.Max(0.35f, _navMeshAgent.radius * 1.5f)
+            : 0.75f;
+        return planarDistance <= maxPlanarSnapDistance;
+    }
+
+    private Vector3 ConstrainRoomStateMovement(Vector3 currentPosition, Vector3 targetPosition)
+    {
+        Vector3 movement = targetPosition - currentPosition;
+        float distance = movement.magnitude;
+        if (distance <= 0.0001f)
+        {
+            return targetPosition;
+        }
+
+        int collisionMask = _roomStateCollisionLayers.value != 0 ? _roomStateCollisionLayers.value : Physics.DefaultRaycastLayers;
+        GetCollisionCapsule(currentPosition, out Vector3 capsuleStart, out Vector3 capsuleEnd, out float capsuleRadius);
+        Vector3 direction = movement / distance;
+
+        if (Physics.CapsuleCast(
+                capsuleStart,
+                capsuleEnd,
+                capsuleRadius,
+                direction,
+                out RaycastHit hit,
+                distance,
+                collisionMask,
+                QueryTriggerInteraction.Ignore)
+            && !IsIgnoredGroundHit(hit))
+        {
+            float safeDistance = Mathf.Max(0f, hit.distance - _roomStateCollisionSkinWidth);
+            return currentPosition + direction * safeDistance;
+        }
+
+        return targetPosition;
+    }
+
+    private void GetCollisionCapsule(Vector3 centerPosition, out Vector3 capsuleStart, out Vector3 capsuleEnd, out float capsuleRadius)
+    {
+        float agentRadius = _navMeshAgent != null ? _navMeshAgent.radius : 0.55f;
+        float agentHeight = _navMeshAgent != null ? _navMeshAgent.height : 2f;
+        capsuleRadius = Mathf.Max(0.05f, agentRadius - _roomStateCollisionSkinWidth);
+        float cylinderHeight = Mathf.Max(0f, agentHeight - (capsuleRadius * 2f));
+        Vector3 center = centerPosition + Vector3.up * (agentHeight * 0.5f);
+        Vector3 halfCylinder = Vector3.up * (cylinderHeight * 0.5f);
+        capsuleStart = center - halfCylinder;
+        capsuleEnd = center + halfCylinder;
     }
 
     private bool TryResolveGroundedPosition(Vector3 worldPosition, out Vector3 groundedPosition)
