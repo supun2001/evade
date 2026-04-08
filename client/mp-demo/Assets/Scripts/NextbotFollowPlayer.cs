@@ -4,6 +4,8 @@ using UnityEngine.AI;
 
 public class NextbotFollowPlayer : MonoBehaviour
 {
+    private const int MaxGroundHitBufferSize = 16;
+
     [Header("Networking")]
     [SerializeField] private bool _useRoomStateAuthority = true;
     [SerializeField] private string _networkNextbotId = "nextbot_0";
@@ -62,8 +64,10 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _groundProbeStartHeight = 3f;
     [SerializeField] private float _groundProbeDistance = 8f;
     [SerializeField] private float _groundSnapOffset = 0.02f;
-    [SerializeField] private float _groundFollowLerpSpeed = 16f;
+    [SerializeField] private float _groundRiseSmoothTime = 0.08f;
+    [SerializeField] private float _groundDropSmoothTime = 0.03f;
     [SerializeField] private float _groundHardSnapDistance = 0.35f;
+    [SerializeField] private float _groundDropSnapDistance = 0.08f;
 
     [Header("Hit")]
     [SerializeField] private float _hitDistance = 1.6f;
@@ -105,6 +109,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _nextHitTime;
     private Camera _targetCamera;
     private Collider[] _nextbotColliders = System.Array.Empty<Collider>();
+    private readonly RaycastHit[] _groundHitBuffer = new RaycastHit[MaxGroundHitBufferSize];
     private readonly HashSet<CharacterController> _ignoredInjuredTargets = new HashSet<CharacterController>();
     private readonly List<CharacterController> _ignoredTargetsToRestore = new List<CharacterController>();
     private Renderer[] _renderers = System.Array.Empty<Renderer>();
@@ -125,6 +130,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _offMeshLinkProgress;
     private bool _hasAppliedRoomState;
     private bool _roomStateAuthorityActive;
+    private float _groundHeightVelocity;
     private Texture _defaultBaseMap;
     private Color _defaultBaseColor = Color.white;
     private AudioClip _defaultLoopClip;
@@ -163,6 +169,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             transform.position = groundedStartPosition;
             _lockedHeight = groundedStartPosition.y;
+            _groundHeightVelocity = 0f;
         }
     }
 
@@ -444,6 +451,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private void ApplyRoomStatePosition(Vector3 targetPosition)
     {
         targetPosition = SmoothGroundedPosition(transform.position, targetPosition);
+        _groundHeightVelocity = 0f;
 
         transform.position = targetPosition;
 
@@ -878,11 +886,13 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (_navMeshAgent != null && _navMeshAgent.enabled)
         {
+            _groundHeightVelocity = 0f;
             _navMeshAgent.Warp(navMeshPosition);
             _navMeshAgent.isStopped = false;
         }
         else
         {
+            _groundHeightVelocity = 0f;
             transform.position = navMeshPosition;
         }
 
@@ -952,6 +962,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         _isTraversingOffMeshLink = false;
         _horizontalVelocity = Vector3.zero;
+        _groundHeightVelocity = 0f;
         _navMeshAgent.Warp(_offMeshLinkEnd);
         _navMeshAgent.CompleteOffMeshLink();
         _navMeshAgent.updatePosition = true;
@@ -1600,18 +1611,92 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool TryResolveGroundedPosition(Vector3 worldPosition, out Vector3 groundedPosition)
     {
+        if (TryGetNearestNavMeshPosition(worldPosition, out Vector3 navMeshPosition))
+        {
+            float planarDistanceToNavMesh = Vector2.Distance(
+                new Vector2(worldPosition.x, worldPosition.z),
+                new Vector2(navMeshPosition.x, navMeshPosition.z));
+            float maxPlanarSnapDistance = _navMeshAgent != null
+                ? Mathf.Max(0.35f, _navMeshAgent.radius * 1.5f)
+                : 0.75f;
+
+            if (planarDistanceToNavMesh <= maxPlanarSnapDistance)
+            {
+                groundedPosition = navMeshPosition;
+                groundedPosition.y += _groundSnapOffset;
+                return true;
+            }
+        }
+
         Vector3 rayOrigin = worldPosition + Vector3.up * Mathf.Max(0.1f, _groundProbeStartHeight);
         float rayDistance = Mathf.Max(0.1f, _groundProbeStartHeight + _groundProbeDistance);
         int groundMask = _groundCheckLayers.value != 0 ? _groundCheckLayers.value : Physics.DefaultRaycastLayers;
+        int hitCount = Physics.RaycastNonAlloc(
+            rayOrigin,
+            Vector3.down,
+            _groundHitBuffer,
+            rayDistance,
+            groundMask,
+            QueryTriggerInteraction.Ignore);
 
-        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, groundMask, QueryTriggerInteraction.Ignore))
+        RaycastHit bestHit = default;
+        bool foundHit = false;
+        float bestDistance = float.PositiveInfinity;
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit hit = _groundHitBuffer[i];
+            if (IsIgnoredGroundHit(hit))
+            {
+                continue;
+            }
+
+            if (hit.distance < bestDistance)
+            {
+                bestHit = hit;
+                bestDistance = hit.distance;
+                foundHit = true;
+            }
+        }
+
+        if (foundHit)
         {
             groundedPosition = worldPosition;
-            groundedPosition.y = hit.point.y + _groundSnapOffset;
+            groundedPosition.y = bestHit.point.y + _groundSnapOffset;
             return true;
         }
 
         groundedPosition = default;
+        return false;
+    }
+
+    private bool IsIgnoredGroundHit(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return true;
+        }
+
+        Transform hitTransform = hit.collider.transform;
+        if (hitTransform == null)
+        {
+            return true;
+        }
+
+        if (hitTransform == transform || hitTransform.IsChildOf(transform))
+        {
+            return true;
+        }
+
+        if (hit.collider.GetComponentInParent<NextbotFollowPlayer>() != null)
+        {
+            return true;
+        }
+
+        if (hit.collider.GetComponentInParent<PlayerController>() != null)
+        {
+            return true;
+        }
+
         return false;
     }
 
@@ -1623,13 +1708,20 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         float verticalDelta = groundedCandidatePosition.y - currentPosition.y;
-        if (Mathf.Abs(verticalDelta) >= _groundHardSnapDistance)
+        if (verticalDelta <= -_groundDropSnapDistance || Mathf.Abs(verticalDelta) >= _groundHardSnapDistance)
         {
+            _groundHeightVelocity = 0f;
             return groundedCandidatePosition;
         }
 
-        float groundBlend = 1f - Mathf.Exp(-_groundFollowLerpSpeed * Time.deltaTime);
-        candidatePosition.y = Mathf.Lerp(currentPosition.y, groundedCandidatePosition.y, groundBlend);
+        float smoothTime = verticalDelta < 0f ? _groundDropSmoothTime : _groundRiseSmoothTime;
+        candidatePosition.y = Mathf.SmoothDamp(
+            currentPosition.y,
+            groundedCandidatePosition.y,
+            ref _groundHeightVelocity,
+            Mathf.Max(0.0001f, smoothTime),
+            Mathf.Infinity,
+            Time.deltaTime);
         return candidatePosition;
     }
 }
