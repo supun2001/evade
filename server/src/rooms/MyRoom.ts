@@ -56,6 +56,7 @@ const PLAYER_INJURY_SYNC_GRACE_MS = 600;
 const PLAYER_MAX_DOWNS_BEFORE_ELIMINATION = 3;
 const DEFAULT_INTERMISSION_DURATION_MS = 30_000;
 const DEFAULT_ROUND_DURATION_MS = 180_000;
+const PLAYER_SPAWN_ROTATION_Y = 180;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;
 const PLAYER_UPDATE_Z = 2;
@@ -492,8 +493,9 @@ export class MyRoom extends Room<MyRoomState> {
     const joinOrder = this.nextJoinOrder;
     const spawnPosition = this.getPlayerSpawnPosition(client.sessionId);
     player.x = spawnPosition.x;
-    player.y = 0;
+    player.y = spawnPosition.y;
     player.z = spawnPosition.z;
+    player.rotationY = PLAYER_SPAWN_ROTATION_Y;
     player.isGrounded = true;
     player.isJumping = false;
     player.isInjured = false;
@@ -502,7 +504,7 @@ export class MyRoom extends Room<MyRoomState> {
     player.wallRunSide = 0;
     player.moveInputX = 0;
     player.moveInputY = 0;
-    player.visualYaw = 180;
+    player.visualYaw = PLAYER_SPAWN_ROTATION_Y;
     player.isHitReacting = false;
     player.hitReactionTimeRemaining = 0;
     player.hitReactionPitch = 0;
@@ -1699,6 +1701,8 @@ export class MyRoom extends Room<MyRoomState> {
       player.x = spawnPosition.x;
       player.y = spawnPosition.y;
       player.z = spawnPosition.z;
+      player.rotationY = PLAYER_SPAWN_ROTATION_Y;
+      player.visualYaw = PLAYER_SPAWN_ROTATION_Y;
       player.velocityX = 0;
       player.velocityY = 0;
       player.velocityZ = 0;
@@ -1744,6 +1748,8 @@ export class MyRoom extends Room<MyRoomState> {
       player.x = spawnPosition.x;
       player.y = spawnPosition.y;
       player.z = spawnPosition.z;
+      player.rotationY = PLAYER_SPAWN_ROTATION_Y;
+      player.visualYaw = PLAYER_SPAWN_ROTATION_Y;
       player.velocityX = 0;
       player.velocityY = 0;
       player.velocityZ = 0;
