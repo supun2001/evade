@@ -58,6 +58,12 @@ public class NextbotFollowPlayer : MonoBehaviour
     [Header("Grounding")]
     [SerializeField] private bool _lockToStartingHeight = true;
     [SerializeField] private float _gravity = 20f;
+    [SerializeField] private LayerMask _groundCheckLayers = Physics.DefaultRaycastLayers;
+    [SerializeField] private float _groundProbeStartHeight = 3f;
+    [SerializeField] private float _groundProbeDistance = 8f;
+    [SerializeField] private float _groundSnapOffset = 0.02f;
+    [SerializeField] private float _groundFollowLerpSpeed = 16f;
+    [SerializeField] private float _groundHardSnapDistance = 0.35f;
 
     [Header("Hit")]
     [SerializeField] private float _hitDistance = 1.6f;
@@ -151,6 +157,12 @@ public class NextbotFollowPlayer : MonoBehaviour
             _navMeshAgent.acceleration = _acceleration;
             _navMeshAgent.stoppingDistance = _stoppingDistance;
             _navMeshAgent.angularSpeed = Mathf.Max(120f, _rotationSpeed * 45f);
+        }
+
+        if (TryResolveGroundedPosition(transform.position, out Vector3 groundedStartPosition))
+        {
+            transform.position = groundedStartPosition;
+            _lockedHeight = groundedStartPosition.y;
         }
     }
 
@@ -385,7 +397,10 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         float positionBlend = 1f - Mathf.Exp(-_roomStatePositionLerpSpeed * Time.deltaTime);
         float rotationBlend = 1f - Mathf.Exp(-_roomStateRotationLerpSpeed * Time.deltaTime);
-        transform.position = Vector3.Lerp(transform.position, targetPosition, positionBlend);
+        Vector3 blendedPosition = Vector3.Lerp(transform.position, targetPosition, positionBlend);
+        blendedPosition = SmoothGroundedPosition(transform.position, blendedPosition);
+
+        transform.position = blendedPosition;
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
         if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
         {
@@ -410,7 +425,17 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (TryGetNearestNavMeshPosition(targetPosition, out Vector3 groundedTargetPosition))
         {
+            if (TryResolveGroundedPosition(groundedTargetPosition, out Vector3 navMeshGroundedPosition))
+            {
+                return navMeshGroundedPosition;
+            }
+
             return groundedTargetPosition;
+        }
+
+        if (TryResolveGroundedPosition(targetPosition, out Vector3 physicsGroundedPosition))
+        {
+            return physicsGroundedPosition;
         }
 
         return targetPosition;
@@ -418,6 +443,8 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void ApplyRoomStatePosition(Vector3 targetPosition)
     {
+        targetPosition = SmoothGroundedPosition(transform.position, targetPosition);
+
         transform.position = targetPosition;
 
         if (_navMeshAgent == null || !_navMeshAgent.enabled)
@@ -839,6 +866,11 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        if (TryResolveGroundedPosition(navMeshPosition, out Vector3 groundedNavMeshPosition))
+        {
+            navMeshPosition = groundedNavMeshPosition;
+        }
+
         if (Mathf.Abs(transform.position.y - navMeshPosition.y) > _landingSnapDistance)
         {
             return;
@@ -913,6 +945,11 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        if (TryResolveGroundedPosition(_offMeshLinkEnd, out Vector3 groundedOffMeshLinkEnd))
+        {
+            _offMeshLinkEnd = groundedOffMeshLinkEnd;
+        }
+
         _isTraversingOffMeshLink = false;
         _horizontalVelocity = Vector3.zero;
         _navMeshAgent.Warp(_offMeshLinkEnd);
@@ -940,7 +977,18 @@ public class NextbotFollowPlayer : MonoBehaviour
             movement.y = _verticalVelocity;
             _characterController.Move(movement * Time.deltaTime);
 
-            if (_lockToStartingHeight)
+            if (TryResolveGroundedPosition(transform.position, out Vector3 groundedPosition)
+                && (_characterController.isGrounded || _verticalVelocity <= 0f))
+            {
+                Vector3 smoothedGroundedPosition = SmoothGroundedPosition(transform.position, groundedPosition);
+                transform.position = smoothedGroundedPosition;
+                _lockedHeight = smoothedGroundedPosition.y;
+                if (_verticalVelocity < 0f)
+                {
+                    _verticalVelocity = -1f;
+                }
+            }
+            else if (_lockToStartingHeight)
             {
                 Vector3 position = transform.position;
                 position.y = _lockedHeight;
@@ -952,7 +1000,12 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         Vector3 nextPosition = transform.position + horizontalVelocity * Time.deltaTime;
-        if (_lockToStartingHeight)
+        if (TryResolveGroundedPosition(nextPosition, out Vector3 groundedNextPosition))
+        {
+            nextPosition = SmoothGroundedPosition(transform.position, groundedNextPosition);
+            _lockedHeight = nextPosition.y;
+        }
+        else if (_lockToStartingHeight)
         {
             nextPosition.y = _lockedHeight;
         }
@@ -1543,5 +1596,40 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         navMeshPosition = default;
         return false;
+    }
+
+    private bool TryResolveGroundedPosition(Vector3 worldPosition, out Vector3 groundedPosition)
+    {
+        Vector3 rayOrigin = worldPosition + Vector3.up * Mathf.Max(0.1f, _groundProbeStartHeight);
+        float rayDistance = Mathf.Max(0.1f, _groundProbeStartHeight + _groundProbeDistance);
+        int groundMask = _groundCheckLayers.value != 0 ? _groundCheckLayers.value : Physics.DefaultRaycastLayers;
+
+        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, groundMask, QueryTriggerInteraction.Ignore))
+        {
+            groundedPosition = worldPosition;
+            groundedPosition.y = hit.point.y + _groundSnapOffset;
+            return true;
+        }
+
+        groundedPosition = default;
+        return false;
+    }
+
+    private Vector3 SmoothGroundedPosition(Vector3 currentPosition, Vector3 candidatePosition)
+    {
+        if (!TryResolveGroundedPosition(candidatePosition, out Vector3 groundedCandidatePosition))
+        {
+            return candidatePosition;
+        }
+
+        float verticalDelta = groundedCandidatePosition.y - currentPosition.y;
+        if (Mathf.Abs(verticalDelta) >= _groundHardSnapDistance)
+        {
+            return groundedCandidatePosition;
+        }
+
+        float groundBlend = 1f - Mathf.Exp(-_groundFollowLerpSpeed * Time.deltaTime);
+        candidatePosition.y = Mathf.Lerp(currentPosition.y, groundedCandidatePosition.y, groundBlend);
+        return candidatePosition;
     }
 }
