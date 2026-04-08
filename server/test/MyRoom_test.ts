@@ -68,4 +68,25 @@ describe("testing your Colyseus app", () => {
 
     assert.strictEqual(nextbot!.y, 0);
   });
+
+  it("uses floor samples to follow uneven ground", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotFloorSamples: [
+        { x: 0, y: 0, z: 0 },
+        { x: 4, y: 2, z: 0 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+
+    nextbot!.x = 0;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+
+    roomAny.moveNextbotTowardsPosition(nextbot, { x: 4, z: 0, distance: 4 }, 1, 4, 0);
+
+    assert.strictEqual(nextbot!.y, 2);
+  });
 });

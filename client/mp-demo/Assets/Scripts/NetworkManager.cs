@@ -53,6 +53,14 @@ public struct ServerObstacleConfig
     public float maxZ;
 }
 
+[Serializable]
+public struct FloorHeightSampleConfig
+{
+    public float x;
+    public float y;
+    public float z;
+}
+
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
@@ -89,6 +97,8 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private float spawnGroundProbeDistance = 120f;
     [SerializeField] private float spawnGroundOffset = 0.15f;
     [SerializeField] private LayerMask spawnGroundLayers = ~0;
+    [SerializeField] private float serverFloorSampleSpacing = 2f;
+    [SerializeField] private float serverFloorSamplePadding = 2f;
     [Tooltip("Optional patrol hints for idle nextbots. Leave empty to auto-roam using the overall spawn area.")]
     [SerializeField] private List<NextbotPatrolPointConfig> nextbotPatrolPoints = new();
     [Header("Round Timing")]
@@ -508,6 +518,7 @@ public class NetworkManager : MonoBehaviour
         List<object> serializedNextbotIds = BuildSerializedNextbotIds();
         List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
         List<object> serializedObstacles = BuildSerializedObstacleBounds();
+        List<object> serializedFloorSamples = BuildSerializedFloorSamples(nextbotSpawnPoints, playerSpawnPoints, nextbotPatrolPoints);
 
         return new Dictionary<string, object>
         {
@@ -516,6 +527,7 @@ public class NetworkManager : MonoBehaviour
             ["nextbotIds"] = serializedNextbotIds,
             ["nextbotConfigs"] = serializedNextbotConfigs,
             ["nextbotObstacles"] = serializedObstacles,
+            ["nextbotFloorSamples"] = serializedFloorSamples,
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
@@ -585,6 +597,93 @@ public class NetworkManager : MonoBehaviour
         }
 
         return true;
+    }
+
+    private List<object> BuildSerializedFloorSamples(
+        List<NextbotSpawnPointConfig> nextbotSpawnConfigs,
+        List<PlayerSpawnPointConfig> playerSpawnConfigs,
+        List<NextbotPatrolPointConfig> patrolConfigs)
+    {
+        List<Vector3> areaPoints = new List<Vector3>();
+        for (int i = 0; i < nextbotSpawnConfigs.Count; i++)
+        {
+            areaPoints.Add(nextbotSpawnConfigs[i].GetWorldPosition());
+        }
+
+        for (int i = 0; i < playerSpawnConfigs.Count; i++)
+        {
+            areaPoints.Add(playerSpawnConfigs[i].GetWorldPosition());
+        }
+
+        for (int i = 0; i < patrolConfigs.Count; i++)
+        {
+            areaPoints.Add(patrolConfigs[i].GetWorldPosition());
+        }
+
+        List<object> serializedSamples = new List<object>();
+        if (areaPoints.Count == 0)
+        {
+            return serializedSamples;
+        }
+
+        float minX = float.PositiveInfinity;
+        float maxX = float.NegativeInfinity;
+        float minZ = float.PositiveInfinity;
+        float maxZ = float.NegativeInfinity;
+        for (int i = 0; i < areaPoints.Count; i++)
+        {
+            Vector3 point = areaPoints[i];
+            minX = Mathf.Min(minX, point.x);
+            maxX = Mathf.Max(maxX, point.x);
+            minZ = Mathf.Min(minZ, point.z);
+            maxZ = Mathf.Max(maxZ, point.z);
+        }
+
+        float spacing = Mathf.Max(0.75f, serverFloorSampleSpacing);
+        minX -= serverFloorSamplePadding;
+        maxX += serverFloorSamplePadding;
+        minZ -= serverFloorSamplePadding;
+        maxZ += serverFloorSamplePadding;
+
+        HashSet<string> dedup = new HashSet<string>();
+        for (float x = minX; x <= maxX + 0.01f; x += spacing)
+        {
+            for (float z = minZ; z <= maxZ + 0.01f; z += spacing)
+            {
+                Vector3 grounded = ResolveGroundedSpawnPosition(new Vector3(x, 0f, z));
+                string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
+                if (!dedup.Add(key))
+                {
+                    continue;
+                }
+
+                serializedSamples.Add(new Dictionary<string, object>
+                {
+                    ["x"] = grounded.x,
+                    ["y"] = grounded.y,
+                    ["z"] = grounded.z,
+                });
+            }
+        }
+
+        for (int i = 0; i < areaPoints.Count; i++)
+        {
+            Vector3 grounded = ResolveGroundedSpawnPosition(areaPoints[i]);
+            string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
+            if (!dedup.Add(key))
+            {
+                continue;
+            }
+
+            serializedSamples.Add(new Dictionary<string, object>
+            {
+                ["x"] = grounded.x,
+                ["y"] = grounded.y,
+                ["z"] = grounded.z,
+            });
+        }
+
+        return serializedSamples;
     }
 
     private static List<object> BuildSerializedNextbotIds()

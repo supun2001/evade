@@ -8,6 +8,7 @@ public class SpeedBoostPickup : MonoBehaviour
     [SerializeField] private AudioClip _pickupSound;
     [SerializeField, Range(0f, 1f)] private float _pickupSoundVolume = 1f;
     [SerializeField, Min(0.05f)] private float _pickupSoundMaxDuration = 0.55f;
+    [SerializeField, Min(0.1f)] private float _minimumTriggerRadius = 0.8f;
     [SerializeField] private bool _destroyOnPickup = true;
 
     private void Reset()
@@ -59,6 +60,8 @@ public class SpeedBoostPickup : MonoBehaviour
     private void EnsureTriggerCollider()
     {
         Collider[] colliders = GetComponents<Collider>();
+        SphereCollider selectedSphereCollider = null;
+
         foreach (Collider collider in colliders)
         {
             if (collider == null)
@@ -66,22 +69,35 @@ public class SpeedBoostPickup : MonoBehaviour
                 continue;
             }
 
-            if (collider is MeshCollider meshCollider && !meshCollider.convex)
+            if (collider is MeshCollider meshCollider)
             {
+                meshCollider.enabled = false;
                 continue;
             }
 
-            collider.isTrigger = true;
-            return;
+            if (collider is SphereCollider sphereCollider)
+            {
+                collider.enabled = true;
+                collider.isTrigger = true;
+                selectedSphereCollider = sphereCollider;
+            }
+            else
+            {
+                collider.enabled = false;
+            }
         }
 
-        SphereCollider fallbackTrigger = GetComponent<SphereCollider>();
-        if (fallbackTrigger == null)
+        if (selectedSphereCollider == null)
         {
-            fallbackTrigger = gameObject.AddComponent<SphereCollider>();
+            selectedSphereCollider = GetComponent<SphereCollider>();
         }
 
-        ConfigureFallbackTrigger(fallbackTrigger);
+        if (selectedSphereCollider == null)
+        {
+            selectedSphereCollider = gameObject.AddComponent<SphereCollider>();
+        }
+
+        ConfigureFallbackTrigger(selectedSphereCollider);
     }
 
     private void ConfigureFallbackTrigger(SphereCollider fallbackTrigger)
@@ -93,7 +109,7 @@ public class SpeedBoostPickup : MonoBehaviour
         {
             Bounds meshBounds = meshFilter.sharedMesh.bounds;
             fallbackTrigger.center = meshBounds.center;
-            fallbackTrigger.radius = Mathf.Max(meshBounds.extents.x, meshBounds.extents.y, meshBounds.extents.z);
+            fallbackTrigger.radius = Mathf.Max(_minimumTriggerRadius, Mathf.Max(meshBounds.extents.x, meshBounds.extents.y, meshBounds.extents.z));
             return;
         }
 
@@ -112,12 +128,12 @@ public class SpeedBoostPickup : MonoBehaviour
                 worldBounds.extents.z / Mathf.Abs(safeScaleZ));
 
             fallbackTrigger.center = localCenter;
-            fallbackTrigger.radius = Mathf.Max(localExtents.x, localExtents.y, localExtents.z);
+            fallbackTrigger.radius = Mathf.Max(_minimumTriggerRadius, Mathf.Max(localExtents.x, localExtents.y, localExtents.z));
             return;
         }
 
         fallbackTrigger.center = Vector3.zero;
-        fallbackTrigger.radius = 0.5f;
+        fallbackTrigger.radius = _minimumTriggerRadius;
     }
 
     private GameObject GetPickupRoot()

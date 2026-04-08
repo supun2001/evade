@@ -49,7 +49,7 @@ const NEXTBOT_PATROL_WAIT_MIN_MS = 1000;
 const NEXTBOT_PATROL_WAIT_MAX_MS = 2000;
 const NEXTBOT_OBSTACLE_PADDING = 0.7;
 const NEXTBOT_OBSTACLE_HEIGHT_PADDING = 1.5;
-const NEXTBOT_MAX_ALLOWED_ASCENT = 0.35;
+const NEXTBOT_MAX_ALLOWED_ASCENT = 3;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 const PLAYER_INJURY_SYNC_GRACE_MS = 600;
@@ -89,6 +89,7 @@ const PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING = 28;
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
 type ObstacleRect = { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number };
+type FloorSample = { x: number; y: number; z: number };
 type RoundPhase = "waiting" | "intermission" | "round";
 type ScoredTarget = {
   player: Player;
@@ -183,6 +184,7 @@ export class MyRoom extends Room<MyRoomState> {
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
   private nextbotPatrolPoints: SpawnPoint[] = [];
   private nextbotObstacles: ObstacleRect[] = [];
+  private nextbotFloorSamples: FloorSample[] = [];
   private nextbotIds = DEFAULT_NEXTBOT_IDS;
   private nextbotMoveSpeeds = new Map<string, number>();
   private nextbotControllers: NextbotControllerState[] = [];
@@ -204,6 +206,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
     this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(options);
     this.nextbotObstacles = this.resolveNextbotObstacles(options);
+    this.nextbotFloorSamples = this.resolveNextbotFloorSamples(options);
     this.nextbotIds = this.resolveNextbotIds(options);
     this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
     this.playerSpawnPoints = this.resolvePlayerSpawnPoints(options);
@@ -639,7 +642,8 @@ export class MyRoom extends Room<MyRoomState> {
       if (target != null && this.isScoreEligibleTarget(target, now, nextbot)) {
         nextbot.targetSessionId = target.sessionId;
         const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
-        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, controller.groundedY);
+        const groundY = this.getGroundYForPosition(predictedTarget.x, predictedTarget.z, controller.groundedY);
+        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
         this.tryInjurePlayer(controller, nextbot, target, now);
         continue;
       }
@@ -820,7 +824,7 @@ export class MyRoom extends Room<MyRoomState> {
       x: nextPatrolTarget.x,
       z: nextPatrolTarget.z,
       distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
-    }, deltaSeconds, controller.moveSpeed, controller.groundedY);
+    }, deltaSeconds, controller.moveSpeed, this.getGroundYForPosition(nextPatrolTarget.x, nextPatrolTarget.z, controller.groundedY));
   }
 
   private moveNextbotTowardsPosition(
@@ -857,7 +861,11 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot.rotationY = Math.atan2(resolvedMove.x, resolvedMove.z) * (180 / Math.PI);
     }
 
-    this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+    this.moveNextbotVerticallyTowardsTarget(
+      nextbot,
+      this.getGroundYForPosition(nextbot.x, nextbot.z, targetY ?? nextbot.y),
+      deltaSeconds,
+      effectiveMoveSpeed);
   }
 
   private resolveNextbotObstacleAwareMove(
@@ -1336,6 +1344,51 @@ export class MyRoom extends Room<MyRoomState> {
         return { minX, maxX, minY, maxY, minZ, maxZ };
       })
       .filter((obstacle): obstacle is ObstacleRect => obstacle !== undefined);
+  }
+
+  private resolveNextbotFloorSamples(options: any): FloorSample[] {
+    const candidateSamples = options?.nextbotFloorSamples;
+    if (!Array.isArray(candidateSamples) || candidateSamples.length === 0) {
+      return [];
+    }
+
+    return candidateSamples
+      .map((sample) => {
+        const x = Number(sample?.x);
+        const y = Number(sample?.y);
+        const z = Number(sample?.z);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+          return undefined;
+        }
+
+        return { x, y, z };
+      })
+      .filter((sample): sample is FloorSample => sample !== undefined);
+  }
+
+  private getGroundYForPosition(x: number, z: number, fallbackY: number) {
+    if (this.nextbotFloorSamples.length === 0) {
+      return fallbackY;
+    }
+
+    let bestSample: FloorSample | undefined;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+    for (const sample of this.nextbotFloorSamples) {
+      const dx = sample.x - x;
+      const dz = sample.z - z;
+      const distanceSq = (dx * dx) + (dz * dz);
+      if (distanceSq < bestDistanceSq) {
+        bestDistanceSq = distanceSq;
+        bestSample = sample;
+      }
+    }
+
+    if (bestSample == null) {
+      return fallbackY;
+    }
+
+    return bestSample.y;
   }
 
   private wouldNextbotMoveHitObstacle(
