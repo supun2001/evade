@@ -65,6 +65,8 @@ public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
     private const int PlayerUpdateFieldCount = 29;
+    private const string WalkableLayerName = "Walkable";
+    private const string RampLayerName = "Ramp";
 
     public static NetworkManager Instance;
     
@@ -540,11 +542,12 @@ public class NetworkManager : MonoBehaviour
         List<object> serializedObstacles = new List<object>();
         Collider[] colliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
         int walkableLayer = LayerMask.NameToLayer("Walkable");
+        int rampLayer = LayerMask.NameToLayer("Ramp");
 
         for (int i = 0; i < colliders.Length; i++)
         {
             Collider collider = colliders[i];
-            if (!ShouldIncludeServerObstacle(collider, walkableLayer))
+            if (!ShouldIncludeServerObstacle(collider, walkableLayer, rampLayer))
             {
                 continue;
             }
@@ -564,7 +567,7 @@ public class NetworkManager : MonoBehaviour
         return serializedObstacles;
     }
 
-    private static bool ShouldIncludeServerObstacle(Collider collider, int walkableLayer)
+    private static bool ShouldIncludeServerObstacle(Collider collider, int walkableLayer, int rampLayer)
     {
         if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy || collider.isTrigger)
         {
@@ -572,6 +575,11 @@ public class NetworkManager : MonoBehaviour
         }
 
         if (walkableLayer >= 0 && collider.gameObject.layer == walkableLayer)
+        {
+            return false;
+        }
+
+        if (rampLayer >= 0 && collider.gameObject.layer == rampLayer)
         {
             return false;
         }
@@ -776,15 +784,26 @@ public class NetworkManager : MonoBehaviour
     private int GetSpawnGroundLayerMask()
     {
         int configuredMask = spawnGroundLayers.value;
-        int walkableLayer = LayerMask.NameToLayer("Walkable");
+        int walkableLayer = LayerMask.NameToLayer(WalkableLayerName);
+        int rampLayer = LayerMask.NameToLayer(RampLayerName);
+        int preferredGroundMask = 0;
         if (walkableLayer >= 0)
         {
-            int walkableMask = 1 << walkableLayer;
+            preferredGroundMask |= 1 << walkableLayer;
+        }
+
+        if (rampLayer >= 0)
+        {
+            preferredGroundMask |= 1 << rampLayer;
+        }
+
+        if (preferredGroundMask != 0)
+        {
             bool usesEverything = configuredMask == ~0;
             bool usesNothing = configuredMask == 0;
             if (usesEverything || usesNothing)
             {
-                return walkableMask;
+                return preferredGroundMask;
             }
         }
 
