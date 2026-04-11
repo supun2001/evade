@@ -25,6 +25,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _remoteRoomStateMaxBufferedSpeed = 30f;
     [SerializeField] private float _remoteRoomStateMaxVisualSpeed = 35f;
     [SerializeField] private float _remoteRoomStateVerticalLerpSpeed = 10f;
+    [SerializeField] private float _remoteRoomStateVerticalAscentLerpSpeed = 18f;
     [SerializeField] private bool _logRemoteRoomStateDiagnostics = true;
 
     [Header("Follow")]
@@ -167,6 +168,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _defaultLoopPitch = 1f;
     private float _defaultMoveSpeed = 10f;
     private int _walkableAreaMask = NavMesh.AllAreas;
+    private Material _visualRuntimeMaterial;
     private readonly List<RoomStateSnapshot> _roomStateSnapshotBuffer = new List<RoomStateSnapshot>(10);
     private float _lastRoomStateArrivalTime = -1f;
     private float _lastRoomStateServerTime = -1f;
@@ -467,8 +469,15 @@ public class NextbotFollowPlayer : MonoBehaviour
             float maxVisualStep = Mathf.Max(0.25f, GetEffectiveRemoteVisualSpeedLimit()) * Time.deltaTime;
             Vector3 currentPlanarPosition = new Vector3(transform.position.x, 0f, transform.position.z);
             Vector3 smoothedBufferedPlanarPosition = Vector3.MoveTowards(currentPlanarPosition, dampedBufferedHorizontalPosition, maxVisualStep);
-            float verticalBlend = 1f - Mathf.Exp(-Mathf.Max(0.01f, _remoteRoomStateVerticalLerpSpeed) * Time.deltaTime);
+            float targetVerticalLerpSpeed = bufferedPosition.y >= transform.position.y
+                ? Mathf.Max(_remoteRoomStateVerticalLerpSpeed, _remoteRoomStateVerticalAscentLerpSpeed)
+                : Mathf.Max(0.01f, _remoteRoomStateVerticalLerpSpeed);
+            float verticalBlend = 1f - Mathf.Exp(-targetVerticalLerpSpeed * Time.deltaTime);
             float smoothedBufferedY = Mathf.Lerp(transform.position.y, bufferedPosition.y, verticalBlend);
+            if (bufferedPosition.y > transform.position.y)
+            {
+                smoothedBufferedY = Mathf.Max(smoothedBufferedY, bufferedPosition.y - 0.02f);
+            }
             Vector3 smoothedBufferedPosition = new Vector3(
                 smoothedBufferedPlanarPosition.x,
                 smoothedBufferedY,
@@ -1678,6 +1687,7 @@ public class NextbotFollowPlayer : MonoBehaviour
                         ? _visualMeshRenderer.sharedMaterial.GetColor("_Color")
                         : Color.white);
             }
+            ConfigureVisualRendererMaterial(_visualMeshRenderer, rootMeshRenderer.sharedMaterial);
             rootMeshRenderer.enabled = false;
             return;
         }
@@ -1711,8 +1721,82 @@ public class NextbotFollowPlayer : MonoBehaviour
                     : Color.white);
         }
 
+        ConfigureVisualRendererMaterial(visualMeshRenderer, rootMeshRenderer.sharedMaterial);
+
         rootMeshRenderer.enabled = false;
         _visualTransform = visualObject.transform;
+    }
+
+    private void ConfigureVisualRendererMaterial(MeshRenderer targetRenderer, Material sourceMaterial)
+    {
+        if (targetRenderer == null)
+        {
+            return;
+        }
+
+        Shader preferredShader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (preferredShader == null)
+        {
+            preferredShader = Shader.Find("Unlit/Texture");
+        }
+
+        if (preferredShader == null)
+        {
+            return;
+        }
+
+        if (_visualRuntimeMaterial == null || _visualRuntimeMaterial.shader != preferredShader)
+        {
+            _visualRuntimeMaterial = new Material(preferredShader)
+            {
+                name = "NextbotVisualRuntimeMaterial"
+            };
+        }
+
+        Texture baseTexture = _defaultBaseMap;
+        Color baseColor = _defaultBaseColor;
+        if (sourceMaterial != null)
+        {
+            if (baseTexture == null)
+            {
+                baseTexture = sourceMaterial.HasProperty("_BaseMap")
+                    ? sourceMaterial.GetTexture("_BaseMap")
+                    : sourceMaterial.mainTexture;
+            }
+
+            if (baseColor == Color.white)
+            {
+                baseColor = sourceMaterial.HasProperty("_BaseColor")
+                    ? sourceMaterial.GetColor("_BaseColor")
+                    : (sourceMaterial.HasProperty("_Color")
+                        ? sourceMaterial.GetColor("_Color")
+                        : Color.white);
+            }
+        }
+
+        if (_visualRuntimeMaterial.HasProperty("_BaseMap"))
+        {
+            _visualRuntimeMaterial.SetTexture("_BaseMap", baseTexture);
+        }
+
+        if (_visualRuntimeMaterial.HasProperty("_MainTex"))
+        {
+            _visualRuntimeMaterial.SetTexture("_MainTex", baseTexture);
+        }
+
+        if (_visualRuntimeMaterial.HasProperty("_BaseColor"))
+        {
+            _visualRuntimeMaterial.SetColor("_BaseColor", baseColor);
+        }
+
+        if (_visualRuntimeMaterial.HasProperty("_Color"))
+        {
+            _visualRuntimeMaterial.SetColor("_Color", baseColor);
+        }
+
+        targetRenderer.sharedMaterial = _visualRuntimeMaterial;
+        targetRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        targetRenderer.receiveShadows = false;
     }
 
     private Vector3 GetVisualLocalPosition(Mesh mesh)
