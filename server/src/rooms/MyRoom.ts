@@ -59,6 +59,7 @@ const NEXTBOT_DROP_LAND_SNAP_DISTANCE = 0.015;
 const NEXTBOT_DROP_LAND_BLEND_SPEED = 14;
 const NEXTBOT_HOP_UPWARD_SPEED = 3.2;
 const NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED = 10;
+const NEXTBOT_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 const PLAYER_INJURY_SYNC_GRACE_MS = 600;
@@ -192,6 +193,7 @@ function sanitizeDisplayName(value: unknown, fallback: string): string {
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 15;
   state = new MyRoomState();
+  private roomCreatedAt = Date.now();
   private playerSafeUntil = new Map<string, number>();
   private nextbotSpawnPoints = DEFAULT_NEXTBOT_SPAWN_POINTS;
   private nextbotPatrolPoints: SpawnPoint[] = [];
@@ -213,8 +215,15 @@ export class MyRoom extends Room<MyRoomState> {
   private latestRoundResultsJson = "";
   private intermissionDurationMs = DEFAULT_INTERMISSION_DURATION_MS;
   private roundDurationMs = DEFAULT_ROUND_DURATION_MS;
+  private nextbotDiagnosticWindowStartedAt = 0;
+  private nextbotDiagnosticTickCount = 0;
+  private nextbotDiagnosticDeltaSum = 0;
+  private nextbotDiagnosticMinDelta = Number.POSITIVE_INFINITY;
+  private nextbotDiagnosticMaxDelta = 0;
 
   onCreate(options: any) {
+    this.roomCreatedAt = Date.now();
+    this.nextbotDiagnosticWindowStartedAt = this.roomCreatedAt;
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
     this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(options);
     this.nextbotObstacles = this.resolveNextbotObstacles(options);
@@ -621,6 +630,7 @@ export class MyRoom extends Room<MyRoomState> {
 
   update(deltaTime: number) {
     const now = Date.now();
+    this.recordNextbotTickDiagnostic(now, deltaTime);
     this.updateRoundFlow(now);
     if (!NEXTBOTS_ENABLED) {
       this.setAllNextbotsActive(false);
@@ -689,6 +699,7 @@ export class MyRoom extends Room<MyRoomState> {
       nextbotState.velocityX = 0;
       nextbotState.velocityY = 0;
       nextbotState.velocityZ = 0;
+      nextbotState.sampleTimeMs = 0;
       this.state.nextbots.set(botId, nextbotState);
       this.nextbotControllers.push({
         id: botId,
@@ -727,6 +738,7 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot.velocityX = 0;
       nextbot.velocityY = 0;
       nextbot.velocityZ = 0;
+      nextbot.sampleTimeMs = 0;
       controller.currentTargetSessionId = "";
       controller.nextInjuryAt = 0;
       controller.groundedY = spawnPoint.y;
@@ -751,6 +763,7 @@ export class MyRoom extends Room<MyRoomState> {
           nextbot.velocityX = 0;
           nextbot.velocityY = 0;
           nextbot.velocityZ = 0;
+          nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
         }
       }
     }
@@ -903,6 +916,40 @@ export class MyRoom extends Room<MyRoomState> {
     nextbot.velocityX = (nextbot.x - previousX) / safeDeltaSeconds;
     nextbot.velocityY = (nextbot.y - previousY) / safeDeltaSeconds;
     nextbot.velocityZ = (nextbot.z - previousZ) / safeDeltaSeconds;
+    nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
+  }
+
+  private getRoomElapsedTimeMs() {
+    return Date.now() - this.roomCreatedAt;
+  }
+
+  private recordNextbotTickDiagnostic(now: number, deltaTime: number) {
+    if (this.nextbotDiagnosticWindowStartedAt <= 0) {
+      this.nextbotDiagnosticWindowStartedAt = now;
+    }
+
+    this.nextbotDiagnosticTickCount += 1;
+    this.nextbotDiagnosticDeltaSum += deltaTime;
+    this.nextbotDiagnosticMinDelta = Math.min(this.nextbotDiagnosticMinDelta, deltaTime);
+    this.nextbotDiagnosticMaxDelta = Math.max(this.nextbotDiagnosticMaxDelta, deltaTime);
+
+    const elapsed = now - this.nextbotDiagnosticWindowStartedAt;
+    if (elapsed < NEXTBOT_DIAGNOSTIC_LOG_INTERVAL_MS) {
+      return;
+    }
+
+    const averageDelta = this.nextbotDiagnosticTickCount > 0
+      ? this.nextbotDiagnosticDeltaSum / this.nextbotDiagnosticTickCount
+      : 0;
+    console.log(
+      `[NextbotDiag][Server] room=${this.roomId} ticks=${this.nextbotDiagnosticTickCount} avgDelta=${averageDelta.toFixed(2)}ms minDelta=${this.nextbotDiagnosticMinDelta.toFixed(2)}ms maxDelta=${this.nextbotDiagnosticMaxDelta.toFixed(2)}ms players=${this.clients.length}`
+    );
+
+    this.nextbotDiagnosticWindowStartedAt = now;
+    this.nextbotDiagnosticTickCount = 0;
+    this.nextbotDiagnosticDeltaSum = 0;
+    this.nextbotDiagnosticMinDelta = Number.POSITIVE_INFINITY;
+    this.nextbotDiagnosticMaxDelta = 0;
   }
 
   private resolveNextbotObstacleAwareMove(

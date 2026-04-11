@@ -10,4 +10,5 @@ export class NextbotState extends Schema {
   @type("number") velocityX: number = 0;
   @type("number") velocityY: number = 0;
   @type("number") velocityZ: number = 0;
+  @type("number") sampleTimeMs: number = 0;
 }

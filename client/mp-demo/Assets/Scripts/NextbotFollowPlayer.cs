@@ -14,6 +14,14 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _roomStateSnapDistance = 1.1f;
     [SerializeField] private float _roomStateChaseResyncDistance = 12f;
     [SerializeField] private float _roomStatePredictionTime = 0.1f;
+    [SerializeField] private float _remoteRoomStatePositionLerpSpeed = 16f;
+    [SerializeField] private float _remoteRoomStateRotationLerpSpeed = 18f;
+    [SerializeField] private float _remoteRoomStateSnapDistance = 4f;
+    [SerializeField] private float _remoteRoomStatePredictionTime = 0.35f;
+    [SerializeField] private float _remoteRoomStateCatchUpBoost = 2.5f;
+    [SerializeField] private float _remoteRoomStateInterpolationBackTime = 0.12f;
+    [SerializeField] private float _remoteRoomStateMaxExtrapolationTime = 0.15f;
+    [SerializeField] private bool _logRemoteRoomStateDiagnostics = true;
 
     [Header("Follow")]
     [SerializeField] private float _moveSpeed = 10f;
@@ -106,6 +114,16 @@ public class NextbotFollowPlayer : MonoBehaviour
         public bool HasLineOfSight;
     }
 
+    private struct RoomStateSnapshot
+    {
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public Vector3 Velocity;
+        public float ArrivalTime;
+        public float ServerTime;
+        public bool IsValid;
+    }
+
     private CharacterController _characterController;
     private NavMeshAgent _navMeshAgent;
     private Transform _target;
@@ -145,6 +163,18 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _defaultLoopPitch = 1f;
     private float _defaultMoveSpeed = 10f;
     private int _walkableAreaMask = NavMesh.AllAreas;
+    private RoomStateSnapshot _previousRoomStateSnapshot;
+    private RoomStateSnapshot _currentRoomStateSnapshot;
+    private float _lastRoomStateArrivalTime = -1f;
+    private float _lastRoomStateServerTime = -1f;
+    private float _roomStateArrivalGapSum;
+    private float _roomStateServerGapSum;
+    private float _roomStateArrivalGapMin = float.PositiveInfinity;
+    private float _roomStateArrivalGapMax;
+    private float _roomStateServerGapMin = float.PositiveInfinity;
+    private float _roomStateServerGapMax;
+    private int _roomStateDiagnosticSampleCount;
+    private float _nextRoomStateDiagnosticLogTime;
 
     public string NetworkNextbotId => _networkNextbotId;
 
@@ -384,8 +414,10 @@ public class NextbotFollowPlayer : MonoBehaviour
             return true;
         }
 
+        Vector3 rawTargetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
         Vector3 targetPosition = ResolveGroundedRoomStatePosition(nextbotState);
         Quaternion targetRotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
+        Vector3 targetVelocity = new Vector3(nextbotState.velocityX, nextbotState.velocityY, nextbotState.velocityZ);
 
         if (TryGetServerAssignedTarget(nextbotState.targetSessionId, out Transform targetTransform, out PlayerController targetController))
         {
@@ -403,22 +435,62 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!_hasAppliedRoomState)
         {
+            PushRoomStateSnapshot(rawTargetPosition, targetRotation, targetVelocity, nextbotState.sampleTimeMs, true);
             ApplyRoomStatePosition(targetPosition, false);
             transform.rotation = targetRotation;
             _hasAppliedRoomState = true;
             return true;
         }
 
+        PushRoomStateSnapshot(rawTargetPosition, targetRotation, targetVelocity, nextbotState.sampleTimeMs, false);
+
+        if (IsUsingRemoteRoomStateProfile() && TryEvaluateBufferedRoomState(out Vector3 bufferedPosition, out Quaternion bufferedRotation))
+        {
+            float bufferedPositionError = Vector3.Distance(transform.position, bufferedPosition);
+            float bufferedSnapDistance = GetEffectiveRoomStateSnapDistance();
+            if (bufferedPositionError >= bufferedSnapDistance)
+            {
+                ApplyRoomStatePosition(bufferedPosition, false);
+                transform.rotation = bufferedRotation;
+                return true;
+            }
+
+            float bufferedBasePositionLerpSpeed = GetEffectiveRoomStatePositionLerpSpeed();
+            float bufferedEffectivePositionLerpSpeed = bufferedBasePositionLerpSpeed;
+            float catchUpT = Mathf.Clamp01(bufferedPositionError / Mathf.Max(0.001f, bufferedSnapDistance));
+            bufferedEffectivePositionLerpSpeed *= Mathf.Lerp(1f, _remoteRoomStateCatchUpBoost, catchUpT);
+            float bufferedPositionBlend = 1f - Mathf.Exp(-bufferedEffectivePositionLerpSpeed * Time.deltaTime);
+            float bufferedRotationBlend = 1f - Mathf.Exp(-GetEffectiveRoomStateRotationLerpSpeed() * Time.deltaTime);
+
+            transform.position = Vector3.Lerp(transform.position, bufferedPosition, bufferedPositionBlend);
+            transform.rotation = Quaternion.Slerp(transform.rotation, bufferedRotation, bufferedRotationBlend);
+            if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+            {
+                _navMeshAgent.nextPosition = transform.position;
+            }
+
+            return true;
+        }
+
         float positionError = Vector3.Distance(transform.position, targetPosition);
-        if (positionError >= _roomStateSnapDistance)
+        float snapDistance = GetEffectiveRoomStateSnapDistance();
+        if (positionError >= snapDistance)
         {
             ApplyRoomStatePosition(targetPosition, false);
             transform.rotation = targetRotation;
             return true;
         }
 
-        float positionBlend = 1f - Mathf.Exp(-_roomStatePositionLerpSpeed * Time.deltaTime);
-        float rotationBlend = 1f - Mathf.Exp(-_roomStateRotationLerpSpeed * Time.deltaTime);
+        float basePositionLerpSpeed = GetEffectiveRoomStatePositionLerpSpeed();
+        float effectivePositionLerpSpeed = basePositionLerpSpeed;
+        if (IsUsingRemoteRoomStateProfile())
+        {
+            float catchUpT = Mathf.Clamp01(positionError / Mathf.Max(0.001f, snapDistance));
+            effectivePositionLerpSpeed *= Mathf.Lerp(1f, _remoteRoomStateCatchUpBoost, catchUpT);
+        }
+
+        float positionBlend = 1f - Mathf.Exp(-effectivePositionLerpSpeed * Time.deltaTime);
+        float rotationBlend = 1f - Mathf.Exp(-GetEffectiveRoomStateRotationLerpSpeed() * Time.deltaTime);
         Vector3 blendedPosition = Vector3.Lerp(transform.position, targetPosition, positionBlend);
 
         transform.position = blendedPosition;
@@ -433,11 +505,183 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
     {
-        float predictionTime = Mathf.Max(0f, _roomStatePredictionTime);
+        float predictionTime = Mathf.Max(0f, GetEffectiveRoomStatePredictionTime());
         return new Vector3(
             nextbotState.x + nextbotState.velocityX * predictionTime,
             nextbotState.y + nextbotState.velocityY * predictionTime,
             nextbotState.z + nextbotState.velocityZ * predictionTime);
+    }
+
+    private void PushRoomStateSnapshot(Vector3 position, Quaternion rotation, Vector3 velocity, float serverTimeMs, bool forceReset)
+    {
+        float arrivalTime = Time.unscaledTime;
+        RecordRoomStateDiagnostic(arrivalTime, serverTimeMs, forceReset);
+        if (forceReset || !_currentRoomStateSnapshot.IsValid)
+        {
+            _previousRoomStateSnapshot = new RoomStateSnapshot
+            {
+                Position = position,
+                Rotation = rotation,
+                Velocity = velocity,
+                ArrivalTime = arrivalTime,
+                ServerTime = serverTimeMs,
+                IsValid = true,
+            };
+            _currentRoomStateSnapshot = _previousRoomStateSnapshot;
+            return;
+        }
+
+        bool changed = Vector3.Distance(_currentRoomStateSnapshot.Position, position) > 0.0001f
+            || Quaternion.Angle(_currentRoomStateSnapshot.Rotation, rotation) > 0.01f
+            || Vector3.Distance(_currentRoomStateSnapshot.Velocity, velocity) > 0.0001f;
+        if (!changed)
+        {
+            return;
+        }
+
+        _previousRoomStateSnapshot = _currentRoomStateSnapshot;
+        _currentRoomStateSnapshot = new RoomStateSnapshot
+        {
+            Position = position,
+            Rotation = rotation,
+            Velocity = velocity,
+            ArrivalTime = arrivalTime,
+            ServerTime = serverTimeMs,
+            IsValid = true,
+        };
+    }
+
+    private bool TryEvaluateBufferedRoomState(out Vector3 position, out Quaternion rotation)
+    {
+        position = default;
+        rotation = Quaternion.identity;
+
+        if (!_currentRoomStateSnapshot.IsValid)
+        {
+            return false;
+        }
+
+        float interpolationBackTimeMs = Mathf.Max(0f, _remoteRoomStateInterpolationBackTime) * 1000f;
+        float timeSinceCurrentSnapshotArrivalMs = Mathf.Max(0f, (Time.unscaledTime - _currentRoomStateSnapshot.ArrivalTime) * 1000f);
+        float renderServerTime = _currentRoomStateSnapshot.ServerTime + timeSinceCurrentSnapshotArrivalMs - interpolationBackTimeMs;
+        if (_previousRoomStateSnapshot.IsValid && _previousRoomStateSnapshot.ServerTime < _currentRoomStateSnapshot.ServerTime)
+        {
+            if (renderServerTime <= _currentRoomStateSnapshot.ServerTime)
+            {
+                float t = Mathf.InverseLerp(_previousRoomStateSnapshot.ServerTime, _currentRoomStateSnapshot.ServerTime, renderServerTime);
+                position = Vector3.Lerp(_previousRoomStateSnapshot.Position, _currentRoomStateSnapshot.Position, t);
+                rotation = Quaternion.Slerp(_previousRoomStateSnapshot.Rotation, _currentRoomStateSnapshot.Rotation, t);
+                return true;
+            }
+        }
+
+        float extrapolationTimeMs = renderServerTime - _currentRoomStateSnapshot.ServerTime;
+        float extrapolationTime = Mathf.Clamp(Mathf.Max(0f, extrapolationTimeMs) / 1000f, 0f, Mathf.Max(0f, _remoteRoomStateMaxExtrapolationTime));
+        position = _currentRoomStateSnapshot.Position + _currentRoomStateSnapshot.Velocity * extrapolationTime;
+        rotation = _currentRoomStateSnapshot.Rotation;
+        return true;
+    }
+
+    private void RecordRoomStateDiagnostic(float arrivalTime, float serverTimeMs, bool forceReset)
+    {
+        if (!_logRemoteRoomStateDiagnostics || !IsUsingRemoteRoomStateProfile())
+        {
+            return;
+        }
+
+        if (forceReset)
+        {
+            _lastRoomStateArrivalTime = arrivalTime;
+            _lastRoomStateServerTime = serverTimeMs;
+            _roomStateArrivalGapSum = 0f;
+            _roomStateServerGapSum = 0f;
+            _roomStateArrivalGapMin = float.PositiveInfinity;
+            _roomStateArrivalGapMax = 0f;
+            _roomStateServerGapMin = float.PositiveInfinity;
+            _roomStateServerGapMax = 0f;
+            _roomStateDiagnosticSampleCount = 0;
+            _nextRoomStateDiagnosticLogTime = Time.unscaledTime + 5f;
+            return;
+        }
+
+        if (_lastRoomStateArrivalTime >= 0f)
+        {
+            float arrivalGapMs = (arrivalTime - _lastRoomStateArrivalTime) * 1000f;
+            float serverGapMs = serverTimeMs - _lastRoomStateServerTime;
+            _roomStateArrivalGapSum += arrivalGapMs;
+            _roomStateServerGapSum += serverGapMs;
+            _roomStateArrivalGapMin = Mathf.Min(_roomStateArrivalGapMin, arrivalGapMs);
+            _roomStateArrivalGapMax = Mathf.Max(_roomStateArrivalGapMax, arrivalGapMs);
+            _roomStateServerGapMin = Mathf.Min(_roomStateServerGapMin, serverGapMs);
+            _roomStateServerGapMax = Mathf.Max(_roomStateServerGapMax, serverGapMs);
+            _roomStateDiagnosticSampleCount += 1;
+        }
+
+        _lastRoomStateArrivalTime = arrivalTime;
+        _lastRoomStateServerTime = serverTimeMs;
+
+        if (Time.unscaledTime < _nextRoomStateDiagnosticLogTime || _roomStateDiagnosticSampleCount <= 0 || !ShouldEmitRoomStateDiagnostic())
+        {
+            return;
+        }
+
+        float averageArrivalGapMs = _roomStateArrivalGapSum / _roomStateDiagnosticSampleCount;
+        float averageServerGapMs = _roomStateServerGapSum / _roomStateDiagnosticSampleCount;
+        Debug.Log(
+            $"[NextbotDiag][Client] id={_networkNextbotId} samples={_roomStateDiagnosticSampleCount} arrivalAvg={averageArrivalGapMs:F1}ms arrivalMin={_roomStateArrivalGapMin:F1}ms arrivalMax={_roomStateArrivalGapMax:F1}ms serverAvg={averageServerGapMs:F1}ms serverMin={_roomStateServerGapMin:F1}ms serverMax={_roomStateServerGapMax:F1}ms");
+
+        _roomStateArrivalGapSum = 0f;
+        _roomStateServerGapSum = 0f;
+        _roomStateArrivalGapMin = float.PositiveInfinity;
+        _roomStateArrivalGapMax = 0f;
+        _roomStateServerGapMin = float.PositiveInfinity;
+        _roomStateServerGapMax = 0f;
+        _roomStateDiagnosticSampleCount = 0;
+        _nextRoomStateDiagnosticLogTime = Time.unscaledTime + 5f;
+    }
+
+    private bool ShouldEmitRoomStateDiagnostic()
+    {
+        return string.IsNullOrWhiteSpace(_networkNextbotId)
+            || string.Equals(_networkNextbotId, "nextbot_0", System.StringComparison.Ordinal);
+    }
+
+    private float GetEffectiveRoomStatePositionLerpSpeed()
+    {
+        return IsUsingRemoteRoomStateProfile() ? _remoteRoomStatePositionLerpSpeed : _roomStatePositionLerpSpeed;
+    }
+
+    private float GetEffectiveRoomStateRotationLerpSpeed()
+    {
+        return IsUsingRemoteRoomStateProfile() ? _remoteRoomStateRotationLerpSpeed : _roomStateRotationLerpSpeed;
+    }
+
+    private float GetEffectiveRoomStateSnapDistance()
+    {
+        return IsUsingRemoteRoomStateProfile() ? _remoteRoomStateSnapDistance : _roomStateSnapDistance;
+    }
+
+    private float GetEffectiveRoomStatePredictionTime()
+    {
+        return IsUsingRemoteRoomStateProfile() ? _remoteRoomStatePredictionTime : _roomStatePredictionTime;
+    }
+
+    private bool IsUsingRemoteRoomStateProfile()
+    {
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null || string.IsNullOrWhiteSpace(networkManager.serverUrl))
+        {
+            return false;
+        }
+
+        if (!System.Uri.TryCreate(networkManager.serverUrl, System.UriKind.Absolute, out System.Uri uri))
+        {
+            return false;
+        }
+
+        return !uri.IsLoopback
+            && !string.Equals(uri.Host, "localhost", System.StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Host, "127.0.0.1", System.StringComparison.OrdinalIgnoreCase);
     }
 
     private void ApplyRoomStatePosition(Vector3 targetPosition, bool constrainMovement = true)

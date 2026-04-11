@@ -41,4 +41,7 @@ public NextbotState() { }
 
 	[Type(8, "number")]
 	public float velocityZ = default(float);
+
+	[Type(9, "number")]
+	public float sampleTimeMs = default(float);
 }
