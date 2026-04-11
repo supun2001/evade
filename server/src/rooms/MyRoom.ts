@@ -60,8 +60,6 @@ const NEXTBOT_DROP_LAND_BLEND_SPEED = 14;
 const NEXTBOT_HOP_UPWARD_SPEED = 3.2;
 const NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED = 10;
 const NEXTBOT_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
-const NEXTBOT_MAX_SIMULATION_DELTA_SECONDS = 0.5;
-const NEXTBOT_MAX_MOVE_SUBSTEP_SECONDS = 1 / 60;
 const NEXTBOT_LARGE_MOVE_DISTANCE = 0.9;
 const NEXTBOT_LARGE_VERTICAL_MOVE_DISTANCE = 0.6;
 const PLAYER_REVIVE_DISTANCE = 6;
@@ -888,58 +886,36 @@ export class MyRoom extends Room<MyRoomState> {
     const previousX = nextbot.x;
     const previousY = nextbot.y;
     const previousZ = nextbot.z;
-    const simulatedDeltaSeconds = Math.min(Math.max(deltaSeconds, 0), NEXTBOT_MAX_SIMULATION_DELTA_SECONDS);
     const effectiveMoveSpeed = Number.isFinite(moveSpeed) && moveSpeed > 0 ? moveSpeed : NEXTBOT_MOVE_SPEED;
-    if (deltaSeconds - simulatedDeltaSeconds > 0.0001) {
-      this.nextbotDiagnosticClampedTickCount += 1;
-    }
-
-    const substepCount = Math.max(1, Math.ceil(simulatedDeltaSeconds / NEXTBOT_MAX_MOVE_SUBSTEP_SECONDS));
-    const substepDeltaSeconds = simulatedDeltaSeconds / substepCount;
-    for (let stepIndex = 0; stepIndex < substepCount; stepIndex++) {
-      this.moveNextbotTowardsPositionStep(
-        controller,
-        nextbot,
-        target,
-        substepDeltaSeconds,
-        effectiveMoveSpeed,
-        targetY,
-      );
-    }
-
-    this.recordNextbotMovementDiagnostic(previousX, previousY, previousZ, nextbot.x, nextbot.y, nextbot.z);
-    const safeDeltaSeconds = Math.max(0.0001, simulatedDeltaSeconds);
-    nextbot.velocityX = (nextbot.x - previousX) / safeDeltaSeconds;
-    nextbot.velocityY = (nextbot.y - previousY) / safeDeltaSeconds;
-    nextbot.velocityZ = (nextbot.z - previousZ) / safeDeltaSeconds;
-    nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
-  }
-
-  private moveNextbotTowardsPositionStep(
-    controller: NextbotControllerState,
-    nextbot: NextbotState,
-    target: PredictedTargetPosition,
-    deltaSeconds: number,
-    moveSpeed: number,
-    targetY?: number,
-  ) {
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
 
     if (distance <= 0.0001) {
-      this.moveNextbotVerticallyTowardsTarget(controller, nextbot, targetY, deltaSeconds, moveSpeed);
+      this.moveNextbotVerticallyTowardsTarget(controller, nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+      this.recordNextbotMovementDiagnostic(previousX, previousY, previousZ, nextbot.x, nextbot.y, nextbot.z);
+      const stationarySafeDeltaSeconds = Math.max(0.0001, deltaSeconds);
+      nextbot.velocityX = (nextbot.x - previousX) / stationarySafeDeltaSeconds;
+      nextbot.velocityY = (nextbot.y - previousY) / stationarySafeDeltaSeconds;
+      nextbot.velocityZ = (nextbot.z - previousZ) / stationarySafeDeltaSeconds;
+      nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
       return;
     }
 
     nextbot.rotationY = Math.atan2(dx, dz) * (180 / Math.PI);
 
     if (distance <= NEXTBOT_STOPPING_DISTANCE) {
-      this.moveNextbotVerticallyTowardsTarget(controller, nextbot, targetY, deltaSeconds, moveSpeed);
+      this.moveNextbotVerticallyTowardsTarget(controller, nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+      this.recordNextbotMovementDiagnostic(previousX, previousY, previousZ, nextbot.x, nextbot.y, nextbot.z);
+      const stoppingSafeDeltaSeconds = Math.max(0.0001, deltaSeconds);
+      nextbot.velocityX = (nextbot.x - previousX) / stoppingSafeDeltaSeconds;
+      nextbot.velocityY = (nextbot.y - previousY) / stoppingSafeDeltaSeconds;
+      nextbot.velocityZ = (nextbot.z - previousZ) / stoppingSafeDeltaSeconds;
+      nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
       return;
     }
 
-    const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, moveSpeed * deltaSeconds);
+    const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, effectiveMoveSpeed * deltaSeconds);
     const desiredMoveX = (dx / distance) * moveDistance;
     const desiredMoveZ = (dz / distance) * moveDistance;
     const resolvedMove = this.resolveNextbotObstacleAwareMove(nextbot, target, desiredMoveX, desiredMoveZ, targetY);
@@ -954,7 +930,14 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot,
       this.getGroundYForPosition(nextbot.x, nextbot.z, targetY ?? nextbot.y),
       deltaSeconds,
-      moveSpeed);
+      effectiveMoveSpeed);
+
+    this.recordNextbotMovementDiagnostic(previousX, previousY, previousZ, nextbot.x, nextbot.y, nextbot.z);
+    const safeDeltaSeconds = Math.max(0.0001, deltaSeconds);
+    nextbot.velocityX = (nextbot.x - previousX) / safeDeltaSeconds;
+    nextbot.velocityY = (nextbot.y - previousY) / safeDeltaSeconds;
+    nextbot.velocityZ = (nextbot.z - previousZ) / safeDeltaSeconds;
+    nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
   }
 
   private getRoomElapsedTimeMs() {
