@@ -14,14 +14,16 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _roomStateSnapDistance = 1.1f;
     [SerializeField] private float _roomStateChaseResyncDistance = 12f;
     [SerializeField] private float _roomStatePredictionTime = 0.1f;
-    [SerializeField] private float _remoteRoomStatePositionLerpSpeed = 16f;
-    [SerializeField] private float _remoteRoomStateRotationLerpSpeed = 18f;
-    [SerializeField] private float _remoteRoomStateSnapDistance = 12f;
+    [SerializeField] private float _remoteRoomStatePositionLerpSpeed = 12f;
+    [SerializeField] private float _remoteRoomStateRotationLerpSpeed = 14000f;
+    [SerializeField] private float _remoteRoomStateSnapDistance = 100f;
     [SerializeField] private float _remoteRoomStatePredictionTime = 0.18f;
-    [SerializeField] private float _remoteRoomStateCatchUpBoost = 2.5f;
-    [SerializeField] private float _remoteRoomStateInterpolationBackTime = 0.22f;
-    [SerializeField] private float _remoteRoomStateMaxExtrapolationTime = 0.05f;
-    [SerializeField] private float _remoteRoomStatePresentationSmoothTime = 0.08f;
+    [SerializeField] private float _remoteRoomStateCatchUpBoost = 1.75f;
+    [SerializeField] private float _remoteRoomStateInterpolationBackTime = 0.3f;
+    [SerializeField] private float _remoteRoomStateMaxExtrapolationTime = 0.01f;
+    [SerializeField] private float _remoteRoomStatePresentationSmoothTime = 0.12f;
+    [SerializeField] private float _remoteRoomStateMaxBufferedSpeed = 30f;
+    [SerializeField] private float _remoteRoomStateMaxVisualSpeed = 35f;
     [SerializeField] private bool _logRemoteRoomStateDiagnostics = true;
 
     [Header("Follow")]
@@ -448,25 +450,19 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (IsUsingRemoteRoomStateProfile() && TryEvaluateBufferedRoomState(out Vector3 bufferedPosition, out Quaternion bufferedRotation))
         {
             float bufferedPositionError = Vector3.Distance(transform.position, bufferedPosition);
-            float bufferedSnapDistance = GetEffectiveRoomStateSnapDistance();
-            if (bufferedPositionError >= bufferedSnapDistance)
-            {
-                ApplyRoomStatePosition(bufferedPosition, false);
-                transform.rotation = bufferedRotation;
-                _remotePresentationVelocity = Vector3.zero;
-                return true;
-            }
-
-            float catchUpT = Mathf.Clamp01(bufferedPositionError / Mathf.Max(0.001f, bufferedSnapDistance));
+            float bufferedCatchUpDistance = Mathf.Max(1f, GetEffectiveRoomStateSnapDistance());
+            float catchUpT = Mathf.Clamp01(bufferedPositionError / bufferedCatchUpDistance);
             float presentationSmoothTime = Mathf.Max(0.01f, _remoteRoomStatePresentationSmoothTime);
             float bufferedMaxSpeed = Mathf.Max(1f, GetEffectiveRoomStatePositionLerpSpeed() * Mathf.Lerp(1f, _remoteRoomStateCatchUpBoost, catchUpT));
-            Vector3 smoothedBufferedPosition = Vector3.SmoothDamp(
+            Vector3 dampedBufferedPosition = Vector3.SmoothDamp(
                 transform.position,
                 bufferedPosition,
                 ref _remotePresentationVelocity,
                 presentationSmoothTime,
                 bufferedMaxSpeed,
                 Time.deltaTime);
+            float maxVisualStep = Mathf.Max(0.25f, GetEffectiveRemoteVisualSpeedLimit()) * Time.deltaTime;
+            Vector3 smoothedBufferedPosition = Vector3.MoveTowards(transform.position, dampedBufferedPosition, maxVisualStep);
             float bufferedRotationBlend = 1f - Mathf.Exp(-GetEffectiveRoomStateRotationLerpSpeed() * Time.deltaTime);
 
             transform.position = smoothedBufferedPosition;
@@ -524,6 +520,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         float arrivalTime = Time.unscaledTime;
         RecordRoomStateDiagnostic(arrivalTime, serverTimeMs, forceReset);
+        Vector3 bufferedPosition = position;
+        Vector3 bufferedVelocity = velocity;
         if (forceReset)
         {
             _roomStateSnapshotBuffer.Clear();
@@ -534,11 +532,30 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             RoomStateSnapshot latestSnapshot = _roomStateSnapshotBuffer[_roomStateSnapshotBuffer.Count - 1];
             bool isOutOfOrder = serverTimeMs < latestSnapshot.ServerTime;
-            bool unchanged = Vector3.Distance(latestSnapshot.Position, position) <= 0.0001f
+            if (isOutOfOrder)
+            {
+                return;
+            }
+
+            if (IsUsingRemoteRoomStateProfile())
+            {
+                float serverDeltaSeconds = Mathf.Max(0.001f, (serverTimeMs - latestSnapshot.ServerTime) / 1000f);
+                float maxBufferedSpeed = GetEffectiveRemoteBufferedSpeedLimit();
+                float maxBufferedDistance = Mathf.Max(0.25f, maxBufferedSpeed * serverDeltaSeconds * 1.5f);
+                Vector3 snapshotDelta = bufferedPosition - latestSnapshot.Position;
+                float snapshotDistance = snapshotDelta.magnitude;
+                if (snapshotDistance > maxBufferedDistance)
+                {
+                    bufferedPosition = latestSnapshot.Position + (snapshotDelta / snapshotDistance) * maxBufferedDistance;
+                    bufferedVelocity = (bufferedPosition - latestSnapshot.Position) / serverDeltaSeconds;
+                }
+            }
+
+            bool unchanged = Vector3.Distance(latestSnapshot.Position, bufferedPosition) <= 0.0001f
                 && Quaternion.Angle(latestSnapshot.Rotation, rotation) <= 0.01f
-                && Vector3.Distance(latestSnapshot.Velocity, velocity) <= 0.0001f
+                && Vector3.Distance(latestSnapshot.Velocity, bufferedVelocity) <= 0.0001f
                 && Mathf.Abs(latestSnapshot.ServerTime - serverTimeMs) <= 0.01f;
-            if (isOutOfOrder || unchanged)
+            if (unchanged)
             {
                 return;
             }
@@ -546,9 +563,9 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         _roomStateSnapshotBuffer.Add(new RoomStateSnapshot
         {
-            Position = position,
+            Position = bufferedPosition,
             Rotation = rotation,
-            Velocity = velocity,
+            Velocity = bufferedVelocity,
             ArrivalTime = arrivalTime,
             ServerTime = serverTimeMs,
             IsValid = true,
@@ -707,6 +724,16 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float GetEffectiveRoomStatePredictionTime()
     {
         return IsUsingRemoteRoomStateProfile() ? _remoteRoomStatePredictionTime : _roomStatePredictionTime;
+    }
+
+    private float GetEffectiveRemoteBufferedSpeedLimit()
+    {
+        return Mathf.Clamp(_remoteRoomStateMaxBufferedSpeed, 6f, 30f);
+    }
+
+    private float GetEffectiveRemoteVisualSpeedLimit()
+    {
+        return Mathf.Clamp(_remoteRoomStateMaxVisualSpeed, 8f, 35f);
     }
 
     private bool IsUsingRemoteRoomStateProfile()

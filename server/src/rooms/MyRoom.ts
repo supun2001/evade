@@ -192,6 +192,18 @@ function sanitizeDisplayName(value: unknown, fallback: string): string {
   return trimmed.slice(0, 24);
 }
 
+function quantizeNumber(value: number, step: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  if (!Number.isFinite(step) || step <= 0) {
+    return value;
+  }
+
+  return Math.round(value / step) * step;
+}
+
 export class MyRoom extends Room<MyRoomState> {
   maxClients = 15;
   state = new MyRoomState();
@@ -208,6 +220,7 @@ export class MyRoom extends Room<MyRoomState> {
   private nextTargetScanAt = 0;
   private playerRevivedUntil = new Map<string, number>();
   private playerForcedInjuredUntil = new Map<string, number>();
+  private playerLastUpdateAt = new Map<string, number>();
   private currentPhase: RoundPhase = "waiting";
   private phaseEndsAt = 0;
   private roundIndex = 0;
@@ -259,11 +272,11 @@ export class MyRoom extends Room<MyRoomState> {
       const keepAuthoritativeInjuredState = forcedInjuredUntil > now;
       const playerUpdate = message as PlayerUpdateMessage;
       const wasInjured = player.isInjured;
+      this.playerLastUpdateAt.set(client.sessionId, now);
 
       // Camera is informational, so keep it in sync every tick.
-      player.cameraRotationX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_X, "cameraRotationX");
-      player.cameraRotationY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_Y, "cameraRotationY");
-      player.timestamp = now;
+      player.cameraRotationX = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_X, "cameraRotationX"), 0.5);
+      player.cameraRotationY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_CAMERA_ROTATION_Y, "cameraRotationY"), 0.5);
 
       if (player.isEliminated) {
         player.velocityX = 0;
@@ -304,19 +317,19 @@ export class MyRoom extends Room<MyRoomState> {
       }
 
       // Position & Rotation
-      player.x = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_X, "x");
-      player.y = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_Y, "y");
-      player.z = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_Z, "z");
-      player.rotationY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ROTATION_Y, "rotationY");
+      player.x = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_X, "x"), 0.02);
+      player.y = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_Y, "y"), 0.02);
+      player.z = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_Z, "z"), 0.02);
+      player.rotationY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ROTATION_Y, "rotationY"), 0.5);
 
       // Velocity
-      player.velocityX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_X, "velocityX");
-      player.velocityY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_Y, "velocityY");
-      player.velocityZ = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_Z, "velocityZ");
+      player.velocityX = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_X, "velocityX"), 0.05);
+      player.velocityY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_Y, "velocityY"), 0.05);
+      player.velocityZ = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VELOCITY_Z, "velocityZ"), 0.05);
 
       // Animation States
-      player.animInputX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_X, "animInputX");
-      player.animInputY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_Y, "animInputY");
+      player.animInputX = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_X, "animInputX"), 0.02);
+      player.animInputY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_Y, "animInputY"), 0.02);
       player.isGrounded = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_GROUNDED, "isGrounded");
       player.isJumping = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_JUMPING, "isJumping");
       player.isInjured = keepAuthoritativeInjuredState
@@ -324,19 +337,19 @@ export class MyRoom extends Room<MyRoomState> {
         : (ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_INJURED, "isInjured"));
       player.isCrouching = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_CROUCHING, "isCrouching");
       player.isWallRunning = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_WALL_RUNNING, "isWallRunning");
-      player.wallRunSide = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_WALL_RUN_SIDE, "wallRunSide");
-      player.moveInputX = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_X, "moveInputX");
-      player.moveInputY = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_Y, "moveInputY");
-      player.visualYaw = readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VISUAL_YAW, "visualYaw");
+      player.wallRunSide = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_WALL_RUN_SIDE, "wallRunSide"), 1);
+      player.moveInputX = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_X, "moveInputX"), 0.02);
+      player.moveInputY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_Y, "moveInputY"), 0.02);
+      player.visualYaw = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VISUAL_YAW, "visualYaw"), 0.5);
       player.isHitReacting = ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_HIT_REACTING, "isHitReacting");
-      player.hitReactionTimeRemaining = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_TIME_REMAINING, "hitReactionTimeRemaining");
-      player.hitReactionPitch = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_PITCH, "hitReactionPitch");
-      player.hitReactionRoll = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_ROLL, "hitReactionRoll");
-      player.hitReactionSeed = ignoreStaleInjuredState ? 0 : readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_SEED, "hitReactionSeed");
-      player.speedBoostMultiplier = Math.max(1, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_MULTIPLIER, "speedBoostMultiplier"));
-      player.speedBoostTimeRemaining = Math.max(0, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_TIME_REMAINING, "speedBoostTimeRemaining"));
-      player.jumpBoostMultiplier = Math.max(1, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_MULTIPLIER, "jumpBoostMultiplier"));
-      player.jumpBoostTimeRemaining = Math.max(0, readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING, "jumpBoostTimeRemaining"));
+      player.hitReactionTimeRemaining = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_TIME_REMAINING, "hitReactionTimeRemaining"), 0.02);
+      player.hitReactionPitch = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_PITCH, "hitReactionPitch"), 0.5);
+      player.hitReactionRoll = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_ROLL, "hitReactionRoll"), 0.5);
+      player.hitReactionSeed = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_SEED, "hitReactionSeed"), 1);
+      player.speedBoostMultiplier = Math.max(1, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_MULTIPLIER, "speedBoostMultiplier"), 0.05));
+      player.speedBoostTimeRemaining = Math.max(0, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_TIME_REMAINING, "speedBoostTimeRemaining"), 0.05));
+      player.jumpBoostMultiplier = Math.max(1, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_MULTIPLIER, "jumpBoostMultiplier"), 0.05));
+      player.jumpBoostTimeRemaining = Math.max(0, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING, "jumpBoostTimeRemaining"), 0.05));
 
       if (keepAuthoritativeInjuredState) {
         player.isHitReacting = false;
@@ -554,6 +567,7 @@ export class MyRoom extends Room<MyRoomState> {
 
     //Add player to state
     this.state.players.set(client.sessionId, player);
+    this.playerLastUpdateAt.set(client.sessionId, Date.now());
     this.playerSafeUntil.set(client.sessionId, Date.now() + NEXTBOT_START_GRACE_MS);
     this.roundStats.set(client.sessionId, {
       bestTimeMs: 0,
@@ -579,6 +593,7 @@ export class MyRoom extends Room<MyRoomState> {
     //Remove player from state
     this.clearCarryStateForPlayer(client.sessionId);
     this.state.players.delete(client.sessionId);
+    this.playerLastUpdateAt.delete(client.sessionId);
     this.playerSafeUntil.delete(client.sessionId);
     this.playerRevivedUntil.delete(client.sessionId);
     this.playerForcedInjuredUntil.delete(client.sessionId);
@@ -1194,7 +1209,8 @@ export class MyRoom extends Room<MyRoomState> {
       return false;
     }
 
-    if (now - player.timestamp > NEXTBOT_STALE_TARGET_TIMEOUT_MS) {
+    const lastUpdateAt = this.playerLastUpdateAt.get(player.sessionId) ?? player.timestamp;
+    if (now - lastUpdateAt > NEXTBOT_STALE_TARGET_TIMEOUT_MS) {
       return false;
     }
 
