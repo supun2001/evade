@@ -757,20 +757,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool IsUsingRemoteRoomStateProfile()
     {
-        NetworkManager networkManager = NetworkManager.Instance;
-        if (networkManager == null || string.IsNullOrWhiteSpace(networkManager.serverUrl))
-        {
-            return false;
-        }
-
-        if (!System.Uri.TryCreate(networkManager.serverUrl, System.UriKind.Absolute, out System.Uri uri))
-        {
-            return false;
-        }
-
-        return !uri.IsLoopback
-            && !string.Equals(uri.Host, "localhost", System.StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(uri.Host, "127.0.0.1", System.StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private void ApplyRoomStatePosition(Vector3 targetPosition, bool constrainMovement = true)
