@@ -225,6 +225,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.intermissionDurationMs = this.resolvePositiveDurationMs(options?.intermissionDurationMs, DEFAULT_INTERMISSION_DURATION_MS);
     this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
     this.initializeNextbots();
+    this.setPatchRate(1000 / 60);
 
     //Room ID
     this.roomId = Math.floor(1000 + Math.random() * 9000).toString();
