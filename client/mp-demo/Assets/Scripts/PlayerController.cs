@@ -1376,16 +1376,7 @@ public class PlayerController : MonoBehaviour
             || _isPauseMenuOpen
             || _gameplayCamera == null
             || _playerHudDocument == null
-            || !TryGetNearestActiveNextbotPosition(out Vector3 nextbotPosition))
-        {
-            SetNextbotWarningIndicatorVisible(false);
-            return;
-        }
-
-        Vector3 flattenedOffset = nextbotPosition - _transform.position;
-        flattenedOffset.y = 0f;
-        float distance = flattenedOffset.magnitude;
-        if (distance > _nextbotWarningRange)
+            || !TryGetActiveNextbotWarningData(out Vector2 warningDirection, out float nearestDistance))
         {
             SetNextbotWarningIndicatorVisible(false);
             return;
@@ -1406,31 +1397,23 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector3 viewportPoint = _gameplayCamera.WorldToViewportPoint(nextbotPosition + Vector3.up * 0.8f);
-        bool isBehindCamera = viewportPoint.z < 0f;
-
-        Vector2 centeredViewport = new Vector2(viewportPoint.x * 2f - 1f, viewportPoint.y * 2f - 1f);
-        if (isBehindCamera)
+        if (warningDirection.sqrMagnitude <= 0.0001f)
         {
-            centeredViewport = -centeredViewport;
+            SetNextbotWarningIndicatorVisible(false);
+            return;
         }
 
-        if (centeredViewport.sqrMagnitude <= 0.0001f)
-        {
-            centeredViewport = Vector2.right;
-        }
-
-        Vector2 ringDirection = centeredViewport.normalized;
+        Vector2 ringDirection = warningDirection.normalized;
         Vector2 ringCenter = new Vector2(rootWidth * 0.5f, rootHeight * 0.5f + _nextbotWarningRingVerticalOffset);
         float ringRadius = Mathf.Min(_nextbotWarningRingRadius, Mathf.Min(rootWidth, rootHeight) * 0.42f);
-        Vector2 ringPosition = ringCenter + ringDirection * ringRadius;
+        Vector2 ringPosition = ringCenter + new Vector2(ringDirection.x, -ringDirection.y) * ringRadius;
 
         float indicatorWidth = Mathf.Max(1f, _nextbotWarningIndicatorElement.resolvedStyle.width);
         float indicatorHeight = Mathf.Max(1f, _nextbotWarningIndicatorElement.resolvedStyle.height);
         _nextbotWarningIndicatorElement.style.left = ringPosition.x - indicatorWidth * 0.5f;
         _nextbotWarningIndicatorElement.style.top = ringPosition.y - indicatorHeight * 0.5f;
 
-        float proximity = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, _nextbotWarningRange));
+        float proximity = 1f - Mathf.Clamp01(nearestDistance / Mathf.Max(0.01f, _nextbotWarningRange));
         float opacity = Mathf.Lerp(_nextbotWarningMinOpacity, _nextbotWarningMaxOpacity, proximity);
         float scaleValue = Mathf.Lerp(_nextbotWarningMinScale, _nextbotWarningMaxScale, proximity);
         _nextbotWarningIndicatorElement.style.opacity = opacity;
@@ -1438,7 +1421,7 @@ public class PlayerController : MonoBehaviour
 
         if (_nextbotWarningArrowElement != null)
         {
-            float arrowAngle = Mathf.Atan2(ringDirection.y, ringDirection.x) * Mathf.Rad2Deg;
+            float arrowAngle = Mathf.Atan2(-ringDirection.y, ringDirection.x) * Mathf.Rad2Deg;
             float indicatorCenterX = indicatorWidth * 0.5f;
             float indicatorCenterY = indicatorHeight * 0.5f;
             Vector2 arrowDirection = new Vector2(ringDirection.x, -ringDirection.y).normalized;
@@ -1465,9 +1448,10 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private bool TryGetNearestActiveNextbotPosition(out Vector3 nextbotPosition)
+    private bool TryGetActiveNextbotWarningData(out Vector2 warningDirection, out float nearestDistance)
     {
-        nextbotPosition = Vector3.zero;
+        warningDirection = Vector2.zero;
+        nearestDistance = float.PositiveInfinity;
 
         NetworkManager networkManager = NetworkManager.Instance;
         if (networkManager == null
@@ -1478,8 +1462,8 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
+        Vector2 accumulatedDirection = Vector2.zero;
         bool foundNextbot = false;
-        float bestDistanceSqr = float.PositiveInfinity;
         foreach (string key in networkManager.Room.State.nextbots.Keys)
         {
             NextbotState nextbotState = networkManager.Room.State.nextbots[key];
@@ -1489,17 +1473,36 @@ public class PlayerController : MonoBehaviour
             }
 
             Vector3 candidatePosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
-            float distanceSqr = (candidatePosition - _transform.position).sqrMagnitude;
-            if (distanceSqr >= bestDistanceSqr)
+            Vector3 worldOffset = candidatePosition - _transform.position;
+            worldOffset.y = 0f;
+
+            float distance = worldOffset.magnitude;
+            if (distance > _nextbotWarningRange || distance <= 0.001f)
             {
                 continue;
             }
 
-            bestDistanceSqr = distanceSqr;
-            nextbotPosition = candidatePosition;
+            Vector3 cameraRelativeOffset = _gameplayCamera.transform.InverseTransformDirection(worldOffset.normalized);
+            Vector2 candidateDirection = new Vector2(cameraRelativeOffset.x, cameraRelativeOffset.z);
+            if (candidateDirection.sqrMagnitude <= 0.0001f)
+            {
+                continue;
+            }
+
+            float weight = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, _nextbotWarningRange));
+            accumulatedDirection += candidateDirection.normalized * Mathf.Max(0.15f, weight);
+            nearestDistance = Mathf.Min(nearestDistance, distance);
             foundNextbot = true;
         }
 
+        if (!foundNextbot || accumulatedDirection.sqrMagnitude <= 0.0001f)
+        {
+            warningDirection = Vector2.zero;
+            nearestDistance = float.PositiveInfinity;
+            return false;
+        }
+
+        warningDirection = accumulatedDirection.normalized;
         return foundNextbot;
     }
 

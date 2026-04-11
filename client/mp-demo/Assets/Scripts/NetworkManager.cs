@@ -99,7 +99,7 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private float spawnGroundProbeDistance = 120f;
     [SerializeField] private float spawnGroundOffset = 0.15f;
     [SerializeField] private LayerMask spawnGroundLayers = ~0;
-    [SerializeField] private float serverFloorSampleSpacing = 2f;
+    [SerializeField] private float serverFloorSampleSpacing = 0.75f;
     [SerializeField] private float serverFloorSamplePadding = 2f;
     [Tooltip("Optional patrol hints for idle nextbots. Leave empty to auto-roam using the overall spawn area.")]
     [SerializeField] private List<NextbotPatrolPointConfig> nextbotPatrolPoints = new();

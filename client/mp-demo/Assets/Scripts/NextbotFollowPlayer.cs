@@ -419,7 +419,6 @@ public class NextbotFollowPlayer : MonoBehaviour
         float positionBlend = 1f - Mathf.Exp(-_roomStatePositionLerpSpeed * Time.deltaTime);
         float rotationBlend = 1f - Mathf.Exp(-_roomStateRotationLerpSpeed * Time.deltaTime);
         Vector3 blendedPosition = Vector3.Lerp(transform.position, targetPosition, positionBlend);
-        blendedPosition = SmoothGroundedPosition(transform.position, blendedPosition);
 
         transform.position = blendedPosition;
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
@@ -433,18 +432,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
     {
-        Vector3 targetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
-        if (TryGetRoomStateGroundedPosition(targetPosition, out Vector3 groundedTargetPosition))
-        {
-            return groundedTargetPosition;
-        }
-
-        if (TryResolveGroundedPosition(targetPosition, out Vector3 physicsGroundedPosition))
-        {
-            return physicsGroundedPosition;
-        }
-
-        return targetPosition;
+        return new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
     }
 
     private void ApplyRoomStatePosition(Vector3 targetPosition, bool constrainMovement = true)
@@ -454,7 +442,6 @@ public class NextbotFollowPlayer : MonoBehaviour
             targetPosition = ConstrainRoomStateMovement(transform.position, targetPosition);
         }
 
-        targetPosition = SmoothGroundedPosition(transform.position, targetPosition);
         _groundHeightVelocity = 0f;
 
         transform.position = targetPosition;

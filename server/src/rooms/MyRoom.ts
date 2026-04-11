@@ -50,6 +50,15 @@ const NEXTBOT_PATROL_WAIT_MAX_MS = 2000;
 const NEXTBOT_OBSTACLE_PADDING = 0.7;
 const NEXTBOT_OBSTACLE_HEIGHT_PADDING = 1.5;
 const NEXTBOT_MAX_ALLOWED_ASCENT = 3;
+const NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT = 4;
+const NEXTBOT_FLOOR_BLEND_RADIUS = 3.5;
+const NEXTBOT_DROP_START_HEIGHT = 0.9;
+const NEXTBOT_DROP_GRAVITY = 22;
+const NEXTBOT_DROP_LAND_BLEND_HEIGHT = 0.75;
+const NEXTBOT_DROP_LAND_SNAP_DISTANCE = 0.015;
+const NEXTBOT_DROP_LAND_BLEND_SPEED = 14;
+const NEXTBOT_HOP_UPWARD_SPEED = 3.2;
+const NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED = 10;
 const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 const PLAYER_INJURY_SYNC_GRACE_MS = 600;
@@ -103,6 +112,8 @@ type NextbotControllerState = {
   moveSpeed: number;
   spawnIndex: number;
   groundedY: number;
+  verticalVelocity: number;
+  isAirborne: boolean;
   patrolTargetX: number;
   patrolTargetY: number;
   patrolTargetZ: number;
@@ -645,7 +656,7 @@ export class MyRoom extends Room<MyRoomState> {
         nextbot.targetSessionId = target.sessionId;
         const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
         const groundY = this.getGroundYForPosition(predictedTarget.x, predictedTarget.z, controller.groundedY);
-        this.moveNextbotTowardsPosition(nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
+        this.moveNextbotTowardsPosition(controller, nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
         this.tryInjurePlayer(controller, nextbot, target, now);
         continue;
       }
@@ -680,6 +691,8 @@ export class MyRoom extends Room<MyRoomState> {
         moveSpeed: this.getConfiguredNextbotMoveSpeed(botId),
         spawnIndex: index,
         groundedY: spawnPoint.y,
+        verticalVelocity: 0,
+        isAirborne: false,
         patrolTargetX: spawnPoint.x,
         patrolTargetY: spawnPoint.y,
         patrolTargetZ: spawnPoint.z,
@@ -710,6 +723,8 @@ export class MyRoom extends Room<MyRoomState> {
       controller.currentTargetSessionId = "";
       controller.nextInjuryAt = 0;
       controller.groundedY = spawnPoint.y;
+      controller.verticalVelocity = 0;
+      controller.isAirborne = false;
       controller.patrolTargetX = spawnPoint.x;
       controller.patrolTargetY = spawnPoint.y;
       controller.patrolTargetZ = spawnPoint.z;
@@ -822,7 +837,7 @@ export class MyRoom extends Room<MyRoomState> {
       y: controller.patrolTargetY,
       z: controller.patrolTargetZ,
     };
-    this.moveNextbotTowardsPosition(nextbot, {
+    this.moveNextbotTowardsPosition(controller, nextbot, {
       x: nextPatrolTarget.x,
       z: nextPatrolTarget.z,
       distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
@@ -830,6 +845,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private moveNextbotTowardsPosition(
+    controller: NextbotControllerState,
     nextbot: NextbotState,
     target: PredictedTargetPosition,
     deltaSeconds: number,
@@ -842,14 +858,14 @@ export class MyRoom extends Room<MyRoomState> {
     const effectiveMoveSpeed = Number.isFinite(moveSpeed) && moveSpeed > 0 ? moveSpeed : NEXTBOT_MOVE_SPEED;
 
     if (distance <= 0.0001) {
-      this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+      this.moveNextbotVerticallyTowardsTarget(controller, nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
       return;
     }
 
     nextbot.rotationY = Math.atan2(dx, dz) * (180 / Math.PI);
 
     if (distance <= NEXTBOT_STOPPING_DISTANCE) {
-      this.moveNextbotVerticallyTowardsTarget(nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
+      this.moveNextbotVerticallyTowardsTarget(controller, nextbot, targetY, deltaSeconds, effectiveMoveSpeed);
       return;
     }
 
@@ -864,6 +880,7 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     this.moveNextbotVerticallyTowardsTarget(
+      controller,
       nextbot,
       this.getGroundYForPosition(nextbot.x, nextbot.z, targetY ?? nextbot.y),
       deltaSeconds,
@@ -922,19 +939,50 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private moveNextbotVerticallyTowardsTarget(
+    controller: NextbotControllerState,
     nextbot: NextbotState,
     targetY: number | undefined,
     deltaSeconds: number,
     moveSpeed: number,
   ) {
     if (targetY != null && Number.isFinite(targetY)) {
+      controller.groundedY = targetY;
       const verticalDelta = targetY - nextbot.y;
       if (verticalDelta > NEXTBOT_MAX_ALLOWED_ASCENT) {
         return;
       }
 
+      if (verticalDelta <= -NEXTBOT_DROP_START_HEIGHT && !controller.isAirborne) {
+        controller.isAirborne = true;
+        controller.verticalVelocity = NEXTBOT_HOP_UPWARD_SPEED;
+      }
+
+      if (controller.isAirborne) {
+        controller.verticalVelocity -= NEXTBOT_DROP_GRAVITY * deltaSeconds;
+        nextbot.y += controller.verticalVelocity * deltaSeconds;
+
+        const landingDelta = nextbot.y - targetY;
+        if (controller.verticalVelocity <= 0 && landingDelta <= NEXTBOT_DROP_LAND_BLEND_HEIGHT) {
+          const landingBlend = 1 - Math.exp(-NEXTBOT_DROP_LAND_BLEND_SPEED * deltaSeconds);
+          nextbot.y += (targetY - nextbot.y) * landingBlend;
+        }
+
+        if (nextbot.y <= targetY + NEXTBOT_DROP_LAND_SNAP_DISTANCE && controller.verticalVelocity <= 0) {
+          controller.verticalVelocity = 0;
+          controller.isAirborne = false;
+          if (Math.abs(nextbot.y - targetY) <= NEXTBOT_DROP_LAND_SNAP_DISTANCE) {
+            nextbot.y = targetY;
+          }
+        }
+
+        return;
+      }
+
       const maxVerticalStep = moveSpeed * deltaSeconds;
-      if (Math.abs(verticalDelta) <= maxVerticalStep) {
+      if (verticalDelta < 0 && Math.abs(verticalDelta) <= NEXTBOT_DROP_LAND_BLEND_HEIGHT) {
+        const groundedBlend = 1 - Math.exp(-NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED * deltaSeconds);
+        nextbot.y += (targetY - nextbot.y) * groundedBlend;
+      } else if (Math.abs(verticalDelta) <= maxVerticalStep) {
         nextbot.y = targetY;
       } else {
         nextbot.y += Math.sign(verticalDelta) * maxVerticalStep;
@@ -1373,24 +1421,53 @@ export class MyRoom extends Room<MyRoomState> {
       return fallbackY;
     }
 
-    let bestSample: FloorSample | undefined;
-    let bestDistanceSq = Number.POSITIVE_INFINITY;
+    const nearestSamples: Array<{ sample: FloorSample; distanceSq: number }> = [];
 
     for (const sample of this.nextbotFloorSamples) {
       const dx = sample.x - x;
       const dz = sample.z - z;
       const distanceSq = (dx * dx) + (dz * dz);
-      if (distanceSq < bestDistanceSq) {
-        bestDistanceSq = distanceSq;
-        bestSample = sample;
+
+      if (!Number.isFinite(distanceSq)) {
+        continue;
       }
+
+      nearestSamples.push({ sample, distanceSq });
     }
 
-    if (bestSample == null) {
+    if (nearestSamples.length === 0) {
       return fallbackY;
     }
 
-    return bestSample.y;
+    nearestSamples.sort((left, right) => left.distanceSq - right.distanceSq);
+
+    const closest = nearestSamples[0];
+    if (closest.distanceSq <= 0.0001) {
+      return closest.sample.y;
+    }
+
+    const maxBlendDistanceSq = NEXTBOT_FLOOR_BLEND_RADIUS * NEXTBOT_FLOOR_BLEND_RADIUS;
+    let blendedY = 0;
+    let totalWeight = 0;
+    let usedSampleCount = 0;
+
+    for (let index = 0; index < nearestSamples.length && usedSampleCount < NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT; index++) {
+      const candidate = nearestSamples[index];
+      if (candidate.distanceSq > maxBlendDistanceSq) {
+        continue;
+      }
+
+      const weight = 1 / Math.max(0.0001, candidate.distanceSq);
+      blendedY += candidate.sample.y * weight;
+      totalWeight += weight;
+      usedSampleCount += 1;
+    }
+
+    if (totalWeight > 0) {
+      return blendedY / totalWeight;
+    }
+
+    return closest.sample.y;
   }
 
   private wouldNextbotMoveHitObstacle(

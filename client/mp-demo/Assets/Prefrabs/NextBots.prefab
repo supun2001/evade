@@ -158,7 +158,7 @@ MonoBehaviour:
   _useOffMeshLinks: 1
   _offMeshLinkDuration: 0.25
   _offMeshLinkArcHeight: 1.2
-  _allowLedgeJump: 1
+  _allowLedgeJump: 0
   _jumpForwardSpeed: 12
   _jumpUpwardSpeed: 7
   _maxJumpDistance: 12
