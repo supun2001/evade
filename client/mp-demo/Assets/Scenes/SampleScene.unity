@@ -27832,7 +27832,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
   localServerUrl: ws://localhost:2567
   productionServerUrl: wss://evade-6o6d.onrender.com
-  useProductionServerInEditor: 0
+  useProductionServerInEditor: 1
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
     position: {x: -567.05, y: 3, z: 259.59}
