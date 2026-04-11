@@ -685,6 +685,9 @@ export class MyRoom extends Room<MyRoomState> {
       nextbotState.rotationY = 0;
       nextbotState.targetSessionId = "";
       nextbotState.isActive = false;
+      nextbotState.velocityX = 0;
+      nextbotState.velocityY = 0;
+      nextbotState.velocityZ = 0;
       this.state.nextbots.set(botId, nextbotState);
       this.nextbotControllers.push({
         id: botId,
@@ -720,6 +723,9 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot.rotationY = 0;
       nextbot.targetSessionId = "";
       nextbot.isActive = false;
+      nextbot.velocityX = 0;
+      nextbot.velocityY = 0;
+      nextbot.velocityZ = 0;
       controller.currentTargetSessionId = "";
       controller.nextInjuryAt = 0;
       controller.groundedY = spawnPoint.y;
@@ -741,6 +747,9 @@ export class MyRoom extends Room<MyRoomState> {
         nextbot.isActive = isActive;
         if (!isActive) {
           nextbot.targetSessionId = "";
+          nextbot.velocityX = 0;
+          nextbot.velocityY = 0;
+          nextbot.velocityZ = 0;
         }
       }
     }
@@ -852,6 +861,9 @@ export class MyRoom extends Room<MyRoomState> {
     moveSpeed: number = NEXTBOT_MOVE_SPEED,
     targetY?: number,
   ) {
+    const previousX = nextbot.x;
+    const previousY = nextbot.y;
+    const previousZ = nextbot.z;
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
@@ -885,6 +897,11 @@ export class MyRoom extends Room<MyRoomState> {
       this.getGroundYForPosition(nextbot.x, nextbot.z, targetY ?? nextbot.y),
       deltaSeconds,
       effectiveMoveSpeed);
+
+    const safeDeltaSeconds = Math.max(0.0001, deltaSeconds);
+    nextbot.velocityX = (nextbot.x - previousX) / safeDeltaSeconds;
+    nextbot.velocityY = (nextbot.y - previousY) / safeDeltaSeconds;
+    nextbot.velocityZ = (nextbot.z - previousZ) / safeDeltaSeconds;
   }
 
   private resolveNextbotObstacleAwareMove(

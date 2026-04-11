@@ -13,6 +13,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _roomStateRotationLerpSpeed = 14f;
     [SerializeField] private float _roomStateSnapDistance = 1.1f;
     [SerializeField] private float _roomStateChaseResyncDistance = 12f;
+    [SerializeField] private float _roomStatePredictionTime = 0.1f;
 
     [Header("Follow")]
     [SerializeField] private float _moveSpeed = 10f;
@@ -432,7 +433,11 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
     {
-        return new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
+        float predictionTime = Mathf.Max(0f, _roomStatePredictionTime);
+        return new Vector3(
+            nextbotState.x + nextbotState.velocityX * predictionTime,
+            nextbotState.y + nextbotState.velocityY * predictionTime,
+            nextbotState.z + nextbotState.velocityZ * predictionTime);
     }
 
     private void ApplyRoomStatePosition(Vector3 targetPosition, bool constrainMovement = true)

@@ -32,5 +32,13 @@ public NextbotState() { }
 
 	[Type(5, "boolean")]
 	public bool isActive = default(bool);
-}
 
+	[Type(6, "number")]
+	public float velocityX = default(float);
+
+	[Type(7, "number")]
+	public float velocityY = default(float);
+
+	[Type(8, "number")]
+	public float velocityZ = default(float);
+}
