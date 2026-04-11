@@ -26,6 +26,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _remoteRoomStateMaxVisualSpeed = 35f;
     [SerializeField] private float _remoteRoomStateVerticalLerpSpeed = 10f;
     [SerializeField] private float _remoteRoomStateVerticalAscentLerpSpeed = 18f;
+    [SerializeField] private float _remoteRoomStateClimbHeightBias = 0.04f;
     [SerializeField] private bool _logRemoteRoomStateDiagnostics = true;
 
     [Header("Follow")]
@@ -89,6 +90,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     [Header("Collision")]
     [SerializeField] private LayerMask _roomStateCollisionLayers = Physics.DefaultRaycastLayers;
     [SerializeField] private float _roomStateCollisionSkinWidth = 0.05f;
+    [Tooltip("Layers treated as solid walls the nextbot cannot pass through (e.g. Ramp). Each frame the nextbot is depenetrated from any overlapping colliders on these layers.")]
+    [SerializeField] private LayerMask _solidObstacleLayers = 0;
 
     [Header("Hit")]
     [SerializeField] private float _hitDistance = 1.6f;
@@ -476,7 +479,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             float smoothedBufferedY = Mathf.Lerp(transform.position.y, bufferedPosition.y, verticalBlend);
             if (bufferedPosition.y > transform.position.y)
             {
-                smoothedBufferedY = Mathf.Max(smoothedBufferedY, bufferedPosition.y - 0.02f);
+                smoothedBufferedY = bufferedPosition.y + Mathf.Max(0f, _remoteRoomStateClimbHeightBias);
             }
             Vector3 smoothedBufferedPosition = new Vector3(
                 smoothedBufferedPlanarPosition.x,
@@ -529,10 +532,20 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
     {
         float predictionTime = Mathf.Max(0f, GetEffectiveRoomStatePredictionTime());
-        return new Vector3(
+        Vector3 predictedPosition = new Vector3(
             nextbotState.x + nextbotState.velocityX * predictionTime,
             nextbotState.y,
             nextbotState.z + nextbotState.velocityZ * predictionTime);
+
+        // ALWAYS trust the local NavMesh or physics ground height over the server's Y.
+        // The server often doesn't know about ramps, so it incorrectly pathfinds at Y=0.
+        // If we limit this by height, the nextbot will suddenly drop through the ramp halfway up.
+        if (TryResolveGroundedPosition(predictedPosition, out Vector3 groundedPosition))
+        {
+            predictedPosition.y = groundedPosition.y;
+        }
+
+        return predictedPosition;
     }
 
     private void PushRoomStateSnapshot(Vector3 position, Quaternion rotation, Vector3 velocity, float serverTimeMs, bool forceReset)
@@ -1121,7 +1134,17 @@ public class NextbotFollowPlayer : MonoBehaviour
             velocity.y = 0f;
             _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
 
+            // Sync Y from the NavMeshAgent's computed surface position so the nextbot
+            // correctly follows ramp slopes instead of driving horizontally through them.
+            Vector3 agentGroundPos = _navMeshAgent.nextPosition;
+            Vector3 syncedPos = transform.position;
+            syncedPos.y = agentGroundPos.y;
+            transform.position = syncedPos;
+            _navMeshAgent.nextPosition = syncedPos;
+            _lockedHeight = syncedPos.y;
+
             UpdateBodyRotation(_horizontalVelocity);
+            ApplySolidObstaclePush();
             TryHitTarget(Vector3.Distance(new Vector3(targetPosition.x, 0f, targetPosition.z), new Vector3(transform.position.x, 0f, transform.position.z)));
             return;
         }
@@ -2218,6 +2241,57 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return false;
+    }
+
+    // Pushes the nextbot out of any solid-obstacle colliders it is overlapping.
+    // Assign the Ramp layer to _solidObstacleLayers to prevent pass-through.
+    private void ApplySolidObstaclePush()
+    {
+        if (_solidObstacleLayers.value == 0)
+        {
+            return;
+        }
+
+        CharacterController cc = _characterController;
+        float radius = cc != null ? Mathf.Max(0.05f, cc.radius - 0.01f) : 0.35f;
+        float height = cc != null ? Mathf.Max(radius * 2f + 0.01f, cc.height) : 1.8f;
+        float halfHeight = height * 0.5f - radius;
+        Vector3 center = transform.position + Vector3.up * (cc != null ? cc.center.y : height * 0.5f);
+        Vector3 p1 = center + Vector3.up * halfHeight;
+        Vector3 p2 = center - Vector3.up * halfHeight;
+
+        Collider[] hits = Physics.OverlapCapsule(p1, p2, radius, _solidObstacleLayers.value, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider obstacle = hits[i];
+            if (obstacle == null)
+            {
+                continue;
+            }
+
+            // Skip self-colliders
+            if (obstacle.transform == transform || obstacle.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            if (Physics.ComputePenetration(
+                cc != null ? (Collider)cc : hits[i],
+                transform.position,
+                transform.rotation,
+                obstacle,
+                obstacle.transform.position,
+                obstacle.transform.rotation,
+                out Vector3 pushDirection,
+                out float pushDistance))
+            {
+                transform.position += pushDirection * (pushDistance + 0.005f);
+                if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+                {
+                    _navMeshAgent.nextPosition = transform.position;
+                }
+            }
+        }
     }
 
     private Vector3 SmoothGroundedPosition(Vector3 currentPosition, Vector3 candidatePosition)
