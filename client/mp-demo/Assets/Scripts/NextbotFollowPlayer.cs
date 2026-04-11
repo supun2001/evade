@@ -15,7 +15,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _roomStateChaseResyncDistance = 12f;
     [SerializeField] private float _roomStatePredictionTime = 0.1f;
     [SerializeField] private float _remoteRoomStatePositionLerpSpeed = 12f;
-    [SerializeField] private float _remoteRoomStateRotationLerpSpeed = 14000f;
+    [SerializeField] private float _remoteRoomStateRotationLerpSpeed = 14f;
     [SerializeField] private float _remoteRoomStateSnapDistance = 100f;
     [SerializeField] private float _remoteRoomStatePredictionTime = 0.18f;
     [SerializeField] private float _remoteRoomStateCatchUpBoost = 1.75f;
@@ -24,6 +24,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _remoteRoomStatePresentationSmoothTime = 0.12f;
     [SerializeField] private float _remoteRoomStateMaxBufferedSpeed = 30f;
     [SerializeField] private float _remoteRoomStateMaxVisualSpeed = 35f;
+    [SerializeField] private float _remoteRoomStateVerticalLerpSpeed = 10f;
     [SerializeField] private bool _logRemoteRoomStateDiagnostics = true;
 
     [Header("Follow")]
@@ -454,15 +455,24 @@ public class NextbotFollowPlayer : MonoBehaviour
             float catchUpT = Mathf.Clamp01(bufferedPositionError / bufferedCatchUpDistance);
             float presentationSmoothTime = Mathf.Max(0.01f, _remoteRoomStatePresentationSmoothTime);
             float bufferedMaxSpeed = Mathf.Max(1f, GetEffectiveRoomStatePositionLerpSpeed() * Mathf.Lerp(1f, _remoteRoomStateCatchUpBoost, catchUpT));
-            Vector3 dampedBufferedPosition = Vector3.SmoothDamp(
-                transform.position,
-                bufferedPosition,
+            Vector3 currentHorizontalPosition = new Vector3(transform.position.x, 0f, transform.position.z);
+            Vector3 targetHorizontalPosition = new Vector3(bufferedPosition.x, 0f, bufferedPosition.z);
+            Vector3 dampedBufferedHorizontalPosition = Vector3.SmoothDamp(
+                currentHorizontalPosition,
+                targetHorizontalPosition,
                 ref _remotePresentationVelocity,
                 presentationSmoothTime,
                 bufferedMaxSpeed,
                 Time.deltaTime);
             float maxVisualStep = Mathf.Max(0.25f, GetEffectiveRemoteVisualSpeedLimit()) * Time.deltaTime;
-            Vector3 smoothedBufferedPosition = Vector3.MoveTowards(transform.position, dampedBufferedPosition, maxVisualStep);
+            Vector3 currentPlanarPosition = new Vector3(transform.position.x, 0f, transform.position.z);
+            Vector3 smoothedBufferedPlanarPosition = Vector3.MoveTowards(currentPlanarPosition, dampedBufferedHorizontalPosition, maxVisualStep);
+            float verticalBlend = 1f - Mathf.Exp(-Mathf.Max(0.01f, _remoteRoomStateVerticalLerpSpeed) * Time.deltaTime);
+            float smoothedBufferedY = Mathf.Lerp(transform.position.y, bufferedPosition.y, verticalBlend);
+            Vector3 smoothedBufferedPosition = new Vector3(
+                smoothedBufferedPlanarPosition.x,
+                smoothedBufferedY,
+                smoothedBufferedPlanarPosition.z);
             float bufferedRotationBlend = 1f - Mathf.Exp(-GetEffectiveRoomStateRotationLerpSpeed() * Time.deltaTime);
 
             transform.position = smoothedBufferedPosition;
@@ -512,7 +522,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         float predictionTime = Mathf.Max(0f, GetEffectiveRoomStatePredictionTime());
         return new Vector3(
             nextbotState.x + nextbotState.velocityX * predictionTime,
-            nextbotState.y + nextbotState.velocityY * predictionTime,
+            nextbotState.y,
             nextbotState.z + nextbotState.velocityZ * predictionTime);
     }
 

@@ -27831,8 +27831,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
   localServerUrl: ws://localhost:2567
-  productionServerUrl: wss://evade-6o6d.onrender.com
-  useProductionServerInEditor: 1
+  productionServerUrl: wss://wargrid.games
+  useProductionServerInEditor: 0
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
     position: {x: -567.05, y: 3, z: 259.59}

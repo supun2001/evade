@@ -59,6 +59,8 @@ const NEXTBOT_DROP_LAND_SNAP_DISTANCE = 0.015;
 const NEXTBOT_DROP_LAND_BLEND_SPEED = 14;
 const NEXTBOT_HOP_UPWARD_SPEED = 3.2;
 const NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED = 10;
+const NEXTBOT_GROUNDED_ASCENT_SMOOTH_SPEED = 8;
+const NEXTBOT_GROUNDED_RAMP_BLEND_HEIGHT = 1.25;
 const NEXTBOT_DIAGNOSTIC_LOG_INTERVAL_MS = 5000;
 const NEXTBOT_LARGE_MOVE_DISTANCE = 0.9;
 const NEXTBOT_LARGE_VERTICAL_MOVE_DISTANCE = 0.6;
@@ -1111,8 +1113,11 @@ export class MyRoom extends Room<MyRoomState> {
       }
 
       const maxVerticalStep = moveSpeed * deltaSeconds;
-      if (verticalDelta < 0 && Math.abs(verticalDelta) <= NEXTBOT_DROP_LAND_BLEND_HEIGHT) {
-        const groundedBlend = 1 - Math.exp(-NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED * deltaSeconds);
+      if (Math.abs(verticalDelta) <= NEXTBOT_GROUNDED_RAMP_BLEND_HEIGHT) {
+        const groundedSmoothSpeed = verticalDelta >= 0
+          ? NEXTBOT_GROUNDED_ASCENT_SMOOTH_SPEED
+          : NEXTBOT_GROUNDED_VERTICAL_SMOOTH_SPEED;
+        const groundedBlend = 1 - Math.exp(-groundedSmoothSpeed * deltaSeconds);
         nextbot.y += (targetY - nextbot.y) * groundedBlend;
       } else if (Math.abs(verticalDelta) <= maxVerticalStep) {
         nextbot.y = targetY;

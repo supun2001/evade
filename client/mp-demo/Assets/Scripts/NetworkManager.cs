@@ -63,7 +63,7 @@ public struct FloorHeightSampleConfig
 
 public class NetworkManager : MonoBehaviour
 {
-    private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
+    private const string HostedServerUrl = "wss://wargrid.games";
     private const int PlayerUpdateFieldCount = 29;
     private const string WalkableLayerName = "Walkable";
     private const string RampLayerName = "Ramp";
