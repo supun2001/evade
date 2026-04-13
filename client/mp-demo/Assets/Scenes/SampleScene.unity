@@ -27774,8 +27774,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
   localServerUrl: ws://localhost:2567
-  productionServerUrl: wss://wargrid.games
-  useProductionServerInEditor: 1
+  productionServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
+  useProductionServerInEditor: 0
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
     position: {x: -567.05, y: 3, z: 259.59}
@@ -27803,7 +27803,7 @@ MonoBehaviour:
     position: {x: -621, y: 0, z: 226}
   - anchor: {fileID: 1845726629}
     position: {x: -621, y: 0, z: 226}
-  intermissionDurationSeconds: 2
+  intermissionDurationSeconds: 10
   roundDurationSeconds: 180
   roomName: my_room
   playerPrefab: {fileID: 4842325826247379024, guid: fa064ee4d0a6048a298a22181dab671b, type: 3}

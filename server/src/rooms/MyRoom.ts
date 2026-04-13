@@ -244,6 +244,10 @@ export class MyRoom extends Room<MyRoomState> {
   private nextbotDiagnosticVerticalMoveMax = 0;
   private nextbotDiagnosticLargeMoveCount = 0;
 
+  private logRoomEvent(message: string) {
+    console.log(`[room ${this.roomId}] ${message}`);
+  }
+
   onCreate(options: any) {
     this.roomCreatedAt = Date.now();
     this.nextbotDiagnosticWindowStartedAt = this.roomCreatedAt;
@@ -261,7 +265,7 @@ export class MyRoom extends Room<MyRoomState> {
 
     //Room ID
     this.roomId = Math.floor(1000 + Math.random() * 9000).toString();
-    console.log("Room created!", options, "ID:", this.roomId);
+    this.logRoomEvent(`created (${this.clients.length}/${this.maxClients} players)`);
 
     //Handle player movement
     this.onMessage("playerUpdate", (client, message) => {
@@ -522,8 +526,6 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   onJoin(client: Client, options: any) {
-    console.log(client.sessionId, "joined!");
-
     this.applyNextbotConfigOverrides(options);
 
     //Create a new player
@@ -586,11 +588,14 @@ export class MyRoom extends Room<MyRoomState> {
       client.send("roundResults", this.latestRoundResultsJson);
     }
 
+    this.logRoomEvent(`${player.displayName} (${client.sessionId}) joined (${this.clients.length}/${this.maxClients} players)`);
     this.tryStartRoundLoop();
   }
 
   onLeave(client: Client, consented: boolean) {
-    console.log(client.sessionId, "left!");
+    const player = this.state.players.get(client.sessionId);
+    const displayName = player?.displayName || "Unknown player";
+    this.logRoomEvent(`${displayName} (${client.sessionId}) left${consented ? "" : " unexpectedly"} (${Math.max(0, this.clients.length - 1)}/${this.maxClients} players)`);
 
     //Remove player from state
     this.clearCarryStateForPlayer(client.sessionId);
@@ -617,7 +622,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   onDispose() {
-    console.log("room", this.roomId, "disposing...");
+    this.logRoomEvent("disposing...");
   }
 
   private clearCarryStateForPlayer(sessionId: string) {
@@ -975,19 +980,6 @@ export class MyRoom extends Room<MyRoomState> {
     if (elapsed < NEXTBOT_DIAGNOSTIC_LOG_INTERVAL_MS) {
       return;
     }
-
-    const averageDelta = this.nextbotDiagnosticTickCount > 0
-      ? this.nextbotDiagnosticDeltaSum / this.nextbotDiagnosticTickCount
-      : 0;
-    const averagePlanarMove = this.nextbotDiagnosticTickCount > 0
-      ? this.nextbotDiagnosticPlanarMoveSum / this.nextbotDiagnosticTickCount
-      : 0;
-    const averageVerticalMove = this.nextbotDiagnosticTickCount > 0
-      ? this.nextbotDiagnosticVerticalMoveSum / this.nextbotDiagnosticTickCount
-      : 0;
-    console.log(
-      `[NextbotDiag][Server] room=${this.roomId} ticks=${this.nextbotDiagnosticTickCount} avgDelta=${averageDelta.toFixed(2)}ms minDelta=${this.nextbotDiagnosticMinDelta.toFixed(2)}ms maxDelta=${this.nextbotDiagnosticMaxDelta.toFixed(2)}ms clampedTicks=${this.nextbotDiagnosticClampedTickCount} planarAvg=${averagePlanarMove.toFixed(3)} planarMax=${this.nextbotDiagnosticPlanarMoveMax.toFixed(3)} verticalAvg=${averageVerticalMove.toFixed(3)} verticalMax=${this.nextbotDiagnosticVerticalMoveMax.toFixed(3)} largeMoves=${this.nextbotDiagnosticLargeMoveCount} players=${this.clients.length}`
-    );
 
     this.nextbotDiagnosticWindowStartedAt = now;
     this.nextbotDiagnosticTickCount = 0;
