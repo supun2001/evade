@@ -86,6 +86,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _reviveHoldDuration = 2.5f;
     [SerializeField, Min(0.05f)] private float _reviveRetryInterval = 0.25f;
     [SerializeField] private float _carryMoveSpeed = 2.1f;
+    [SerializeField, Min(1f)] private float _carrySlideSpeedMultiplier = 1.35f;
     [SerializeField] private Vector3 _carriedPlayerOffset = new Vector3(0.45f, 1.05f, -0.15f);
     [SerializeField] private string _carryLeftAnchorBoneName = "L_Arm";
     [SerializeField] private string _carryRightAnchorBoneName = "R_Arm";
@@ -279,6 +280,8 @@ public class PlayerController : MonoBehaviour
     private bool _isBeingCarried;
     private string _carriedPlayerSessionId;
     private string _carrierSessionId;
+    private GameObject _ignoredCarryCollisionObject;
+    private readonly System.Collections.Generic.List<Collider> _ignoredCarryCollisionColliders = new();
     private bool _jumpedThisFrame;
     private bool _isCrouching;
     private bool _isWallRunning;
@@ -484,6 +487,11 @@ public class PlayerController : MonoBehaviour
 
         _preferredViewMode = _startingViewMode;
         SetCameraView(_startingViewMode, true);
+    }
+
+    private void OnDestroy()
+    {
+        RestoreCarryCollisionIgnore();
     }
     #endregion
 
@@ -759,7 +767,7 @@ public class PlayerController : MonoBehaviour
 
     private bool ShouldForceThirdPersonView()
     {
-        return IsInjuredOrHitReacting() || _isBeingCarried;
+        return IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried;
     }
 
     private void UpdateAutoSprint()
@@ -1738,6 +1746,14 @@ public class PlayerController : MonoBehaviour
 
     public void ApplyNetworkCarryState(bool isCarrying, bool isBeingCarried, string carriedPlayerSessionId, string carrierSessionId)
     {
+        bool wasCarryingPlayer = _isCarryingPlayer;
+        bool wasBeingCarried = _isBeingCarried;
+        bool carryStateChanged =
+            wasCarryingPlayer != isCarrying
+            || wasBeingCarried != isBeingCarried
+            || !string.Equals(_carriedPlayerSessionId, carriedPlayerSessionId, StringComparison.Ordinal)
+            || !string.Equals(_carrierSessionId, carrierSessionId, StringComparison.Ordinal);
+
         _isCarryingPlayer = isCarrying;
         _isBeingCarried = isBeingCarried;
         _carriedPlayerSessionId = carriedPlayerSessionId;
@@ -1753,7 +1769,7 @@ public class PlayerController : MonoBehaviour
           _carriedPlayerSessionId = string.Empty;
         }
 
-        if (_isCarryingPlayer)
+        if (_isCarryingPlayer && (!wasCarryingPlayer || carryStateChanged))
         {
             _runHeldTime = 0f;
             _isCrouching = false;
@@ -1766,7 +1782,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        if (_isBeingCarried)
+        if (_isBeingCarried && (!wasBeingCarried || carryStateChanged))
         {
             _horizontalVelocity = Vector3.zero;
             _verticalVelocity = 0f;
@@ -1777,7 +1793,96 @@ public class PlayerController : MonoBehaviour
             _wallRunSprintGraceTimer = 0f;
         }
 
-        UpdateForcedCameraViewState(forceImmediate: true);
+        if (carryStateChanged)
+        {
+            UpdateCarryCollisionIgnore();
+            UpdateForcedCameraViewState(forceImmediate: true);
+        }
+        else
+        {
+            UpdateCarryCollisionIgnore();
+        }
+    }
+
+    private void UpdateCarryCollisionIgnore()
+    {
+        if (_characterController == null)
+        {
+            return;
+        }
+
+        GameObject linkedPlayerObject = ResolveCarryLinkedPlayerObject();
+        if (_ignoredCarryCollisionObject == linkedPlayerObject && _ignoredCarryCollisionColliders.Count > 0)
+        {
+            return;
+        }
+
+        RestoreCarryCollisionIgnore();
+
+        if (linkedPlayerObject == null)
+        {
+            return;
+        }
+
+        Collider[] linkedColliders = linkedPlayerObject.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < linkedColliders.Length; i++)
+        {
+            Collider linkedCollider = linkedColliders[i];
+            if (linkedCollider == null
+                || linkedCollider == _characterController
+                || !linkedCollider.enabled
+                || !linkedCollider.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            Physics.IgnoreCollision(_characterController, linkedCollider, true);
+            _ignoredCarryCollisionColliders.Add(linkedCollider);
+        }
+
+        if (_ignoredCarryCollisionColliders.Count > 0)
+        {
+            _ignoredCarryCollisionObject = linkedPlayerObject;
+        }
+    }
+
+    private void RestoreCarryCollisionIgnore()
+    {
+        if (_characterController != null)
+        {
+            for (int i = 0; i < _ignoredCarryCollisionColliders.Count; i++)
+            {
+                Collider linkedCollider = _ignoredCarryCollisionColliders[i];
+                if (linkedCollider == null)
+                {
+                    continue;
+                }
+
+                Physics.IgnoreCollision(_characterController, linkedCollider, false);
+            }
+        }
+
+        _ignoredCarryCollisionColliders.Clear();
+        _ignoredCarryCollisionObject = null;
+    }
+
+    private GameObject ResolveCarryLinkedPlayerObject()
+    {
+        string linkedSessionId = _isCarryingPlayer
+            ? _carriedPlayerSessionId
+            : (_isBeingCarried ? _carrierSessionId : string.Empty);
+
+        if (string.IsNullOrEmpty(linkedSessionId) || NetworkManager.Instance == null)
+        {
+            return null;
+        }
+
+        if (!NetworkManager.Instance.TryGetPlayerObject(linkedSessionId, out GameObject linkedPlayerObject) || linkedPlayerObject == null)
+        {
+            return null;
+        }
+
+        return linkedPlayerObject;
     }
 
     public bool TryGetCarriedFollowPose(out Vector3 targetPosition, out Quaternion targetRotation)
@@ -2210,7 +2315,7 @@ public class PlayerController : MonoBehaviour
             newViewMode = CameraViewMode.ThirdPerson;
         }
 
-        if (IsInjured() && newViewMode == CameraViewMode.FirstPerson)
+        if (ShouldForceThirdPersonView() && newViewMode == CameraViewMode.FirstPerson)
         {
             newViewMode = CameraViewMode.ThirdPerson;
         }
@@ -2765,7 +2870,7 @@ public class PlayerController : MonoBehaviour
             }
 
             Transform hitTransform = collider.transform;
-            if (hitTransform == null || hitTransform.IsChildOf(_transform))
+            if (hitTransform == null || hitTransform.IsChildOf(_transform) || IsCarryLinkedTransform(hitTransform))
             {
                 continue;
             }
@@ -2978,7 +3083,7 @@ public class PlayerController : MonoBehaviour
 
         if (_isCarryingPlayer)
         {
-            HandleCarryMovement(movementDirection, inputMagnitude, deltaTime);
+            HandleCarryMovement(movementDirection, inputMagnitude, targetSpeed, deltaTime);
             return;
         }
 
@@ -2997,14 +3102,14 @@ public class PlayerController : MonoBehaviour
         HandleGroundMovement(movementDirection, inputMagnitude, targetSpeed, deltaTime);
     }
 
-    private void HandleCarryMovement(Vector3 movementDirection, float inputMagnitude, float deltaTime)
+    private void HandleCarryMovement(Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)
     {
         _ = deltaTime;
 
         Vector3 desiredVelocity = Vector3.zero;
         if (movementDirection.sqrMagnitude > 0.001f && inputMagnitude > 0.001f)
         {
-            desiredVelocity = movementDirection.normalized * (_carryMoveSpeed * inputMagnitude);
+            desiredVelocity = movementDirection.normalized * targetSpeed;
         }
 
         _horizontalVelocity = desiredVelocity;
@@ -3051,7 +3156,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        UpdateVisualFacingFromMouse();
+        UpdateDirectionalVisualFacing(GetDirectionalVisualFacingInput());
     }
 
     private void UpdateDirectionalVisualFacing(Vector2 movementInput)
@@ -3751,7 +3856,7 @@ public class PlayerController : MonoBehaviour
         }
         else
         {
-            _horizontalVelocity = horizontalVelocity.normalized * Mathf.Min(horizontalVelocity.magnitude, _carryMoveSpeed);
+            _horizontalVelocity = horizontalVelocity.normalized * Mathf.Min(horizontalVelocity.magnitude, GetCarryMoveSpeedLimit());
         }
         _horizontalVelocity.y = 0f;
     }
@@ -4169,7 +4274,7 @@ public class PlayerController : MonoBehaviour
 
         if (_isCarryingPlayer)
         {
-            baseSpeed = _carryMoveSpeed;
+            baseSpeed = GetCarryBaseMoveSpeed();
             return baseSpeed * GetActiveSpeedBoostMultiplier();
         }
 
@@ -4193,6 +4298,26 @@ public class PlayerController : MonoBehaviour
 
         baseSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
         return baseSpeed * GetActiveSpeedBoostMultiplier();
+    }
+
+    private float GetCarryBaseMoveSpeed()
+    {
+        if (_isCrouchRunning)
+        {
+            return Mathf.Max(_crouchMoveSpeed, GetCurrentCrouchRunBaseSpeed());
+        }
+
+        if (IsCrouching())
+        {
+            return Mathf.Min(_carryMoveSpeed, _crouchMoveSpeed);
+        }
+
+        return _carryMoveSpeed;
+    }
+
+    private float GetCarryMoveSpeedLimit()
+    {
+        return GetCarryBaseMoveSpeed() * GetActiveSpeedBoostMultiplier();
     }
 
     public void ApplyTemporarySpeedBoost(float multiplier, float durationSeconds)
@@ -4864,16 +4989,24 @@ public class PlayerController : MonoBehaviour
         bool crouchHeld = _playerLocomotionInput != null
             ? _playerLocomotionInput.CrouchHeld
             : (Keyboard.current != null && Keyboard.current.cKey.isPressed);
+        Vector2 movementInput = _playerLocomotionInput != null
+            ? _playerLocomotionInput.MovementInput
+            : Vector2.zero;
+        float crouchRunEnterSpeed = _isCarryingPlayer
+            ? Mathf.Max(0.01f, Mathf.Min(_crouchRunEnterMinSpeed, _carryMoveSpeed * 0.75f))
+            : Mathf.Max(_crouchMoveSpeed, _crouchRunEnterMinSpeed);
         bool canStartCrouchRun = crouchPressedThisFrame
             && !IsInjured()
-            && !_isCarryingPlayer
             && !_isBeingCarried
             && IsGrounded()
-            && GetHorizontalSpeed() >= Mathf.Max(_crouchMoveSpeed, _crouchRunEnterMinSpeed);
+            && (!_isCarryingPlayer || movementInput.sqrMagnitude > 0.01f)
+            && GetHorizontalSpeed() >= crouchRunEnterSpeed;
 
         if (canStartCrouchRun)
         {
-            float uncrouchedMoveSpeed = Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
+            float uncrouchedMoveSpeed = _isCarryingPlayer
+                ? Mathf.Max(_carryMoveSpeed * _carrySlideSpeedMultiplier, _crouchMoveSpeed + 0.1f)
+                : Mathf.Lerp(runSpeed, sprintSpeed, GetSprintProgress());
             _crouchRunStartMoveSpeed = Mathf.Max(uncrouchedMoveSpeed, GetHorizontalSpeed());
             _crouchRunTimer = Mathf.Max(0.01f, _crouchRunHoldDuration);
             _isCrouchRunning = true;
@@ -4901,7 +5034,6 @@ public class PlayerController : MonoBehaviour
 
         bool shouldCrouch =
             !IsInjured()
-            && !_isCarryingPlayer
             && !_isBeingCarried
             && (crouchHeld || _isCrouchRunning);
 

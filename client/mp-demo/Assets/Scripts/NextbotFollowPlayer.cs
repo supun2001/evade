@@ -5,6 +5,17 @@ using UnityEngine.AI;
 public class NextbotFollowPlayer : MonoBehaviour
 {
     private const int MaxGroundHitBufferSize = 16;
+    private const float MultiplayerNextbotStoppingDistance = 0.7f;
+    private const float MultiplayerNextbotInjuryDistance = 0.95f;
+    private const float MultiplayerNextbotInjuryCooldownSeconds = 1.2f;
+    private const float MultiplayerNextbotScanIntervalSeconds = 0.25f;
+    private const float MultiplayerNextbotTargetLockSeconds = 1.4f;
+    private const float MultiplayerNextbotSwitchScoreThreshold = 20f;
+    private const float MultiplayerNextbotSwitchConfirmSeconds = 0.3f;
+    private const float OfflineLocalPlayerPressureBonus = 10000f;
+    private const float OfflinePatrolReachedDistance = 1.1f;
+    private const float OfflinePatrolRetargetMinSeconds = 1f;
+    private const float OfflinePatrolRetargetMaxSeconds = 2f;
 
     [Header("Networking")]
     [SerializeField] private bool _useRoomStateAuthority = true;
@@ -167,6 +178,9 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool _roomStateAuthorityActive;
     private bool _forceOfflineLocalAuthority;
     private bool _offlineNextbotActive = true;
+    private bool _hasOfflinePatrolTarget;
+    private Vector3 _offlinePatrolTarget;
+    private float _offlinePatrolWaitUntil;
     private float _groundHeightVelocity;
     private Texture _defaultBaseMap;
     private Color _defaultBaseColor = Color.white;
@@ -329,8 +343,14 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     public void AssignNetworkNextbotId(string nextbotId)
     {
+        if (string.Equals(_networkNextbotId, nextbotId, System.StringComparison.Ordinal))
+        {
+            return;
+        }
+
         _networkNextbotId = nextbotId;
         _hasAppliedRoomState = false;
+        ResetOfflinePatrolTarget();
     }
 
     public void SetOfflineLocalAuthority(bool isOfflineLocalAuthority)
@@ -344,7 +364,9 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         SetRoomStateAuthorityActive(false);
         SetServerVisualState(true);
+        ApplyOfflineMultiplayerTuning();
         _hasAppliedRoomState = false;
+        ResetOfflinePatrolTarget();
         _isJumping = false;
         _jumpVelocity = Vector3.zero;
         _isTraversingOffMeshLink = false;
@@ -368,6 +390,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         ClearTarget();
+        ResetOfflinePatrolTarget();
         StopAgent();
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
@@ -397,6 +420,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
         ClearTarget();
+        ResetOfflinePatrolTarget();
         StopAgent();
         EnsureAgentOnNavMesh();
     }
@@ -977,6 +1001,12 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        if (_forceOfflineLocalAuthority && IsOfflineLocalPlayerTarget(bestTarget.Value.Transform))
+        {
+            AssignTarget(bestTarget.Value.Transform, bestTarget.Value.Controller);
+            return;
+        }
+
         if (_pendingSwitchTarget != bestTarget.Value.Transform)
         {
             _pendingSwitchTarget = bestTarget.Value.Transform;
@@ -1045,6 +1075,11 @@ public class NextbotFollowPlayer : MonoBehaviour
             return null;
         }
 
+        if (_forceOfflineLocalAuthority && IsOfflineTargetClaimedByOtherNextbot(candidateTransform))
+        {
+            return null;
+        }
+
         float pathDistance = GetPathDistance(candidateTransform.position);
         if (float.IsInfinity(pathDistance) || pathDistance > _maxChaseRange)
         {
@@ -1056,7 +1091,12 @@ public class NextbotFollowPlayer : MonoBehaviour
         float visibleBonus = hasLineOfSight && pathDistance <= _visibleRange ? _visibleBonus : 0f;
         float frontBonus = IsTargetInFront(candidateTransform.position) ? _frontBonus : 0f;
         float currentTargetBonus = isCurrentTarget ? _currentTargetBonus : 0f;
-        float targetPressurePenalty = CountOtherNextbotsTargeting(candidateTransform) * _sameTargetScorePenalty;
+        float localPlayerPressureBonus = _forceOfflineLocalAuthority && IsOfflineLocalPlayerTarget(candidateTransform)
+            ? OfflineLocalPlayerPressureBonus
+            : 0f;
+        float targetPressurePenalty = _forceOfflineLocalAuthority
+            ? 0f
+            : CountOtherNextbotsTargeting(candidateTransform) * _sameTargetScorePenalty;
 
         return new ScoredTarget
         {
@@ -1064,7 +1104,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             Controller = candidateController,
             PathDistance = pathDistance,
             HasLineOfSight = hasLineOfSight,
-            Score = distanceScore + visibleBonus + frontBonus + currentTargetBonus - targetPressurePenalty,
+            Score = distanceScore + visibleBonus + frontBonus + currentTargetBonus + localPlayerPressureBonus - targetPressurePenalty,
         };
     }
 
@@ -1101,8 +1141,67 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
+        if (_forceOfflineLocalAuthority && IsOfflineTargetClaimedByOtherNextbot(_target))
+        {
+            return false;
+        }
+
         float pathDistance = GetPathDistance(_target.position);
         return !float.IsInfinity(pathDistance) && pathDistance <= _maxChaseRange;
+    }
+
+    private void ApplyOfflineMultiplayerTuning()
+    {
+        _stoppingDistance = MultiplayerNextbotStoppingDistance;
+        _targetRefreshInterval = MultiplayerNextbotScanIntervalSeconds;
+        _targetLockDuration = MultiplayerNextbotTargetLockSeconds;
+        _switchScoreThreshold = MultiplayerNextbotSwitchScoreThreshold;
+        _switchConfirmDuration = MultiplayerNextbotSwitchConfirmSeconds;
+        _hitDistance = MultiplayerNextbotInjuryDistance;
+        _hitCooldown = MultiplayerNextbotInjuryCooldownSeconds;
+
+        if (_navMeshAgent != null)
+        {
+            _navMeshAgent.stoppingDistance = _stoppingDistance;
+        }
+    }
+
+    private bool IsOfflineTargetClaimedByOtherNextbot(Transform candidateTransform)
+    {
+        if (candidateTransform == null)
+        {
+            return false;
+        }
+
+        NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < nextbots.Length; i++)
+        {
+            NextbotFollowPlayer nextbot = nextbots[i];
+            if (nextbot == null || nextbot == this || nextbot._target != candidateTransform)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsOfflineLocalPlayerTarget(Transform candidateTransform)
+    {
+        if (candidateTransform == null)
+        {
+            return false;
+        }
+
+        OfflinePlayerIdentity identity = candidateTransform.GetComponent<OfflinePlayerIdentity>();
+        if (identity == null)
+        {
+            identity = candidateTransform.GetComponentInParent<OfflinePlayerIdentity>();
+        }
+
+        return identity != null && identity.IsLocalPlayer;
     }
 
     private float GetPathDistance(Vector3 destination)
@@ -1172,15 +1271,210 @@ public class NextbotFollowPlayer : MonoBehaviour
         _targetLockedUntil = Time.time + _targetLockDuration;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
+        ResetOfflinePatrolTarget();
     }
 
     private void ClearTarget()
     {
+        bool hadTarget = _target != null;
         _target = null;
         _targetController = null;
         _targetLockedUntil = 0f;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
+
+        if (hadTarget)
+        {
+            ResetOfflinePatrolTarget();
+        }
+    }
+
+    private void ResetOfflinePatrolTarget()
+    {
+        _hasOfflinePatrolTarget = false;
+        _offlinePatrolTarget = Vector3.zero;
+        _offlinePatrolWaitUntil = 0f;
+    }
+
+    private bool TryUpdateOfflinePatrolMovement()
+    {
+        if (!_forceOfflineLocalAuthority || !_offlineNextbotActive)
+        {
+            ResetOfflinePatrolTarget();
+            return false;
+        }
+
+        if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            || !offlineModeManager.IsOfflineRoundActive)
+        {
+            ResetOfflinePatrolTarget();
+            return false;
+        }
+
+        if (!_hasOfflinePatrolTarget)
+        {
+            SetNextOfflinePatrolTarget(offlineModeManager);
+        }
+
+        float distance = GetPlanarDistance(transform.position, _offlinePatrolTarget);
+        if (distance <= OfflinePatrolReachedDistance)
+        {
+            if (_offlinePatrolWaitUntil <= 0f)
+            {
+                _offlinePatrolWaitUntil = Time.time + Random.Range(OfflinePatrolRetargetMinSeconds, OfflinePatrolRetargetMaxSeconds);
+                StopAgent();
+                return true;
+            }
+
+            if (Time.time < _offlinePatrolWaitUntil)
+            {
+                StopAgent();
+                return true;
+            }
+
+            SetNextOfflinePatrolTarget(offlineModeManager);
+            distance = GetPlanarDistance(transform.position, _offlinePatrolTarget);
+        }
+
+        MoveTowardOfflinePatrolTarget(_offlinePatrolTarget);
+        return true;
+    }
+
+    private void SetNextOfflinePatrolTarget(OfflineModeManager offlineModeManager)
+    {
+        if (offlineModeManager == null)
+        {
+            ResetOfflinePatrolTarget();
+            return;
+        }
+
+        Vector3 patrolTarget = offlineModeManager.GetPatrolPosition(GetOfflinePatrolIndex(), transform.position);
+        if (TryResolveGroundedPosition(patrolTarget, out Vector3 groundedPatrolTarget))
+        {
+            patrolTarget = groundedPatrolTarget;
+        }
+
+        _offlinePatrolTarget = patrolTarget;
+        _offlinePatrolWaitUntil = 0f;
+        _hasOfflinePatrolTarget = true;
+    }
+
+    private void MoveTowardOfflinePatrolTarget(Vector3 patrolTarget)
+    {
+        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.speed = _moveSpeed;
+            _navMeshAgent.acceleration = _acceleration;
+            _navMeshAgent.stoppingDistance = _stoppingDistance;
+            _navMeshAgent.isStopped = false;
+
+            Vector3 navMeshPatrolPosition = patrolTarget;
+            bool hasNavMeshPatrolPosition = TryGetNearestNavMeshPosition(patrolTarget, out navMeshPatrolPosition);
+            if (hasNavMeshPatrolPosition)
+            {
+                _navMeshAgent.SetDestination(navMeshPatrolPosition);
+            }
+
+            bool pathBlocked = !_navMeshAgent.pathPending
+                && (_navMeshAgent.pathStatus == NavMeshPathStatus.PathPartial
+                    || _navMeshAgent.pathStatus == NavMeshPathStatus.PathInvalid);
+            bool edgeJumpNeeded = ShouldJumpFromEdge(patrolTarget, hasNavMeshPatrolPosition ? navMeshPatrolPosition : patrolTarget);
+            if ((pathBlocked || edgeJumpNeeded) && TryStartJumpToward(patrolTarget))
+            {
+                return;
+            }
+
+            if (_useOffMeshLinks && _navMeshAgent.isOnOffMeshLink)
+            {
+                BeginOffMeshLinkTraversal();
+                return;
+            }
+
+            Vector3 velocity = _navMeshAgent.desiredVelocity;
+            velocity.y = 0f;
+            _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
+
+            Vector3 agentGroundPos = _navMeshAgent.nextPosition;
+            Vector3 syncedPos = transform.position;
+            syncedPos.y = agentGroundPos.y;
+            transform.position = syncedPos;
+            _navMeshAgent.nextPosition = syncedPos;
+            _lockedHeight = syncedPos.y;
+
+            UpdateBodyRotation(_horizontalVelocity);
+            ApplySolidObstaclePush();
+            return;
+        }
+
+        if (_lockToStartingHeight)
+        {
+            patrolTarget.y = _lockedHeight;
+        }
+
+        Vector3 planarOffset = patrolTarget - transform.position;
+        planarOffset.y = 0f;
+        float currentDistance = planarOffset.magnitude;
+        Vector3 moveDirection = currentDistance > 0.001f ? planarOffset / currentDistance : Vector3.zero;
+        Vector3 desiredVelocity = currentDistance > _stoppingDistance ? moveDirection * _moveSpeed : Vector3.zero;
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, _acceleration * Time.deltaTime);
+
+        ApplyFallbackMovement(_horizontalVelocity);
+    }
+
+    private int GetOfflinePatrolIndex()
+    {
+        if (TryParseTrailingIndex(_networkNextbotId, 0, out int networkIndex))
+        {
+            return networkIndex;
+        }
+
+        if (gameObject != null && TryParseTrailingIndex(gameObject.name, -1, out int objectNameIndex))
+        {
+            return objectNameIndex;
+        }
+
+        return Mathf.Abs(GetInstanceID());
+    }
+
+    private static bool TryParseTrailingIndex(string value, int offset, out int index)
+    {
+        index = 0;
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        int end = value.Length - 1;
+        while (end >= 0 && !char.IsDigit(value[end]))
+        {
+            end--;
+        }
+
+        if (end < 0)
+        {
+            return false;
+        }
+
+        int start = end;
+        while (start >= 0 && char.IsDigit(value[start]))
+        {
+            start--;
+        }
+
+        if (!int.TryParse(value.Substring(start + 1, end - start), out int parsedIndex))
+        {
+            return false;
+        }
+
+        index = Mathf.Max(0, parsedIndex + offset);
+        return true;
+    }
+
+    private static float GetPlanarDistance(Vector3 a, Vector3 b)
+    {
+        float dx = a.x - b.x;
+        float dz = a.z - b.z;
+        return Mathf.Sqrt(dx * dx + dz * dz);
     }
 
     private bool TryGetServerAssignedTarget(string targetSessionId, out Transform targetTransform, out PlayerController targetController)
@@ -1213,6 +1507,11 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         if (_target == null)
         {
+            if (TryUpdateOfflinePatrolMovement())
+            {
+                return;
+            }
+
             StopAgent();
             return;
         }

@@ -113,6 +113,7 @@ public class LobbyUI : MonoBehaviour
     private const float MenuButtonScaleLerpSpeed = 12f;
     private const string JoinGameCardResourcePath = "UI/JoinGameCard";
     private const string ShopCardResourcePath = "UI/ShopCard";
+    private const string OfflineCardResourcePath = "UI/Offline mode";
     private const string InventoryCardResourcePath = "UI/InventoryCard";
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
@@ -120,6 +121,7 @@ public class LobbyUI : MonoBehaviour
     private static readonly Scale DefaultButtonScale = new Scale(Vector3.one);
     private static Texture2D s_joinGameCardTexture;
     private static Texture2D s_shopCardTexture;
+    private static Texture2D s_offlineCardTexture;
     private static Texture2D s_inventoryCardTexture;
     private string _pendingHoverLabelText = DefaultMenuHoverText;
     private float _currentHoverLabelOpacity;
@@ -1339,6 +1341,11 @@ public class LobbyUI : MonoBehaviour
             s_inventoryCardTexture = Resources.Load<Texture2D>(InventoryCardResourcePath);
         }
 
+        if (s_offlineCardTexture == null)
+        {
+            s_offlineCardTexture = Resources.Load<Texture2D>(OfflineCardResourcePath);
+        }
+
         if (s_joinGameCardTexture != null)
         {
             _startButton.style.backgroundImage = new StyleBackground(s_joinGameCardTexture);
@@ -1349,6 +1356,12 @@ public class LobbyUI : MonoBehaviour
         {
             _shopButton.style.backgroundImage = new StyleBackground(s_shopCardTexture);
             _shopButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        }
+
+        if (_offlineButton != null && s_offlineCardTexture != null)
+        {
+            _offlineButton.style.backgroundImage = new StyleBackground(s_offlineCardTexture);
+            _offlineButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
         }
 
         if (_inventoryButton != null && s_inventoryCardTexture != null)

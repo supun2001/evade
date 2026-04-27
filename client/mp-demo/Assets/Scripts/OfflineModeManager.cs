@@ -5,10 +5,11 @@ using UnityEngine.AI;
 
 public class OfflineModeManager : MonoBehaviour
 {
-    private const float InteractionDistance = 5f;
+    private const float InteractionDistance = 6f;
     private const float NextbotStartGraceSeconds = 3.5f;
     private const int PlayerMaxDownsBeforeElimination = 3;
     private const int MaxRescuersPerDownedPlayer = 2;
+    private const float PlayerSpawnRotationY = 180f;
     private const string WaitingPhase = "waiting";
     private const string IntermissionPhase = "intermission";
     private const string RoundPhase = "round";
@@ -211,9 +212,6 @@ public class OfflineModeManager : MonoBehaviour
             || reviver.IsBeingCarried()
             || IsOfflinePlayerEliminated(reviverSessionId)
             || IsOfflinePlayerEliminated(targetSessionId)
-            || target.IsHitReacting()
-            || target.IsCarrying()
-            || target.IsBeingCarried()
             || !target.IsInjuredOrHitReacting())
         {
             return false;
@@ -253,8 +251,13 @@ public class OfflineModeManager : MonoBehaviour
 
         if (carrier.IsCarrying())
         {
-            ClearCarryStateForPlayer(carrierSessionId);
-            return true;
+            if (string.Equals(carrier.GetCarriedPlayerSessionId(), targetSessionId, System.StringComparison.Ordinal))
+            {
+                ClearCarryStateForPlayer(carrierSessionId);
+                return true;
+            }
+
+            return false;
         }
 
         if (carrier.IsInjuredOrHitReacting()
@@ -331,7 +334,6 @@ public class OfflineModeManager : MonoBehaviour
                 || candidateController == null
                 || candidateController.IsBeingCarried()
                 || candidateController.IsCarrying()
-                || candidateController.IsHitReacting()
                 || IsOfflinePlayerEliminated(pair.Key)
                 || !candidateController.IsInjuredOrHitReacting())
             {
@@ -439,7 +441,6 @@ public class OfflineModeManager : MonoBehaviour
             && targetController != null
             && !targetController.IsBeingCarried()
             && !targetController.IsCarrying()
-            && !targetController.IsHitReacting()
             && targetController.IsInjuredOrHitReacting();
     }
 
@@ -757,8 +758,8 @@ public class OfflineModeManager : MonoBehaviour
             PlayerController controller = state.Controller != null
                 ? state.Controller
                 : state.PlayerObject.GetComponent<PlayerController>();
-            Vector3 resetPosition = state.PlayerObject.transform.position;
-            float resetYaw = state.PlayerObject.transform.eulerAngles.y;
+            Vector3 resetPosition = roundStarted ? state.PlayerObject.transform.position : ResolveSpawnPosition(state.SpawnIndex);
+            float resetYaw = roundStarted ? state.PlayerObject.transform.eulerAngles.y : PlayerSpawnRotationY;
             if (controller != null)
             {
                 controller.ApplyNetworkRoundReset(resetPosition, resetYaw);
@@ -785,8 +786,55 @@ public class OfflineModeManager : MonoBehaviour
                 state.RevivesDone = 0;
             }
 
+            ResetPlayerStateForPhase(state, resetPosition, resetYaw);
             SyncPlayerState(state);
         }
+    }
+
+    private void ResetPlayerStateForPhase(OfflinePlayerRoundState state, Vector3 resetPosition, float resetYaw)
+    {
+        if (state == null || state.PlayerState == null)
+        {
+            return;
+        }
+
+        state.PlayerState.x = resetPosition.x;
+        state.PlayerState.y = resetPosition.y;
+        state.PlayerState.z = resetPosition.z;
+        state.PlayerState.rotationY = resetYaw;
+        state.PlayerState.visualYaw = resetYaw;
+        state.PlayerState.velocityX = 0f;
+        state.PlayerState.velocityY = 0f;
+        state.PlayerState.velocityZ = 0f;
+        state.PlayerState.animInputX = 0f;
+        state.PlayerState.animInputY = 0f;
+        state.PlayerState.moveInputX = 0f;
+        state.PlayerState.moveInputY = 0f;
+        state.PlayerState.isGrounded = true;
+        state.PlayerState.isJumping = false;
+        state.PlayerState.isInjured = false;
+        state.PlayerState.isEliminated = false;
+        state.PlayerState.isHitReacting = false;
+        state.PlayerState.hitReactionTimeRemaining = 0f;
+        state.PlayerState.hitReactionPitch = 0f;
+        state.PlayerState.hitReactionRoll = 0f;
+        state.PlayerState.hitReactionSeed = 0f;
+        state.PlayerState.hitTriggerId = 0f;
+        state.PlayerState.hitSourceX = 0f;
+        state.PlayerState.hitSourceY = 0f;
+        state.PlayerState.hitSourceZ = 0f;
+        state.PlayerState.isCrouching = false;
+        state.PlayerState.isWallRunning = false;
+        state.PlayerState.wallRunSide = 0f;
+        state.PlayerState.isCarrying = false;
+        state.PlayerState.isBeingCarried = false;
+        state.PlayerState.carriedPlayerSessionId = string.Empty;
+        state.PlayerState.carrierSessionId = string.Empty;
+        state.PlayerState.speedBoostMultiplier = 1f;
+        state.PlayerState.speedBoostTimeRemaining = 0f;
+        state.PlayerState.jumpBoostMultiplier = 1f;
+        state.PlayerState.jumpBoostTimeRemaining = 0f;
+        state.PlayerState.isSpectator = false;
     }
 
     private void ResetOfflineNextbots(bool active)
@@ -994,10 +1042,51 @@ public class OfflineModeManager : MonoBehaviour
         bool isGrounded = controller == null || controller.IsGrounded();
         bool isJumping = controller != null && controller.DidJumpThisFrame();
         float verticalSpeed = velocity.y;
+        bool isHitReacting = false;
+        float hitReactionTimeRemaining = 0f;
+        float hitReactionPitch = 0f;
+        float hitReactionRoll = 0f;
+        float hitReactionSeed = 0f;
 
         if (animation != null)
         {
             animation.GetAnimationSyncState(out animationInput, out isGrounded, out isJumping, out verticalSpeed);
+        }
+
+        if (controller != null)
+        {
+            controller.GetHitReactionSyncState(
+                out isHitReacting,
+                out hitReactionTimeRemaining,
+                out hitReactionPitch,
+                out hitReactionRoll,
+                out hitReactionSeed);
+        }
+
+        bool isEliminated = state.IsEliminated;
+        bool isInjured = controller != null && controller.IsInjuredOrHitReacting();
+        if (!IsOfflineRoundActive && !isEliminated)
+        {
+            isInjured = false;
+            isHitReacting = false;
+            hitReactionTimeRemaining = 0f;
+            hitReactionPitch = 0f;
+            hitReactionRoll = 0f;
+            hitReactionSeed = 0f;
+        }
+
+        if (isEliminated)
+        {
+            velocity = Vector3.zero;
+            moveInput = Vector2.zero;
+            animationInput = Vector2.zero;
+            isJumping = false;
+            isInjured = true;
+            isHitReacting = false;
+            hitReactionTimeRemaining = 0f;
+            hitReactionPitch = 0f;
+            hitReactionRoll = 0f;
+            hitReactionSeed = 0f;
         }
 
         state.PlayerState.x = playerTransform.position.x;
@@ -1011,27 +1100,33 @@ public class OfflineModeManager : MonoBehaviour
         state.PlayerState.animInputY = animationInput.y;
         state.PlayerState.isGrounded = isGrounded;
         state.PlayerState.isJumping = isJumping;
-        state.PlayerState.isInjured = controller != null && controller.IsInjuredOrHitReacting();
-        state.PlayerState.isEliminated = state.IsEliminated;
-        state.PlayerState.isCrouching = controller != null && controller.IsCrouching();
-        state.PlayerState.isWallRunning = controller != null && controller.IsWallRunning();
-        state.PlayerState.wallRunSide = controller != null ? controller.GetWallRunSide() : 0f;
+        state.PlayerState.isInjured = isInjured;
+        state.PlayerState.isEliminated = isEliminated;
+        state.PlayerState.isCrouching = !isEliminated && controller != null && controller.IsCrouching();
+        state.PlayerState.isWallRunning = !isEliminated && controller != null && controller.IsWallRunning();
+        state.PlayerState.wallRunSide = !isEliminated && controller != null ? controller.GetWallRunSide() : 0f;
         state.PlayerState.moveInputX = moveInput.x;
         state.PlayerState.moveInputY = moveInput.y;
         state.PlayerState.visualYaw = controller != null ? controller.GetVisualYaw() : playerTransform.eulerAngles.y;
         Vector2 cameraRotation = controller != null ? controller.GetCameraRotation() : Vector2.zero;
         state.PlayerState.cameraRotationX = cameraRotation.x;
         state.PlayerState.cameraRotationY = cameraRotation.y;
+        state.PlayerState.isHitReacting = isHitReacting;
+        state.PlayerState.hitReactionTimeRemaining = hitReactionTimeRemaining;
+        state.PlayerState.hitReactionPitch = hitReactionPitch;
+        state.PlayerState.hitReactionRoll = hitReactionRoll;
+        state.PlayerState.hitReactionSeed = hitReactionSeed;
         state.PlayerState.timestamp = Time.unscaledTime * 1000f;
         state.PlayerState.isReady = IsOfflineModeActive;
-        state.PlayerState.isCarrying = controller != null && controller.IsCarrying();
-        state.PlayerState.isBeingCarried = controller != null && controller.IsBeingCarried();
-        state.PlayerState.carriedPlayerSessionId = controller != null ? controller.GetCarriedPlayerSessionId() : string.Empty;
-        state.PlayerState.carrierSessionId = controller != null ? controller.GetCarrierSessionId() : string.Empty;
-        state.PlayerState.speedBoostMultiplier = controller != null ? controller.GetSyncedSpeedBoostMultiplier() : 1f;
-        state.PlayerState.speedBoostTimeRemaining = controller != null ? controller.GetSyncedSpeedBoostTimeRemaining() : 0f;
-        state.PlayerState.jumpBoostMultiplier = controller != null ? controller.GetSyncedJumpBoostMultiplier() : 1f;
-        state.PlayerState.jumpBoostTimeRemaining = controller != null ? controller.GetSyncedJumpBoostTimeRemaining() : 0f;
+        state.PlayerState.isSpectator = false;
+        state.PlayerState.isCarrying = !isEliminated && controller != null && controller.IsCarrying();
+        state.PlayerState.isBeingCarried = !isEliminated && controller != null && controller.IsBeingCarried();
+        state.PlayerState.carriedPlayerSessionId = !isEliminated && controller != null ? controller.GetCarriedPlayerSessionId() : string.Empty;
+        state.PlayerState.carrierSessionId = !isEliminated && controller != null ? controller.GetCarrierSessionId() : string.Empty;
+        state.PlayerState.speedBoostMultiplier = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedSpeedBoostMultiplier() : 1f;
+        state.PlayerState.speedBoostTimeRemaining = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedSpeedBoostTimeRemaining() : 0f;
+        state.PlayerState.jumpBoostMultiplier = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedJumpBoostMultiplier() : 1f;
+        state.PlayerState.jumpBoostTimeRemaining = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedJumpBoostTimeRemaining() : 0f;
     }
 
     private int GetIntermissionDurationMs()
@@ -1187,7 +1282,7 @@ public class OfflineModeManager : MonoBehaviour
     {
         NetworkManager networkManager = NetworkManager.Instance;
         Vector3 spawnPosition = ResolveSpawnPosition(spawnIndex);
-        GameObject playerObject = Instantiate(networkManager.PlayerPrefab, spawnPosition, Quaternion.identity);
+        GameObject playerObject = Instantiate(networkManager.PlayerPrefab, spawnPosition, Quaternion.Euler(0f, PlayerSpawnRotationY, 0f));
         playerObject.name = isLocalPlayer ? "LocalPlayer" : $"OfflinePlayer_{displayName}";
 
         OfflinePlayerIdentity identity = playerObject.GetComponent<OfflinePlayerIdentity>();
@@ -1217,13 +1312,13 @@ public class OfflineModeManager : MonoBehaviour
             controller.SetSimulationControlled(!isLocalPlayer);
         }
 
-        ApplySkin(playerObject, skinIndex);
         Player simulatedState = CreateSimulatedPlayerState(
             sessionId,
             displayName,
             skinIndex,
             spawnPosition,
-            playerObject.transform.eulerAngles.y);
+            PlayerSpawnRotationY);
+        InitializeAppearance(playerObject, simulatedState, skinIndex);
         networkManager.RegisterSimulatedPlayerObject(sessionId, playerObject, simulatedState);
         _offlinePlayers[sessionId] = playerObject;
         _offlinePlayerStates[sessionId] = new OfflinePlayerRoundState
@@ -1270,6 +1365,7 @@ public class OfflineModeManager : MonoBehaviour
             rotationY = rotationY,
             visualYaw = rotationY,
             isReady = true,
+            isSpectator = false,
             skinIndex = skinIndex,
             isGrounded = true,
             speedBoostMultiplier = 1f,
@@ -1292,6 +1388,18 @@ public class OfflineModeManager : MonoBehaviour
             Mathf.Max(0, appearance.skinRegistry.skins != null ? appearance.skinRegistry.skins.Length - 1 : 0));
 
         PlayerAppearance.ApplySkinToRenderers(appearance.skinRegistry, validSkinIndex, renderers);
+    }
+
+    private void InitializeAppearance(GameObject playerObject, Player simulatedState, int fallbackSkinIndex)
+    {
+        PlayerAppearance appearance = playerObject.GetComponent<PlayerAppearance>();
+        if (appearance != null && simulatedState != null)
+        {
+            appearance.Initialize(simulatedState);
+            return;
+        }
+
+        ApplySkin(playerObject, fallbackSkinIndex);
     }
 
     private int ResolveBotSkinIndex(int localSkinIndex, int botIndex)
