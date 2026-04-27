@@ -8,7 +8,7 @@ public class OfflineModeManager : MonoBehaviour
     private const float InteractionDistance = 6f;
     private const float NextbotStartGraceSeconds = 3.5f;
     private const int PlayerMaxDownsBeforeElimination = 3;
-    private const int MaxRescuersPerDownedPlayer = 2;
+    private const int MaxRescuersPerDownedPlayer = 1;
     private const float PlayerSpawnRotationY = 180f;
     private const string WaitingPhase = "waiting";
     private const string IntermissionPhase = "intermission";
@@ -20,6 +20,7 @@ public class OfflineModeManager : MonoBehaviour
 
     private readonly Dictionary<string, GameObject> _offlinePlayers = new Dictionary<string, GameObject>();
     private readonly Dictionary<string, OfflinePlayerRoundState> _offlinePlayerStates = new Dictionary<string, OfflinePlayerRoundState>();
+    // Rescuer session id -> downed target session id. This keeps offline bots from dogpiling one revive.
     private readonly Dictionary<string, string> _rescueAssignments = new Dictionary<string, string>();
     private readonly List<Vector3> _spawnPositions = new List<Vector3>();
     private readonly List<Vector3> _nextbotSpawnPositions = new List<Vector3>();
