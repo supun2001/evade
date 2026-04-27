@@ -41,6 +41,11 @@ public class NetworkPlayer : MonoBehaviour
         if (animator == null) animator = GetComponent<Animator>();
         if (animator == null) animator = GetComponentInChildren<Animator>();
 
+        if (controller != null)
+        {
+            controller.SetLocalCharacterAudio(isLocal);
+        }
+
         if (!isLocal)
         {
             if (controller) controller.enabled = false;

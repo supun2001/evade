@@ -32,6 +32,48 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(room.state.nextbots.size, 5);
   });
 
+  it("keeps hit-reacting players revivable while the injured pose latches", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+    const reviver = await colyseus.connectTo(room);
+    const target = await colyseus.connectTo(room);
+
+    await room.waitForNextPatch();
+
+    reviver.send("playerUpdate", {
+      x: 0,
+      y: 0,
+      z: 0,
+      isGrounded: true,
+      isInjured: false,
+      isHitReacting: false,
+    });
+    target.send("playerUpdate", {
+      x: 1,
+      y: 0,
+      z: 0,
+      isGrounded: true,
+      isInjured: false,
+      isHitReacting: true,
+      hitReactionTimeRemaining: 2.4,
+    });
+
+    await room.waitForNextPatch();
+
+    const targetState = room.state.players.get(target.sessionId);
+    assert.ok(targetState);
+    assert.strictEqual(targetState.isHitReacting, true);
+    assert.strictEqual(targetState.isInjured, true);
+
+    reviver.send("revivePlayer", {
+      targetSessionId: target.sessionId,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(targetState.isHitReacting, false);
+    assert.strictEqual(targetState.isInjured, false);
+  });
+
   it("keeps nextbots out of configured obstacles", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {
       nextbotObstacles: [

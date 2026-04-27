@@ -338,16 +338,20 @@ export class MyRoom extends Room<MyRoomState> {
       player.animInputY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_ANIM_INPUT_Y, "animInputY"), 0.02);
       player.isGrounded = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_GROUNDED, "isGrounded");
       player.isJumping = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_JUMPING, "isJumping");
+      const reportedIsInjured = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_INJURED, "isInjured");
+      const reportedIsHitReacting = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_HIT_REACTING, "isHitReacting");
       player.isInjured = keepAuthoritativeInjuredState
         ? true
-        : (ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_INJURED, "isInjured"));
+        : (ignoreStaleInjuredState ? false : (reportedIsInjured || reportedIsHitReacting));
       player.isCrouching = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_CROUCHING, "isCrouching");
       player.isWallRunning = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_WALL_RUNNING, "isWallRunning");
       player.wallRunSide = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_WALL_RUN_SIDE, "wallRunSide"), 1);
       player.moveInputX = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_X, "moveInputX"), 0.02);
       player.moveInputY = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_MOVE_INPUT_Y, "moveInputY"), 0.02);
       player.visualYaw = quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_VISUAL_YAW, "visualYaw"), 0.5);
-      player.isHitReacting = ignoreStaleInjuredState ? false : readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_HIT_REACTING, "isHitReacting");
+      // The local client reports hit reaction before it latches the injured pose.
+      // Keep that state revivable so a completed hold is not rejected mid-tumble.
+      player.isHitReacting = ignoreStaleInjuredState ? false : reportedIsHitReacting;
       player.hitReactionTimeRemaining = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_TIME_REMAINING, "hitReactionTimeRemaining"), 0.02);
       player.hitReactionPitch = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_PITCH, "hitReactionPitch"), 0.5);
       player.hitReactionRoll = ignoreStaleInjuredState ? 0 : quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_HIT_REACTION_ROLL, "hitReactionRoll"), 0.5);
@@ -1129,6 +1133,7 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
+    this.clearCarryStateForPlayer(target.sessionId);
     this.recordPlayerDowned(target.sessionId, now);
     target.isInjured = true;
     target.isHitReacting = false;

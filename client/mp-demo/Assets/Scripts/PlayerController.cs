@@ -84,6 +84,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _injuredInteractionPromptDistance = 5f;
     [SerializeField] private float _injuredInteractionPromptHeightTolerance = 1.75f;
     [SerializeField] private float _reviveHoldDuration = 2.5f;
+    [SerializeField, Min(0.05f)] private float _reviveRetryInterval = 0.25f;
     [SerializeField] private float _carryMoveSpeed = 2.1f;
     [SerializeField] private Vector3 _carriedPlayerOffset = new Vector3(0.45f, 1.05f, -0.15f);
     [SerializeField] private string _carryLeftAnchorBoneName = "L_Arm";
@@ -202,6 +203,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField, Min(0f)] private float _footstepVolume = 0.6f;
     [SerializeField, Range(0f, 0.3f)] private float _footstepPitchRandomness = 0.04f;
     [SerializeField, Min(0f)] private float _footstepMinHorizontalSpeed = 0.5f;
+    [SerializeField, Min(0f)] private float _remoteFootstepMinDistance = 1.5f;
+    [SerializeField, Min(0.1f)] private float _remoteFootstepMaxDistance = 18f;
     [SerializeField] private AudioClip[] _crouchFootstepClips;
     [SerializeField, Min(0f)] private float _crouchFootstepVolume = 0.4f;
     [SerializeField] private AudioClip[] _jumpStartFootstepClips;
@@ -271,6 +274,7 @@ public class PlayerController : MonoBehaviour
     private float _reviveHoldStartedAt = -1f;
     private string _reviveHoldTargetSessionId;
     private bool _reviveHoldTriggered;
+    private float _nextReviveRequestAt = -1f;
     private bool _isCarryingPlayer;
     private bool _isBeingCarried;
     private string _carriedPlayerSessionId;
@@ -351,6 +355,7 @@ public class PlayerController : MonoBehaviour
     private bool _isPauseMenuOpen;
     private bool _hudEventsBound;
     private bool _isTemporaryThirdPersonForced;
+    private bool _isSimulationControlled;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
     private const string INJURED_VISUAL_ROOT_NAME = "player";
@@ -463,11 +468,19 @@ public class PlayerController : MonoBehaviour
         _hurtAudioSource.loop = false;
         _hurtAudioSource.spatialBlend = 0f;
         _hurtAudioSource.dopplerLevel = 0f;
+
+        SetLocalCharacterAudio(true);
     }
     
     private void Start() {
         // UnityEngine.Cursor.lockState = CursorLockMode.Locked;
         // UnityEngine.Cursor.visible = false;
+
+        if (_isSimulationControlled)
+        {
+            ApplySimulationPresentationState();
+            return;
+        }
 
         _preferredViewMode = _startingViewMode;
         SetCameraView(_startingViewMode, true);
@@ -477,7 +490,10 @@ public class PlayerController : MonoBehaviour
     #region Update
     private void Update() {
         _jumpedThisFrame = false;
-        HandlePauseMenuToggle();
+        if (!_isSimulationControlled)
+        {
+            HandlePauseMenuToggle();
+        }
 
         if (_isSpectating)
         {
@@ -490,20 +506,27 @@ public class PlayerController : MonoBehaviour
         UpdateForcedCameraViewState();
         UpdateCrouchState();
         UpdateDownedCollisionShape();
-        UpdateSpeedHud();
-        UpdateAnimationDebugHud();
-        UpdateCrosshairVisibility();
-        UpdateNextbotWarningIndicator();
-        UpdateInjuredInteractionPrompt();
-        HandleInjuredInteractionInput();
-        UpdateInjuredInteractionPromptPressedState();
+        if (!_isSimulationControlled)
+        {
+            UpdateSpeedHud();
+            UpdateAnimationDebugHud();
+            UpdateCrosshairVisibility();
+            UpdateNextbotWarningIndicator();
+            UpdateInjuredInteractionPrompt();
+            HandleInjuredInteractionInput();
+            UpdateInjuredInteractionPromptPressedState();
+            HandleCursorLock();
+            HandleViewToggle();
+        }
 
-        HandleCursorLock();
-        HandleViewToggle();
         UpdateAutoSprint();
         UpdateWallRunEligibility();
         UpdateWallRunState();
-        UpdateZoom();
+        if (!_isSimulationControlled)
+        {
+            UpdateZoom();
+        }
+
         UpdateRampState();
 
         if (_isBeingCarried)
@@ -600,6 +623,12 @@ public class PlayerController : MonoBehaviour
 
     private void HandleInjuredInteractionInput()
     {
+        if (_isSimulationControlled)
+        {
+            ResetReviveHoldState();
+            return;
+        }
+
         if (_isPauseMenuOpen || IsInjuredOrHitReacting() || Keyboard.current == null)
         {
             ResetReviveHoldState();
@@ -612,7 +641,7 @@ public class PlayerController : MonoBehaviour
 
             if (Keyboard.current.qKey.wasPressedThisFrame && !string.IsNullOrEmpty(_carriedPlayerSessionId))
             {
-                NetworkManager.Instance?.SendCarryRequest(_carriedPlayerSessionId);
+                SendCarryRequest(_carriedPlayerSessionId);
             }
 
             return;
@@ -628,7 +657,7 @@ public class PlayerController : MonoBehaviour
 
         if (Keyboard.current.qKey.wasPressedThisFrame)
         {
-            NetworkManager.Instance?.SendCarryRequest(targetSessionId);
+            SendCarryRequest(targetSessionId);
         }
     }
 
@@ -769,6 +798,12 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (_isSimulationControlled)
+        {
+            UpdateSimulationVisuals();
+            return;
+        }
+
         if (_isHitReacting)
         {
             UpdateNextbotHitReactionVisual();
@@ -785,7 +820,7 @@ public class PlayerController : MonoBehaviour
         Vector2 lookInput = _playerLocomotionInput.LookInput;
         float minPitch = _currentViewMode == CameraViewMode.FirstPerson ? -_firstPersonLookUpLimit : -lookLimitV;
         float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
-        bool lookBackHeld = Keyboard.current != null && Keyboard.current.rKey.isPressed;
+        bool lookBackHeld = !_isSimulationControlled && Keyboard.current != null && Keyboard.current.rKey.isPressed;
         
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, minPitch, maxPitch);
@@ -826,6 +861,44 @@ public class PlayerController : MonoBehaviour
         ResolveCameraWallCollision();
         UpdateSprintArmPose();
         UpdateArmWallClipVisibility();
+    }
+
+    private void UpdateSimulationVisuals()
+    {
+        Vector2 lookInput = _playerLocomotionInput != null ? _playerLocomotionInput.LookInput : Vector2.zero;
+        _cameraRotation.x += lookSenseH * lookInput.x;
+        _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, -lookLimitV, lookLimitV);
+
+        if (!_isBeingCarried && !IsInjured())
+        {
+            _playerRotationY += lookSenseH * lookInput.x;
+            _transform.rotation = Quaternion.Euler(0f, _playerRotationY, 0f);
+        }
+
+        if (_isHitReacting)
+        {
+            UpdateNextbotHitReactionVisual();
+        }
+        else if (_isBeingCarried)
+        {
+            ResetInjuredVisualRootRotation();
+        }
+        else if (IsInjured())
+        {
+            UpdateInjuredFacing();
+        }
+        else if (IsCrouching() || _isCarryingPlayer)
+        {
+            UpdateCrouchFacing();
+        }
+        else
+        {
+            ResetInjuredVisualRootRotation();
+        }
+
+        UpdateDownedVisualRootPosition();
+        UpdateSprintArmPose();
+        EnsureRemoteFullBodyVisible();
     }
     #endregion
 
@@ -1589,29 +1662,36 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        float now = Time.unscaledTime;
         if (!string.Equals(_reviveHoldTargetSessionId, targetSessionId, StringComparison.Ordinal))
         {
             _reviveHoldTargetSessionId = targetSessionId;
-            _reviveHoldStartedAt = Time.unscaledTime;
+            _reviveHoldStartedAt = now;
             _reviveHoldTimer = 0f;
             _reviveHoldTriggered = false;
-        }
-
-        if (_reviveHoldTriggered)
-        {
-            return;
+            _nextReviveRequestAt = -1f;
         }
 
         if (_reviveHoldStartedAt < 0f)
         {
-            _reviveHoldStartedAt = Time.unscaledTime;
+            _reviveHoldStartedAt = now;
         }
 
-        _reviveHoldTimer = Mathf.Min(_reviveHoldDuration, Time.unscaledTime - _reviveHoldStartedAt);
-        if (_reviveHoldTimer >= _reviveHoldDuration)
+        _reviveHoldTimer = Mathf.Min(_reviveHoldDuration, now - _reviveHoldStartedAt);
+        if (_reviveHoldTimer < _reviveHoldDuration)
         {
-            NetworkManager.Instance?.SendReviveRequest(targetSessionId);
+            return;
+        }
+
+        if (_reviveHoldTriggered && now < _nextReviveRequestAt)
+        {
+            return;
+        }
+
+        if (SendReviveRequest(targetSessionId))
+        {
             _reviveHoldTriggered = true;
+            _nextReviveRequestAt = now + Mathf.Max(0.05f, _reviveRetryInterval);
         }
     }
 
@@ -1621,6 +1701,39 @@ public class PlayerController : MonoBehaviour
         _reviveHoldStartedAt = -1f;
         _reviveHoldTargetSessionId = null;
         _reviveHoldTriggered = false;
+        _nextReviveRequestAt = -1f;
+    }
+
+    private bool SendReviveRequest(string targetSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(targetSessionId))
+        {
+            return false;
+        }
+
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager) && offlineModeManager.IsOfflineModeActive)
+        {
+            return offlineModeManager.TryRevivePlayer(gameObject, targetSessionId);
+        }
+
+        NetworkManager.Instance?.SendReviveRequest(targetSessionId);
+        return NetworkManager.Instance != null;
+    }
+
+    private void SendCarryRequest(string targetSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(targetSessionId))
+        {
+            return;
+        }
+
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager) && offlineModeManager.IsOfflineModeActive)
+        {
+            offlineModeManager.TryToggleCarryPlayer(gameObject, targetSessionId);
+            return;
+        }
+
+        NetworkManager.Instance?.SendCarryRequest(targetSessionId);
     }
 
     public void ApplyNetworkCarryState(bool isCarrying, bool isBeingCarried, string carriedPlayerSessionId, string carrierSessionId)
@@ -1791,20 +1904,26 @@ public class PlayerController : MonoBehaviour
             PlayerAnimation candidate = hit.collider.GetComponentInParent<PlayerAnimation>();
             if (candidate == null || candidate == _playerAnimation || !candidate.IsInjuredActive)
             {
-                return false;
+                continue;
             }
 
             NetworkPlayer candidateNetworkPlayer = candidate.GetComponent<NetworkPlayer>();
             if (candidateNetworkPlayer == null || !candidateNetworkPlayer.TryGetSessionId(out targetSessionId))
             {
-                return false;
+                OfflinePlayerIdentity offlineIdentity = candidate.GetComponentInParent<OfflinePlayerIdentity>();
+                if (offlineIdentity == null || string.IsNullOrWhiteSpace(offlineIdentity.SessionId))
+                {
+                    continue;
+                }
+
+                targetSessionId = offlineIdentity.SessionId;
             }
 
             Transform candidateTransform = candidate.transform;
             Vector3 offset = candidateTransform.position - localPosition;
             if (Mathf.Abs(offset.y) > _injuredInteractionPromptHeightTolerance)
             {
-                return false;
+                continue;
             }
 
             injuredPlayerAnimation = candidate;
@@ -1903,6 +2022,16 @@ public class PlayerController : MonoBehaviour
     public bool IsBeingCarried()
     {
         return _isBeingCarried;
+    }
+
+    public string GetCarriedPlayerSessionId()
+    {
+        return _carriedPlayerSessionId;
+    }
+
+    public string GetCarrierSessionId()
+    {
+        return _carrierSessionId;
     }
 
     private void SetPauseMenuVisible(bool visible)
@@ -3507,6 +3636,7 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
+        ClearOfflineCarryStateBeforeNextbotHit();
         CacheNextbotHitLimbTransforms();
 
         Vector3 awayDirection = _transform.position - sourcePosition;
@@ -3553,6 +3683,24 @@ public class PlayerController : MonoBehaviour
         UpdateForcedCameraViewState(forceImmediate: true);
 
         return true;
+    }
+
+    private void ClearOfflineCarryStateBeforeNextbotHit()
+    {
+        if ((!_isCarryingPlayer && !_isBeingCarried)
+            || !OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            || !offlineModeManager.IsOfflineModeActive)
+        {
+            return;
+        }
+
+        OfflinePlayerIdentity identity = GetComponent<OfflinePlayerIdentity>();
+        if (identity == null || string.IsNullOrWhiteSpace(identity.SessionId))
+        {
+            return;
+        }
+
+        offlineModeManager.ClearCarryStateForPlayer(identity.SessionId);
     }
 
     private void HandleAirMovement(Vector2 movementInput, Vector3 movementDirection, float inputMagnitude, float targetSpeed, float deltaTime)
@@ -3931,6 +4079,83 @@ public class PlayerController : MonoBehaviour
     public int GetWallRunSide()
     {
         return _wallRunSide;
+    }
+
+    public bool IsSimulationControlled()
+    {
+        return _isSimulationControlled;
+    }
+
+    public void SetSimulationControlled(bool isSimulationControlled)
+    {
+        _isSimulationControlled = isSimulationControlled;
+        SetLocalCharacterAudio(!isSimulationControlled);
+
+        if (_playerLocomotionInput != null)
+        {
+            _playerLocomotionInput.SetSimulatedInputEnabled(isSimulationControlled);
+            _playerLocomotionInput.InputEnabled = true;
+        }
+
+        if (!isSimulationControlled)
+        {
+            if (_playerHudDocument != null)
+            {
+                _playerHudDocument.enabled = true;
+            }
+
+            return;
+        }
+
+        if (_playerHudDocument != null)
+        {
+            _playerHudDocument.enabled = false;
+        }
+
+        ApplySimulationPresentationState();
+    }
+
+    private void ApplySimulationPresentationState()
+    {
+        EnsureRemoteFullBodyVisible();
+
+        Camera[] cameras = GetComponentsInChildren<Camera>(true);
+        for (int i = 0; i < cameras.Length; i++)
+        {
+            if (cameras[i] != null)
+            {
+                cameras[i].gameObject.SetActive(false);
+            }
+        }
+
+        AudioListener[] audioListeners = GetComponentsInChildren<AudioListener>(true);
+        for (int i = 0; i < audioListeners.Length; i++)
+        {
+            if (audioListeners[i] != null)
+            {
+                audioListeners[i].enabled = false;
+            }
+        }
+    }
+
+    public void SetLocalCharacterAudio(bool isLocalCharacter)
+    {
+        ConfigureCharacterAudioSource(_footstepAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
+        ConfigureCharacterAudioSource(_hurtAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
+    }
+
+    private static void ConfigureCharacterAudioSource(AudioSource audioSource, bool isLocalCharacter, float minDistance, float maxDistance)
+    {
+        if (audioSource == null)
+        {
+            return;
+        }
+
+        audioSource.spatialBlend = isLocalCharacter ? 0f : 1f;
+        audioSource.rolloffMode = AudioRolloffMode.Linear;
+        audioSource.minDistance = Mathf.Max(0f, minDistance);
+        audioSource.maxDistance = Mathf.Max(audioSource.minDistance + 0.1f, maxDistance);
+        audioSource.dopplerLevel = 0f;
     }
 
     private float GetCurrentMoveSpeed()
@@ -4326,11 +4551,6 @@ public class PlayerController : MonoBehaviour
 
     private bool CanPlayLocalCharacterAudio()
     {
-        if (_networkPlayer != null && !_networkPlayer.IsLocalPlayer)
-        {
-            return false;
-        }
-
         if (_footstepAudioSource == null)
         {
             return false;
@@ -4638,8 +4858,12 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateCrouchState()
     {
-        bool crouchPressedThisFrame = Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame;
-        bool crouchHeld = Keyboard.current != null && Keyboard.current.cKey.isPressed;
+        bool crouchPressedThisFrame = _playerLocomotionInput != null
+            ? _playerLocomotionInput.CrouchPressedThisFrame
+            : (Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame);
+        bool crouchHeld = _playerLocomotionInput != null
+            ? _playerLocomotionInput.CrouchHeld
+            : (Keyboard.current != null && Keyboard.current.cKey.isPressed);
         bool canStartCrouchRun = crouchPressedThisFrame
             && !IsInjured()
             && !_isCarryingPlayer

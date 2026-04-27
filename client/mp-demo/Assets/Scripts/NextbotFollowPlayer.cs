@@ -48,6 +48,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _targetLockDuration = 1.4f;
     [SerializeField] private float _switchConfirmDuration = 0.3f;
     [SerializeField] private float _frontAngleThreshold = 85f;
+    [SerializeField] private float _sameTargetScorePenalty = 65f;
 
     [Header("Detection")]
     [SerializeField] private LayerMask _wallDetectionLayers = 1 << 6;
@@ -164,6 +165,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _offMeshLinkProgress;
     private bool _hasAppliedRoomState;
     private bool _roomStateAuthorityActive;
+    private bool _forceOfflineLocalAuthority;
+    private bool _offlineNextbotActive = true;
     private float _groundHeightVelocity;
     private Texture _defaultBaseMap;
     private Color _defaultBaseColor = Color.white;
@@ -262,7 +265,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         MyRoomState roomState = GetRoomState();
         NextbotState assignedNextbotState = null;
-        bool useRoomStateAuthority = _useRoomStateAuthority
+        bool useRoomStateAuthority = !_forceOfflineLocalAuthority
+            && _useRoomStateAuthority
             && roomState != null
             && TryGetAssignedNextbotState(roomState, out assignedNextbotState);
         SetRoomStateAuthorityActive(useRoomStateAuthority);
@@ -270,6 +274,25 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (useRoomStateAuthority)
         {
             return UpdateFromRoomState(assignedNextbotState);
+        }
+
+        if (_forceOfflineLocalAuthority)
+        {
+            SetServerVisualState(_offlineNextbotActive);
+            if (!_offlineNextbotActive)
+            {
+                ClearTarget();
+                StopAgent();
+                _horizontalVelocity = Vector3.zero;
+                _verticalVelocity = 0f;
+                _isJumping = false;
+                _jumpVelocity = Vector3.zero;
+                _isTraversingOffMeshLink = false;
+                return true;
+            }
+
+            EnsureAgentOnNavMesh();
+            return false;
         }
 
         if (_useRoomStateAuthority && roomState != null)
@@ -308,6 +331,74 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         _networkNextbotId = nextbotId;
         _hasAppliedRoomState = false;
+    }
+
+    public void SetOfflineLocalAuthority(bool isOfflineLocalAuthority)
+    {
+        _forceOfflineLocalAuthority = isOfflineLocalAuthority;
+
+        if (!isOfflineLocalAuthority)
+        {
+            return;
+        }
+
+        SetRoomStateAuthorityActive(false);
+        SetServerVisualState(true);
+        _hasAppliedRoomState = false;
+        _isJumping = false;
+        _jumpVelocity = Vector3.zero;
+        _isTraversingOffMeshLink = false;
+        EnsureAgentOnNavMesh();
+    }
+
+    public void SetOfflineNextbotActive(bool isActive)
+    {
+        _offlineNextbotActive = isActive;
+
+        if (!_forceOfflineLocalAuthority)
+        {
+            return;
+        }
+
+        SetServerVisualState(isActive);
+        if (isActive)
+        {
+            EnsureAgentOnNavMesh();
+            return;
+        }
+
+        ClearTarget();
+        StopAgent();
+        _horizontalVelocity = Vector3.zero;
+        _verticalVelocity = 0f;
+        _isJumping = false;
+        _jumpVelocity = Vector3.zero;
+        _isTraversingOffMeshLink = false;
+    }
+
+    public void PrepareOfflineNextbot(Vector3 spawnPosition)
+    {
+        SetOfflineLocalAuthority(true);
+        _offlineNextbotActive = true;
+
+        if (_characterController != null)
+        {
+            bool wasEnabled = _characterController.enabled;
+            _characterController.enabled = false;
+            transform.position = spawnPosition;
+            _characterController.enabled = wasEnabled;
+        }
+        else
+        {
+            transform.position = spawnPosition;
+        }
+
+        _lockedHeight = spawnPosition.y;
+        _horizontalVelocity = Vector3.zero;
+        _verticalVelocity = 0f;
+        ClearTarget();
+        StopAgent();
+        EnsureAgentOnNavMesh();
     }
 
     public void ApplyRegistryEntry(NextbotRegistryEntry entry)
@@ -965,6 +1056,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         float visibleBonus = hasLineOfSight && pathDistance <= _visibleRange ? _visibleBonus : 0f;
         float frontBonus = IsTargetInFront(candidateTransform.position) ? _frontBonus : 0f;
         float currentTargetBonus = isCurrentTarget ? _currentTargetBonus : 0f;
+        float targetPressurePenalty = CountOtherNextbotsTargeting(candidateTransform) * _sameTargetScorePenalty;
 
         return new ScoredTarget
         {
@@ -972,8 +1064,34 @@ public class NextbotFollowPlayer : MonoBehaviour
             Controller = candidateController,
             PathDistance = pathDistance,
             HasLineOfSight = hasLineOfSight,
-            Score = distanceScore + visibleBonus + frontBonus + currentTargetBonus,
+            Score = distanceScore + visibleBonus + frontBonus + currentTargetBonus - targetPressurePenalty,
         };
+    }
+
+    private int CountOtherNextbotsTargeting(Transform candidateTransform)
+    {
+        if (candidateTransform == null || _sameTargetScorePenalty <= 0f)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < nextbots.Length; i++)
+        {
+            NextbotFollowPlayer nextbot = nextbots[i];
+            if (nextbot == null || nextbot == this)
+            {
+                continue;
+            }
+
+            if (nextbot._target == candidateTransform)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private bool CanKeepCurrentTarget()
@@ -1466,6 +1584,13 @@ public class NextbotFollowPlayer : MonoBehaviour
     private void TryHitTarget(float distanceToTarget)
     {
         if (_target == null || Time.time < _nextHitTime || distanceToTarget > _hitDistance)
+        {
+            return;
+        }
+
+        if (_forceOfflineLocalAuthority
+            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && !offlineModeManager.CanOfflineNextbotsDamagePlayers)
         {
             return;
         }

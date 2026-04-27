@@ -129,7 +129,11 @@ public class NetworkManager : MonoBehaviour
     private ColyseusRoom<MyRoomState> room;
     public ColyseusRoom<MyRoomState> Room => room;
     private Dictionary<string, GameObject> players = new Dictionary<string, GameObject>();
+    private readonly Dictionary<string, GameObject> simulatedPlayers = new Dictionary<string, GameObject>();
+    private readonly Dictionary<string, Player> simulatedPlayerStates = new Dictionary<string, Player>();
     private readonly float[] playerUpdatePayload = new float[PlayerUpdateFieldCount];
+    private string simulatedLocalSessionId = string.Empty;
+    public GameObject PlayerPrefab => playerPrefab;
 
     private bool ShouldUseCompactPlayerUpdatePayload
     {
@@ -174,7 +178,11 @@ public class NetworkManager : MonoBehaviour
     public event Action<RoundAnnouncementMessageData> RoundAnnouncementReceived;
     public event Action<RoundResultsMessageData> RoundResultsReceived;
     public event Action RoomLeftEvent;
-    public string LocalSessionId => room != null ? room.SessionId : string.Empty;
+    public string LocalSessionId => room != null ? room.SessionId : simulatedLocalSessionId;
+    public Dictionary<string, Player> SimulatedPlayerStates => simulatedPlayerStates;
+    public bool HasSimulatedPlayerStates => simulatedPlayerStates.Count > 0;
+    public int IntermissionDurationMilliseconds => IntermissionDurationMs;
+    public int RoundDurationMilliseconds => RoundDurationMs;
     private bool _hasReceivedRoundPhaseFromServer;
     private Coroutine _fallbackRoundFlowCoroutine;
     private Coroutine _localRoundResetCoroutine;
@@ -423,7 +431,120 @@ public class NetworkManager : MonoBehaviour
 
     public bool TryGetPlayerObject(string sessionId, out GameObject playerObject)
     {
-        return players.TryGetValue(sessionId, out playerObject);
+        if (players.TryGetValue(sessionId, out playerObject))
+        {
+            return true;
+        }
+
+        return simulatedPlayers.TryGetValue(sessionId, out playerObject);
+    }
+
+    public void RegisterSimulatedPlayerObject(string sessionId, GameObject playerObject)
+    {
+        RegisterSimulatedPlayerObject(sessionId, playerObject, null);
+    }
+
+    public void RegisterSimulatedPlayerObject(string sessionId, GameObject playerObject, Player simulatedPlayerState)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || playerObject == null)
+        {
+            return;
+        }
+
+        simulatedPlayers[sessionId] = playerObject;
+        if (simulatedPlayerState != null)
+        {
+            simulatedPlayerStates[sessionId] = simulatedPlayerState;
+        }
+    }
+
+    public void UnregisterSimulatedPlayerObject(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        simulatedPlayers.Remove(sessionId);
+        simulatedPlayerStates.Remove(sessionId);
+
+        if (string.Equals(simulatedLocalSessionId, sessionId, StringComparison.Ordinal))
+        {
+            simulatedLocalSessionId = string.Empty;
+        }
+    }
+
+    public void SetSimulatedLocalSessionId(string sessionId)
+    {
+        simulatedLocalSessionId = sessionId ?? string.Empty;
+    }
+
+    public void PublishSimulatedRoundPhase(RoundPhaseMessageData payload)
+    {
+        if (payload == null)
+        {
+            return;
+        }
+
+        RoundPhaseChanged?.Invoke(payload);
+    }
+
+    public void PublishSimulatedRoundAnnouncement(RoundAnnouncementMessageData payload)
+    {
+        if (payload == null)
+        {
+            return;
+        }
+
+        RoundAnnouncementReceived?.Invoke(payload);
+    }
+
+    public void PublishSimulatedRoundResults(RoundResultsMessageData payload)
+    {
+        if (payload == null)
+        {
+            return;
+        }
+
+        RoundResultsReceived?.Invoke(payload);
+    }
+
+    public void PublishSimulatedRoomLeft()
+    {
+        RoomLeftEvent?.Invoke();
+    }
+
+    public List<Vector3> GetConfiguredPlayerSpawnPositions()
+    {
+        List<Vector3> spawnPositions = new List<Vector3>(playerSpawnPoints.Count);
+        for (int i = 0; i < playerSpawnPoints.Count; i++)
+        {
+            spawnPositions.Add(ResolveGroundedSpawnPosition(playerSpawnPoints[i].GetWorldPosition()));
+        }
+
+        return spawnPositions;
+    }
+
+    public List<Vector3> GetConfiguredNextbotSpawnPositions()
+    {
+        List<Vector3> spawnPositions = new List<Vector3>(nextbotSpawnPoints.Count);
+        for (int i = 0; i < nextbotSpawnPoints.Count; i++)
+        {
+            spawnPositions.Add(ResolveGroundedSpawnPosition(nextbotSpawnPoints[i].GetWorldPosition()));
+        }
+
+        return spawnPositions;
+    }
+
+    public List<Vector3> GetConfiguredNextbotPatrolPositions()
+    {
+        List<Vector3> patrolPositions = new List<Vector3>(nextbotPatrolPoints.Count);
+        for (int i = 0; i < nextbotPatrolPoints.Count; i++)
+        {
+            patrolPositions.Add(ResolveGroundedSpawnPosition(nextbotPatrolPoints[i].GetWorldPosition()));
+        }
+
+        return patrolPositions;
     }
 
     public async Task<string> CreateGame(){

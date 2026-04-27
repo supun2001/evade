@@ -23,13 +23,26 @@ public class NextbotSpawner : MonoBehaviour
 
     private void Start()
     {
-        _nextbotRegistry = Resources.Load<NextbotRegistry>("NextbotRegistry");
-        _nextbotPrefab = Resources.Load<GameObject>(NextbotPrefabResourcePath);
-        EnsureNetworkedNextbotInstances();
+        RefreshNow();
     }
 
     private void Update()
     {
+        EnsureNetworkedNextbotInstances();
+    }
+
+    public void RefreshNow()
+    {
+        if (_nextbotRegistry == null)
+        {
+            _nextbotRegistry = Resources.Load<NextbotRegistry>("NextbotRegistry");
+        }
+
+        if (_nextbotPrefab == null)
+        {
+            _nextbotPrefab = Resources.Load<GameObject>(NextbotPrefabResourcePath);
+        }
+
         EnsureNetworkedNextbotInstances();
     }
 

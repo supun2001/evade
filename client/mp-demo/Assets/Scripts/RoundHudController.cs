@@ -363,31 +363,33 @@ public class RoundHudController : MonoBehaviour
             return false;
         }
 
-        return _networkManager != null
-            && _networkManager.Room != null
-            && _networkManager.Room.State != null
-            && _networkManager.Room.State.players != null
-            && _networkManager.Room.State.players.Count > 0;
+        return HasScoreboardPlayers();
     }
 
     private void RebuildTabScoreboardRows()
     {
         _tabScoreboardList.Clear();
 
-        if (_networkManager?.Room?.State?.players == null)
+        if (_networkManager == null)
         {
             return;
         }
 
         List<PlayerRowData> rows = new List<PlayerRowData>();
-        foreach (string sessionId in _networkManager.Room.State.players.Keys)
+        Dictionary<string, Player> scoreboardPlayers = GetScoreboardPlayers();
+        if (scoreboardPlayers == null)
+        {
+            return;
+        }
+
+        foreach (string sessionId in scoreboardPlayers.Keys)
         {
             if (string.IsNullOrWhiteSpace(sessionId))
             {
                 continue;
             }
 
-            Player player = _networkManager.Room.State.players[sessionId];
+            Player player = scoreboardPlayers[sessionId];
             if (player == null)
             {
                 continue;
@@ -454,9 +456,40 @@ public class RoundHudController : MonoBehaviour
 
         if (_tabScoreboardPlayerCountLabel != null)
         {
-            int playerCount = _networkManager?.Room?.State?.players?.Count ?? 0;
+            int playerCount = GetScoreboardPlayers()?.Count ?? 0;
             _tabScoreboardPlayerCountLabel.text = $"{playerCount} players";
         }
+    }
+
+    private bool HasScoreboardPlayers()
+    {
+        return GetScoreboardPlayers()?.Count > 0;
+    }
+
+    private Dictionary<string, Player> GetScoreboardPlayers()
+    {
+        if (_networkManager == null)
+        {
+            return null;
+        }
+
+        if (_networkManager.Room != null
+            && _networkManager.Room.State != null
+            && _networkManager.Room.State.players != null
+            && _networkManager.Room.State.players.Count > 0)
+        {
+            Dictionary<string, Player> onlinePlayers = new Dictionary<string, Player>();
+            foreach (string sessionId in _networkManager.Room.State.players.Keys)
+            {
+                onlinePlayers[sessionId] = _networkManager.Room.State.players[sessionId];
+            }
+
+            return onlinePlayers;
+        }
+
+        return _networkManager.HasSimulatedPlayerStates
+            ? _networkManager.SimulatedPlayerStates
+            : null;
     }
 
     private VisualElement CreateTabScoreboardRow(PlayerRowData rowData, int index)
