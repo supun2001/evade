@@ -81,7 +81,11 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _downedControllerBlend = 12f;
 
     [Header("Injured Interaction Prompt")]
-    [SerializeField] private float _injuredInteractionPromptDistance = 5f;
+    [SerializeField] private float _injuredInteractionPromptDistance = 8f;
+    [SerializeField] private float _reviveInteractionPromptDistance = 8f;
+    [SerializeField] private float _carryInteractionPromptDistance = 8f;
+    [SerializeField] private float _thirdPersonInteractionRayHeight = 1.15f;
+    [SerializeField] private float _thirdPersonInteractionRayRadius = 0.65f;
     [SerializeField] private float _injuredInteractionPromptHeightTolerance = 1.75f;
     [SerializeField] private float _reviveHoldDuration = 2.5f;
     [SerializeField, Min(0.05f)] private float _reviveRetryInterval = 0.25f;
@@ -655,17 +659,26 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (!TryGetLookedAtInjuredPlayer(out _, out string targetSessionId))
+        bool hasReviveTarget = TryGetLookedAtRevivePlayer(out _, out string reviveTargetSessionId);
+        bool hasCarryTarget = TryGetLookedAtCarryPlayer(out _, out string carryTargetSessionId);
+        if (!hasReviveTarget && !hasCarryTarget)
         {
             ResetReviveHoldState();
             return;
         }
 
-        UpdateReviveHoldState(targetSessionId, Keyboard.current.eKey.isPressed);
-
-        if (Keyboard.current.qKey.wasPressedThisFrame)
+        if (hasReviveTarget)
         {
-            SendCarryRequest(targetSessionId);
+            UpdateReviveHoldState(reviveTargetSessionId, Keyboard.current.eKey.isPressed);
+        }
+        else
+        {
+            ResetReviveHoldState();
+        }
+
+        if (hasCarryTarget && Keyboard.current.qKey.wasPressedThisFrame)
+        {
+            SendCarryRequest(carryTargetSessionId);
         }
     }
 
@@ -1418,7 +1431,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (TryGetLookedAtInjuredPlayer(out _, out _))
+        if (TryGetLookedAtRevivePlayer(out _, out _) || TryGetLookedAtCarryPlayer(out _, out _))
         {
             SetInjuredInteractionPromptVisible(true);
             return;
@@ -1974,6 +1987,26 @@ public class PlayerController : MonoBehaviour
 
     private bool TryGetLookedAtInjuredPlayer(out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
     {
+        float interactionDistance = Mathf.Max(
+            _injuredInteractionPromptDistance,
+            Mathf.Max(_reviveInteractionPromptDistance, _carryInteractionPromptDistance));
+        return TryGetInjuredInteractionTarget(interactionDistance, out injuredPlayerAnimation, out targetSessionId);
+    }
+
+    private bool TryGetLookedAtRevivePlayer(out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
+    {
+        float interactionDistance = Mathf.Max(_injuredInteractionPromptDistance, _reviveInteractionPromptDistance);
+        return TryGetInjuredInteractionTarget(interactionDistance, out injuredPlayerAnimation, out targetSessionId);
+    }
+
+    private bool TryGetLookedAtCarryPlayer(out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
+    {
+        float interactionDistance = Mathf.Max(_injuredInteractionPromptDistance, _carryInteractionPromptDistance);
+        return TryGetInjuredInteractionTarget(interactionDistance, out injuredPlayerAnimation, out targetSessionId);
+    }
+
+    private bool TryGetInjuredInteractionTarget(float interactionDistance, out PlayerAnimation injuredPlayerAnimation, out string targetSessionId)
+    {
         injuredPlayerAnimation = null;
         targetSessionId = null;
 
@@ -1983,13 +2016,77 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        Vector3 localPosition = _transform.position;
-        RaycastHit[] hits = Physics.RaycastAll(
+        float queryDistance = Mathf.Max(0.1f, interactionDistance);
+        if (TryGetInjuredInteractionTargetFromCast(
             rayOriginTransform.position,
             rayOriginTransform.forward,
-            _injuredInteractionPromptDistance,
-            _cameraCollisionLayers,
-            QueryTriggerInteraction.Ignore);
+            queryDistance,
+            0f,
+            out injuredPlayerAnimation,
+            out targetSessionId))
+        {
+            return true;
+        }
+
+        if (_currentViewMode != CameraViewMode.ThirdPerson)
+        {
+            return false;
+        }
+
+        Vector3 thirdPersonOrigin = _transform.position + Vector3.up * Mathf.Max(0f, _thirdPersonInteractionRayHeight);
+        Vector3 thirdPersonDirection = _transform.forward;
+        thirdPersonDirection.y = 0f;
+        if (thirdPersonDirection.sqrMagnitude <= 0.0001f)
+        {
+            thirdPersonDirection = rayOriginTransform.forward;
+            thirdPersonDirection.y = 0f;
+        }
+
+        if (thirdPersonDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        return TryGetInjuredInteractionTargetFromCast(
+            thirdPersonOrigin,
+            thirdPersonDirection.normalized,
+            queryDistance,
+            _thirdPersonInteractionRayRadius,
+            out injuredPlayerAnimation,
+            out targetSessionId);
+    }
+
+    private bool TryGetInjuredInteractionTargetFromCast(
+        Vector3 origin,
+        Vector3 direction,
+        float distance,
+        float radius,
+        out PlayerAnimation injuredPlayerAnimation,
+        out string targetSessionId)
+    {
+        injuredPlayerAnimation = null;
+        targetSessionId = null;
+
+        if (direction.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        Vector3 localPosition = _transform.position;
+        RaycastHit[] hits = radius > 0f
+            ? Physics.SphereCastAll(
+                origin,
+                radius,
+                direction.normalized,
+                distance,
+                _cameraCollisionLayers,
+                QueryTriggerInteraction.Ignore)
+            : Physics.RaycastAll(
+                origin,
+                direction.normalized,
+                distance,
+                _cameraCollisionLayers,
+                QueryTriggerInteraction.Ignore);
 
         if (hits == null || hits.Length == 0)
         {
