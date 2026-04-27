@@ -13,7 +13,8 @@ public class RoundHudController : MonoBehaviour
     private const string IntermissionMusicResourcePath = "SFX/InGame";
     private const string InGameMusicResourcePath = "SFX/InGame";
     private const string RoundStartSfxResourcePath = "SFX/RoundStart";
-    private const string SkinRegistryResourcePath = "SkinRegistry";
+    private const string GreenScoreboardIconResourcePath = "UI/green_icon";
+    private const string PinkScoreboardIconResourcePath = "UI/pink_icon";
 
     private NetworkManager _networkManager;
     private UIDocument _hudDocument;
@@ -26,7 +27,8 @@ public class RoundHudController : MonoBehaviour
     private AudioClip _inGameMusicClip;
     private AudioClip _roundStartClip;
     private AudioClip _activeLoopClip;
-    private SkinRegistry _skinRegistry;
+    private Texture2D _greenScoreboardIcon;
+    private Texture2D _pinkScoreboardIcon;
 
     private VisualElement _roundPhaseContainer;
     private Label _roundPhaseTitleLabel;
@@ -61,7 +63,8 @@ public class RoundHudController : MonoBehaviour
         _intermissionMusicClip = Resources.Load<AudioClip>(IntermissionMusicResourcePath);
         _inGameMusicClip = Resources.Load<AudioClip>(InGameMusicResourcePath);
         _roundStartClip = Resources.Load<AudioClip>(RoundStartSfxResourcePath);
-        _skinRegistry = Resources.Load<SkinRegistry>(SkinRegistryResourcePath);
+        _greenScoreboardIcon = Resources.Load<Texture2D>(GreenScoreboardIconResourcePath);
+        _pinkScoreboardIcon = Resources.Load<Texture2D>(PinkScoreboardIconResourcePath);
 
         _musicAudioSource = gameObject.AddComponent<AudioSource>();
         _musicAudioSource.playOnAwake = false;
@@ -526,8 +529,8 @@ public class RoundHudController : MonoBehaviour
         avatar.style.borderBottomLeftRadius = 2f;
         avatar.style.borderBottomRightRadius = 2f;
         avatar.style.backgroundColor = new Color(1f, 1f, 1f, 0.08f);
-        avatar.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
-        Texture2D avatarTexture = GetSkinPreviewTexture(Mathf.RoundToInt(rowData.Player.skinIndex));
+        avatar.style.unityBackgroundScaleMode = ScaleMode.ScaleToFit;
+        Texture2D avatarTexture = GetScoreboardPreviewTexture(Mathf.RoundToInt(rowData.Player.skinIndex));
         if (avatarTexture != null)
         {
             avatar.style.backgroundImage = new StyleBackground(avatarTexture);
@@ -548,27 +551,6 @@ public class RoundHudController : MonoBehaviour
         stateLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
         stateLabel.style.color = GetPlayerStateColor(rowData.Player);
 
-        VisualElement skinCell = new VisualElement();
-        skinCell.style.width = 110f;
-        skinCell.style.alignItems = Align.Center;
-        skinCell.style.justifyContent = Justify.Center;
-
-        VisualElement skinPreview = new VisualElement();
-        skinPreview.style.width = 70f;
-        skinPreview.style.height = 30f;
-        skinPreview.style.backgroundColor = new Color(1f, 1f, 1f, 0.06f);
-        skinPreview.style.borderTopLeftRadius = 2f;
-        skinPreview.style.borderTopRightRadius = 2f;
-        skinPreview.style.borderBottomLeftRadius = 2f;
-        skinPreview.style.borderBottomRightRadius = 2f;
-        skinPreview.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
-        if (avatarTexture != null)
-        {
-            skinPreview.style.backgroundImage = new StyleBackground(avatarTexture);
-        }
-
-        skinCell.Add(skinPreview);
-
         Label readyLabel = new Label(rowData.Player.isReady ? "IN" : "MENU");
         readyLabel.style.width = 88f;
         readyLabel.style.fontSize = 18f;
@@ -580,7 +562,6 @@ public class RoundHudController : MonoBehaviour
 
         row.Add(nameCell);
         row.Add(stateLabel);
-        row.Add(skinCell);
         row.Add(readyLabel);
         return row;
     }
@@ -666,25 +647,19 @@ public class RoundHudController : MonoBehaviour
         return new Color(0.52f, 1f, 0.48f);
     }
 
-    private Texture2D GetSkinPreviewTexture(int skinIndex)
+    private Texture2D GetScoreboardPreviewTexture(int skinIndex)
     {
-        if (_skinRegistry == null || _skinRegistry.skins == null || _skinRegistry.skins.Length == 0)
+        if (skinIndex == 0 && _greenScoreboardIcon != null)
         {
-            return null;
+            return _greenScoreboardIcon;
         }
 
-        if (skinIndex < 0 || skinIndex >= _skinRegistry.skins.Length)
+        if (skinIndex == 1 && _pinkScoreboardIcon != null)
         {
-            return null;
+            return _pinkScoreboardIcon;
         }
 
-        Sprite preview = _skinRegistry.skins[skinIndex].uiPreview;
-        if (preview != null)
-        {
-            return preview.texture;
-        }
-
-        return _skinRegistry.skins[skinIndex].texture;
+        return null;
     }
 
     private void RefreshPhaseDisplay()

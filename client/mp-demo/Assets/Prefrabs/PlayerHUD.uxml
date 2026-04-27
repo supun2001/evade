@@ -65,7 +65,6 @@
             <ui:VisualElement style="flex-direction: row; margin-top: 14px; padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; background-color: rgba(0, 0, 0, 0.42);">
                 <ui:Label text="NAME" style="flex-grow: 1; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold;"/>
                 <ui:Label text="STATE" style="width: 110px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-center;"/>
-                <ui:Label text="SKIN" style="width: 110px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-center;"/>
                 <ui:Label text="READY" style="width: 88px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-right;"/>
             </ui:VisualElement>
             <ui:ScrollView name="tab-scoreboard-list" mode="Vertical" vertical-scroller-visibility="Hidden" horizontal-scroller-visibility="Hidden" style="flex-grow: 1; margin-top: 4px; background-color: rgba(0, 0, 0, 0.14);"/>
