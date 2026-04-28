@@ -17,6 +17,13 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     [SerializeField] private float _reviveHoldDuration = 2.5f;
     [SerializeField] private float _playerAvoidanceRadius = 2.25f;
     [SerializeField] private float _playerAvoidanceStrength = 3.5f;
+    [SerializeField] private float _evadeFanAngle = 55f;
+    [SerializeField] private float _lowObstacleJumpProbeHeight = 0.35f;
+    [SerializeField] private float _midObstacleJumpProbeHeight = 0.9f;
+    [SerializeField] private float _edgeJumpProbeRadius = 0.32f;
+    [SerializeField] private float _stuckJumpDelay = 0.45f;
+    [SerializeField] private float _stuckJumpMaxSpeed = 0.45f;
+    [SerializeField] private float _stuckJumpInputThreshold = 0.3f;
 
     private PlayerController _controller;
     private PlayerLocomotionInput _locomotionInput;
@@ -29,10 +36,33 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     private NavMeshPath _path;
     private string _reviveHoldTargetSessionId;
     private float _reviveHoldStartedAt = -1f;
+    private bool _hasInitialWanderTarget;
+    private float _movementBlockedSince = -1f;
 
     public void Initialize(int botIndex)
     {
         _botIndex = botIndex;
+        _hasInitialWanderTarget = false;
+    }
+
+    public void ResetOpeningRoute()
+    {
+        _hasInitialWanderTarget = false;
+        _wanderTarget = transform.position;
+        _nextWanderRetargetAt = 0f;
+        _movementBlockedSince = -1f;
+        ResetReviveHold();
+        ReleaseCurrentPatrolAssignment();
+    }
+
+    private void ReleaseCurrentPatrolAssignment()
+    {
+        if (_identity != null && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager))
+        {
+            offlineModeManager.ReleasePatrolAssignment(_identity.SessionId);
+        }
+
+        _nextWanderRetargetAt = 0f;
     }
 
     private void Awake()
@@ -58,15 +88,21 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         if (_controller.IsBeingCarried())
         {
             ResetReviveHold();
+            _movementBlockedSince = -1f;
+            ReleaseCurrentPatrolAssignment();
             OfflineModeManager.Instance.ReleaseRescueAssignment(_identity.SessionId);
             _locomotionInput.ApplySimulatedInput(Vector2.zero, Vector2.zero, false, false, false, false);
             return;
         }
 
         Vector3 origin = transform.position;
+        EnsureInitialWanderTarget(origin);
+
         if (_controller.IsInjuredOrHitReacting())
         {
             ResetReviveHold();
+            _movementBlockedSince = -1f;
+            ReleaseCurrentPatrolAssignment();
             OfflineModeManager.Instance.ReleaseRescueAssignment(_identity.SessionId);
             Vector2 injuredLookInput = Vector2.zero;
             if (OfflineModeManager.Instance.TryGetNearestActivePlayer(
@@ -175,11 +211,13 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     {
         if (_controller.IsCarrying())
         {
+            ReleaseCurrentPatrolAssignment();
             return DetermineCarryingDestination(origin, hasThreat, threatTransform, threatDistance);
         }
 
         if (hasDownedTarget && downedIdentity != null && downedController != null)
         {
+            ReleaseCurrentPatrolAssignment();
             Vector3 downedPosition = downedController.transform.position;
             bool targetHasThreat = OfflineModeManager.Instance.TryGetNearestThreat(
                 downedPosition,
@@ -224,12 +262,13 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         OfflineModeManager.Instance.ReleaseRescueAssignment(_identity.SessionId);
         if (hasThreat && threatTransform != null && threatDistance <= _evadeDistance)
         {
+            ReleaseCurrentPatrolAssignment();
             return BuildEvadeDestination(origin, threatTransform);
         }
 
         if (Time.time >= _nextWanderRetargetAt || Vector3.Distance(origin, _wanderTarget) <= 1.6f)
         {
-            _wanderTarget = OfflineModeManager.Instance.GetPatrolPosition(_botIndex + 1, origin);
+            _wanderTarget = OfflineModeManager.Instance.GetPatrolPosition(_identity.SessionId, _botIndex + 1, origin);
             _nextWanderRetargetAt = Time.time + Random.Range(_wanderRetargetInterval * 0.75f, _wanderRetargetInterval * 1.35f);
         }
 
@@ -275,7 +314,8 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             away = -transform.forward;
         }
 
-        return origin + away.normalized * 8f;
+        Vector3 evadeDirection = ApplyBotFan(away.normalized, _evadeFanAngle);
+        return origin + evadeDirection * 8f;
     }
 
     private Vector3 BuildRescueStagingDestination(Vector3 origin, Vector3 downedPosition, Vector3 threatPosition)
@@ -293,7 +333,34 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             awayFromThreat = -transform.forward;
         }
 
-        return downedPosition + awayFromThreat.normalized * Mathf.Max(_rescueDistance + 1f, 4f);
+        Vector3 stagingDirection = ApplyBotFan(awayFromThreat.normalized, _evadeFanAngle * 0.55f);
+        return downedPosition + stagingDirection * Mathf.Max(_rescueDistance + 1f, 4f);
+    }
+
+    private void EnsureInitialWanderTarget(Vector3 origin)
+    {
+        if (_hasInitialWanderTarget || OfflineModeManager.Instance == null)
+        {
+            return;
+        }
+
+        _wanderTarget = OfflineModeManager.Instance.GetOpeningPatrolPosition(_identity.SessionId, _botIndex + 1, origin);
+        _nextWanderRetargetAt = Time.time + Random.Range(_wanderRetargetInterval * 1.25f, _wanderRetargetInterval * 2.1f);
+        _hasInitialWanderTarget = true;
+    }
+
+    private Vector3 ApplyBotFan(Vector3 direction, float maxAngle)
+    {
+        direction.y = 0f;
+        if (direction.sqrMagnitude <= 0.001f || maxAngle <= 0f)
+        {
+            return direction.sqrMagnitude > 0.001f ? direction.normalized : transform.forward;
+        }
+
+        float normalizedSlot = Mathf.Repeat((_botIndex + 1) * 0.6180339f, 1f);
+        float fanAngle = Mathf.Lerp(-maxAngle, maxAngle, normalizedSlot);
+        Vector3 fannedDirection = Quaternion.Euler(0f, fanAngle, 0f) * direction.normalized;
+        return fannedDirection.normalized;
     }
 
     private void UpdateReviveHold(string targetSessionId)
@@ -411,21 +478,22 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             || _controller.IsInjuredOrHitReacting()
             || _controller.IsBeingCarried()
             || !_controller.IsGrounded()
-            || movementInput.y <= 0.1f
+            || movementInput.sqrMagnitude < _stuckJumpInputThreshold * _stuckJumpInputThreshold
             || Time.time < _nextJumpAllowedAt)
         {
+            _movementBlockedSince = -1f;
             return false;
         }
 
-        Vector3 probeOrigin = transform.position + Vector3.up * 0.9f;
-        bool obstacleAhead = Physics.SphereCast(
-            probeOrigin,
-            0.2f,
-            transform.forward,
-            out _,
-            _jumpCheckDistance,
-            _movementProbeLayers,
-            QueryTriggerInteraction.Ignore);
+        Vector3 movementDirection = GetWorldMovementDirection(movementInput);
+        if (movementDirection.sqrMagnitude <= 0.0001f)
+        {
+            _movementBlockedSince = -1f;
+            return false;
+        }
+
+        bool obstacleAhead = HasJumpableObstacleAhead(movementDirection);
+        Vector3 probeOrigin = transform.position + Vector3.up * _midObstacleJumpProbeHeight;
 
         bool sideWall =
             Physics.Raycast(probeOrigin, transform.right, _sideWallCheckDistance, _movementProbeLayers, QueryTriggerInteraction.Ignore)
@@ -433,10 +501,112 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
         if (obstacleAhead)
         {
+            _movementBlockedSince = -1f;
             return true;
         }
 
-        return hasThreat && threatDistance <= _evadeDistance * 0.7f && sideWall;
+        if (ShouldJumpBecauseBlocked())
+        {
+            _movementBlockedSince = -1f;
+            return true;
+        }
+
+        bool shouldJumpForThreatSideWall = hasThreat && threatDistance <= _evadeDistance * 0.7f && sideWall;
+        if (shouldJumpForThreatSideWall)
+        {
+            _movementBlockedSince = -1f;
+        }
+
+        return shouldJumpForThreatSideWall;
+    }
+
+    private Vector3 GetWorldMovementDirection(Vector2 movementInput)
+    {
+        Vector3 localDirection = new Vector3(movementInput.x, 0f, movementInput.y);
+        if (localDirection.sqrMagnitude <= 0.0001f)
+        {
+            return Vector3.zero;
+        }
+
+        Vector3 worldDirection = transform.TransformDirection(localDirection.normalized);
+        worldDirection.y = 0f;
+        return worldDirection.sqrMagnitude > 0.0001f ? worldDirection.normalized : Vector3.zero;
+    }
+
+    private bool HasJumpableObstacleAhead(Vector3 movementDirection)
+    {
+        float probeDistance = Mathf.Max(_jumpCheckDistance, 0.4f);
+        float probeRadius = Mathf.Max(0.05f, _edgeJumpProbeRadius);
+        Vector3 lowProbeOrigin = transform.position + Vector3.up * Mathf.Max(0.05f, _lowObstacleJumpProbeHeight);
+        Vector3 midProbeOrigin = transform.position + Vector3.up * Mathf.Max(_lowObstacleJumpProbeHeight, _midObstacleJumpProbeHeight);
+
+        return HasValidJumpProbeHit(lowProbeOrigin, probeRadius, movementDirection, probeDistance)
+            || HasValidJumpProbeHit(midProbeOrigin, probeRadius * 0.75f, movementDirection, probeDistance * 0.85f);
+    }
+
+    private bool HasValidJumpProbeHit(Vector3 origin, float radius, Vector3 direction, float distance)
+    {
+        RaycastHit[] hits = Physics.SphereCastAll(
+            origin,
+            radius,
+            direction,
+            distance,
+            _movementProbeLayers,
+            QueryTriggerInteraction.Ignore);
+
+        if (hits == null || hits.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < hits.Length; i++)
+        {
+            if (IsValidJumpObstacle(hits[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsValidJumpObstacle(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return false;
+        }
+
+        Transform hitTransform = hit.collider.transform;
+        if (hitTransform == null || hitTransform.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        if (hit.collider.GetComponentInParent<PlayerController>() != null
+            || hit.collider.GetComponentInParent<NextbotFollowPlayer>() != null)
+        {
+            return false;
+        }
+
+        return hit.normal.y < 0.65f;
+    }
+
+    private bool ShouldJumpBecauseBlocked()
+    {
+        if (_controller.GetHorizontalSpeed() > _stuckJumpMaxSpeed)
+        {
+            _movementBlockedSince = -1f;
+            return false;
+        }
+
+        if (_movementBlockedSince < 0f)
+        {
+            _movementBlockedSince = Time.time;
+            return false;
+        }
+
+        return Time.time - _movementBlockedSince >= _stuckJumpDelay;
     }
 
     private static float GetPlanarDistance(Vector3 a, Vector3 b)

@@ -17,11 +17,13 @@ public class OfflineModeManager : MonoBehaviour
 
     [SerializeField, Min(1)] private int _offlineTotalPlayerCount = 15;
     [SerializeField] private float _spawnRingRadius = 1.8f;
+    [SerializeField, Min(1f)] private float _patrolReservationRadius = 8f;
 
     private readonly Dictionary<string, GameObject> _offlinePlayers = new Dictionary<string, GameObject>();
     private readonly Dictionary<string, OfflinePlayerRoundState> _offlinePlayerStates = new Dictionary<string, OfflinePlayerRoundState>();
     // Rescuer session id -> downed target session id. This keeps offline bots from dogpiling one revive.
     private readonly Dictionary<string, string> _rescueAssignments = new Dictionary<string, string>();
+    private readonly Dictionary<string, PatrolAssignment> _patrolAssignments = new Dictionary<string, PatrolAssignment>();
     private readonly List<Vector3> _spawnPositions = new List<Vector3>();
     private readonly List<Vector3> _nextbotSpawnPositions = new List<Vector3>();
     private readonly List<Vector3> _patrolPositions = new List<Vector3>();
@@ -173,6 +175,7 @@ public class OfflineModeManager : MonoBehaviour
         _offlinePlayers.Clear();
         _offlinePlayerStates.Clear();
         _rescueAssignments.Clear();
+        _patrolAssignments.Clear();
         _nextbotSpawnPositions.Clear();
         _patrolPositions.Clear();
         IsOfflineModeActive = false;
@@ -620,6 +623,17 @@ public class OfflineModeManager : MonoBehaviour
         return Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
     }
 
+    private static int PositiveModulo(int value, int modulo)
+    {
+        if (modulo <= 0)
+        {
+            return 0;
+        }
+
+        int result = value % modulo;
+        return result < 0 ? result + modulo : result;
+    }
+
     public bool TryGetNearestThreat(Vector3 origin, out Transform threatTransform, out float distance)
     {
         threatTransform = null;
@@ -679,26 +693,196 @@ public class OfflineModeManager : MonoBehaviour
 
     public Vector3 GetPatrolPosition(int botIndex, Vector3 currentPosition)
     {
+        return GetPatrolPosition(string.Empty, botIndex, currentPosition);
+    }
+
+    public Vector3 GetPatrolPosition(string requesterSessionId, int botIndex, Vector3 currentPosition)
+    {
         if (_patrolPositions.Count == 0)
         {
             return _spawnPositions.Count > 0 ? _spawnPositions[Mathf.Abs(botIndex) % _spawnPositions.Count] : Vector3.zero;
         }
 
-        Vector3 selectedPosition = _patrolPositions[Mathf.Abs(botIndex) % _patrolPositions.Count];
-        float selectedDistance = GetPlanarDistance(currentPosition, selectedPosition);
+        PrunePatrolAssignments();
+        int patrolCount = _patrolPositions.Count;
+        int selectedIndex = PositiveModulo(botIndex * 7, patrolCount);
+        Vector3 selectedPosition = _patrolPositions[selectedIndex];
+        float selectedScore = GetPatrolPositionScore(requesterSessionId, botIndex, currentPosition, selectedIndex, patrolCount);
 
-        for (int attempts = 0; attempts < 8; attempts++)
+        for (int candidateIndex = 0; candidateIndex < patrolCount; candidateIndex++)
         {
-            Vector3 candidate = _patrolPositions[Random.Range(0, _patrolPositions.Count)];
-            float candidateDistance = GetPlanarDistance(currentPosition, candidate);
-            if (candidateDistance > selectedDistance)
+            float candidateScore = GetPatrolPositionScore(requesterSessionId, botIndex, currentPosition, candidateIndex, patrolCount) + Random.Range(0f, 18f);
+            if (candidateScore > selectedScore)
             {
-                selectedPosition = candidate;
-                selectedDistance = candidateDistance;
+                selectedIndex = candidateIndex;
+                selectedPosition = _patrolPositions[candidateIndex];
+                selectedScore = candidateScore;
             }
         }
 
+        ReservePatrolAssignment(requesterSessionId, selectedIndex, selectedPosition);
         return selectedPosition;
+    }
+
+    public Vector3 GetOpeningPatrolPosition(int botIndex, Vector3 currentPosition)
+    {
+        return GetOpeningPatrolPosition(string.Empty, botIndex, currentPosition);
+    }
+
+    public Vector3 GetOpeningPatrolPosition(string requesterSessionId, int botIndex, Vector3 currentPosition)
+    {
+        if (_patrolPositions.Count == 0)
+        {
+            return _spawnPositions.Count > 0 ? _spawnPositions[Mathf.Abs(botIndex) % _spawnPositions.Count] : currentPosition;
+        }
+
+        PrunePatrolAssignments();
+        int patrolCount = _patrolPositions.Count;
+        int randomStart = Random.Range(0, patrolCount);
+        float preferredDistance = Random.Range(8f, 28f);
+        int selectedIndex = PositiveModulo(randomStart + botIndex * 5, patrolCount);
+        Vector3 selectedPosition = _patrolPositions[selectedIndex];
+        float selectedScore = float.NegativeInfinity;
+
+        for (int offset = 0; offset < patrolCount; offset++)
+        {
+            int candidateIndex = PositiveModulo(randomStart + botIndex * 11 + offset, patrolCount);
+            Vector3 candidate = _patrolPositions[candidateIndex];
+            float distance = GetPlanarDistance(currentPosition, candidate);
+            float distancePreference = -Mathf.Abs(distance - preferredDistance);
+            float slotNoise = Random.Range(0f, 28f);
+            float tooClosePenalty = distance < 4f ? (4f - distance) * 8f : 0f;
+            float reservationPenalty = string.IsNullOrWhiteSpace(requesterSessionId)
+                ? 0f
+                : GetPatrolReservationPenalty(requesterSessionId, candidateIndex, candidate, _patrolReservationRadius * 1.2f);
+            float score = distancePreference + slotNoise - tooClosePenalty - reservationPenalty;
+            if (score <= selectedScore)
+            {
+                continue;
+            }
+
+            selectedScore = score;
+            selectedIndex = candidateIndex;
+            selectedPosition = candidate;
+        }
+
+        Vector3 scatteredPosition = AddOpeningTargetScatter(botIndex, selectedPosition);
+        Vector3 finalPosition = TrySampleNavMeshPosition(scatteredPosition, out Vector3 sampledPosition)
+            ? sampledPosition
+            : selectedPosition;
+        ReservePatrolAssignment(requesterSessionId, selectedIndex, finalPosition);
+        return finalPosition;
+    }
+
+    public void ReleasePatrolAssignment(string requesterSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(requesterSessionId))
+        {
+            return;
+        }
+
+        _patrolAssignments.Remove(requesterSessionId);
+    }
+
+    private float GetPatrolPositionScore(string requesterSessionId, int botIndex, Vector3 currentPosition, int candidateIndex, int patrolCount)
+    {
+        Vector3 candidate = _patrolPositions[candidateIndex];
+        float distance = GetPlanarDistance(currentPosition, candidate);
+        float desiredSlot = Mathf.Repeat((botIndex + 1) * 0.6180339f, 1f);
+        float candidateSlot = patrolCount <= 1 ? 0f : candidateIndex / (float)patrolCount;
+        float slotDelta = Mathf.Abs(candidateSlot - desiredSlot);
+        slotDelta = Mathf.Min(slotDelta, 1f - slotDelta);
+        float spreadScore = 1f - Mathf.Clamp01(slotDelta * 2f);
+        float tooClosePenalty = distance < 3f ? (3f - distance) * 6f : 0f;
+        float reservationPenalty = string.IsNullOrWhiteSpace(requesterSessionId)
+            ? 0f
+            : GetPatrolReservationPenalty(requesterSessionId, candidateIndex, candidate, _patrolReservationRadius);
+        return distance + spreadScore * 12f - tooClosePenalty - reservationPenalty;
+    }
+
+    private static Vector3 AddOpeningTargetScatter(int botIndex, Vector3 targetPosition)
+    {
+        float randomAngle = Random.Range(0f, 360f);
+        float botAngleOffset = Mathf.Repeat((botIndex + 1) * 137.5f, 360f);
+        float angle = (randomAngle + botAngleOffset) * Mathf.Deg2Rad;
+        float distance = Random.Range(4f, 12f);
+        Vector3 offset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * distance;
+        return targetPosition + offset;
+    }
+
+    private float GetPatrolReservationPenalty(string requesterSessionId, int candidateIndex, Vector3 candidatePosition, float reservationRadius)
+    {
+        if (_patrolAssignments.Count == 0)
+        {
+            return 0f;
+        }
+
+        float penalty = 0f;
+        foreach (KeyValuePair<string, PatrolAssignment> assignmentPair in _patrolAssignments)
+        {
+            if (string.Equals(assignmentPair.Key, requesterSessionId, System.StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            PatrolAssignment assignment = assignmentPair.Value;
+            if (assignment == null)
+            {
+                continue;
+            }
+
+            if (assignment.PatrolIndex == candidateIndex)
+            {
+                penalty += 1000f;
+                continue;
+            }
+
+            float distance = GetPlanarDistance(candidatePosition, assignment.Position);
+            if (distance < reservationRadius)
+            {
+                penalty += 220f + (reservationRadius - distance) * 24f;
+            }
+        }
+
+        return penalty;
+    }
+
+    private void ReservePatrolAssignment(string requesterSessionId, int patrolIndex, Vector3 position)
+    {
+        if (string.IsNullOrWhiteSpace(requesterSessionId))
+        {
+            return;
+        }
+
+        _patrolAssignments[requesterSessionId] = new PatrolAssignment
+        {
+            PatrolIndex = patrolIndex,
+            Position = position,
+        };
+    }
+
+    private void PrunePatrolAssignments()
+    {
+        if (_patrolAssignments.Count == 0)
+        {
+            return;
+        }
+
+        List<string> assignmentsToRemove = new List<string>();
+        foreach (KeyValuePair<string, PatrolAssignment> assignmentPair in _patrolAssignments)
+        {
+            if (string.IsNullOrWhiteSpace(assignmentPair.Key)
+                || !_offlinePlayers.ContainsKey(assignmentPair.Key)
+                || IsOfflinePlayerEliminated(assignmentPair.Key))
+            {
+                assignmentsToRemove.Add(assignmentPair.Key);
+            }
+        }
+
+        for (int i = 0; i < assignmentsToRemove.Count; i++)
+        {
+            _patrolAssignments.Remove(assignmentsToRemove[i]);
+        }
     }
 
     private void StartOfflineRoundFlow()
@@ -801,6 +985,7 @@ public class OfflineModeManager : MonoBehaviour
     private void ResetOfflinePlayersForPhase(bool roundStarted)
     {
         _rescueAssignments.Clear();
+        _patrolAssignments.Clear();
 
         foreach (KeyValuePair<string, OfflinePlayerRoundState> pair in _offlinePlayerStates)
         {
@@ -832,6 +1017,9 @@ public class OfflineModeManager : MonoBehaviour
                 : state.PlayerObject.GetComponent<PlayerLocomotionInput>();
             locomotionInput?.ResetSimulationState();
             state.LocomotionInput = locomotionInput;
+
+            OfflinePlayerBotBrain botBrain = state.PlayerObject.GetComponent<OfflinePlayerBotBrain>();
+            botBrain?.ResetOpeningRoute();
 
             state.WasDowned = false;
             state.IsEliminated = false;
@@ -1289,6 +1477,32 @@ public class OfflineModeManager : MonoBehaviour
         {
             _patrolPositions.Add(Vector3.zero);
         }
+
+        EnsurePatrolPositionCapacity(Mathf.Max(_offlineTotalPlayerCount * 2, 24));
+    }
+
+    private void EnsurePatrolPositionCapacity(int targetCount)
+    {
+        if (_patrolPositions.Count == 0 || targetCount <= _patrolPositions.Count)
+        {
+            return;
+        }
+
+        int guard = 0;
+        int maxAttempts = targetCount * 16;
+        while (_patrolPositions.Count < targetCount && guard < maxAttempts)
+        {
+            Vector3 origin = _patrolPositions[guard % _patrolPositions.Count];
+            float angle = (Random.Range(0f, 360f) + guard * 137.5f) * Mathf.Deg2Rad;
+            float distance = Random.Range(8f, 34f);
+            Vector3 candidate = origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * distance;
+            if (TrySampleNavMeshPosition(candidate, out Vector3 sampledPosition))
+            {
+                AddUniquePatrolPosition(sampledPosition);
+            }
+
+            guard++;
+        }
     }
 
     private void AddUniquePatrolPositions(List<Vector3> positions)
@@ -1548,6 +1762,12 @@ public class OfflineModeManager : MonoBehaviour
         a.y = 0f;
         b.y = 0f;
         return Vector3.Distance(a, b);
+    }
+
+    private sealed class PatrolAssignment
+    {
+        public int PatrolIndex;
+        public Vector3 Position;
     }
 
     private sealed class OfflinePlayerRoundState
