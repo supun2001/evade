@@ -177,6 +177,46 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(insideObstacle, false);
   });
 
+  it("expands sparse spawn points using patrol points", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotSpawnPoints: [
+        { x: 0, y: 0, z: 0 },
+      ],
+      nextbotPatrolPoints: [
+        { x: 10, y: 0, z: 0 },
+        { x: -10, y: 0, z: 0 },
+        { x: 0, y: 0, z: 10 },
+        { x: 0, y: 0, z: -10 },
+        { x: 14, y: 0, z: 14 },
+      ],
+    });
+
+    const roomAny = room as any;
+    assert.ok(roomAny.nextbotSpawnPoints.length >= room.state.nextbots.size);
+  });
+
+  it("prefers configured patrol points over random interior positions", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotSpawnPoints: [
+        { x: 0, y: 0, z: 0 },
+      ],
+      nextbotPatrolPoints: [
+        { x: 10, y: 0, z: 0 },
+        { x: 0, y: 0, z: 12 },
+        { x: -12, y: 0, z: 0 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const patrolTarget = roomAny.getRandomPatrolTarget(0, 0, 0, roomAny.nextbotControllers[0]);
+    const isConfiguredPoint = roomAny.nextbotPatrolPoints.some((point: { x: number; y: number; z: number }) =>
+      Math.abs(point.x - patrolTarget.x) < 0.001
+      && Math.abs(point.y - patrolTarget.y) < 0.001
+      && Math.abs(point.z - patrolTarget.z) < 0.001);
+
+    assert.strictEqual(isConfiguredPoint, true);
+  });
+
   it("keeps nextbots on their grounded spawn height while chasing", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {});
     const roomAny = room as any;
@@ -216,5 +256,39 @@ describe("testing your Colyseus app", () => {
     roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 4, z: 0, distance: 4 }, 1, 4, 0);
 
     assert.ok(Math.abs(nextbot!.y - 2) < 0.1);
+  });
+
+  it("does not injure players through walls", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotObstacles: [
+        { minX: 0.4, maxX: 0.6, minY: -1, maxY: 3, minZ: -1, maxZ: 1 },
+      ],
+    });
+    const client = await colyseus.connectTo(room);
+    await room.waitForNextPatch();
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    const target = roomAny.state.players.get(client.sessionId);
+    assert.ok(target);
+
+    nextbot!.x = 0;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+    target.x = 0.9;
+    target.y = 0;
+    target.z = 0;
+    target.isInjured = false;
+    target.isHitReacting = false;
+    target.isEliminated = false;
+    controller.nextInjuryAt = 0;
+
+    roomAny.tryInjurePlayer(controller, nextbot, target, Date.now());
+
+    assert.strictEqual(target.isInjured, false);
   });
 });

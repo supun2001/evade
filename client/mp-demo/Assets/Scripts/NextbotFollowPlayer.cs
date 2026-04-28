@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -16,6 +17,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private const float OfflinePatrolReachedDistance = 1.1f;
     private const float OfflinePatrolRetargetMinSeconds = 1f;
     private const float OfflinePatrolRetargetMaxSeconds = 2f;
+    private const float ParkourFallbackPatrolRadius = 8f;
 
     [Header("Networking")]
     [SerializeField] private bool _useRoomStateAuthority = true;
@@ -47,6 +49,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _stoppingDistance = 1.4f;
     [SerializeField] private float _targetRefreshInterval = 0.2f;
     [SerializeField] private bool _followNearestPlayer = true;
+    [SerializeField, Min(0f)] private float _parkourTargetHoldSeconds = 1f;
+    [SerializeField, Min(1f)] private float _parkourMaxChaseRange = 1000f;
 
     [Header("Target Score")]
     [SerializeField] private float _maxChaseRange = 70f;
@@ -65,9 +69,13 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private LayerMask _wallDetectionLayers = 1 << 6;
     [SerializeField] private float _eyeHeight = 1.25f;
     [SerializeField] private float _targetEyeHeight = 1.0f;
+    [SerializeField, Min(0f)] private float _lastSeenTargetMemorySeconds = 2.5f;
+    [SerializeField, Min(0f)] private float _lastSeenTargetLeadDistance = 3f;
+    [SerializeField, Min(0f)] private float _lastSeenTargetReachedDistance = 1.1f;
 
     [Header("NavMesh")]
     [SerializeField] private float _navMeshSnapDistance = 8f;
+    [SerializeField] private float _parkourNavMeshRejoinWarpDistance = 0.3f;
     [SerializeField] private string _walkableAreaName = "Walkable";
     [SerializeField] private bool _useOffMeshLinks = true;
     [SerializeField] private float _offMeshLinkDuration = 0.35f;
@@ -156,6 +164,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Camera _targetCamera;
     private Collider[] _nextbotColliders = System.Array.Empty<Collider>();
     private readonly RaycastHit[] _groundHitBuffer = new RaycastHit[MaxGroundHitBufferSize];
+    private readonly Collider[] _roomStateOverlapBuffer = new Collider[16];
     private readonly HashSet<CharacterController> _ignoredInjuredTargets = new HashSet<CharacterController>();
     private readonly List<CharacterController> _ignoredTargetsToRestore = new List<CharacterController>();
     private Renderer[] _renderers = System.Array.Empty<Renderer>();
@@ -178,6 +187,16 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool _roomStateAuthorityActive;
     private bool _forceOfflineLocalAuthority;
     private bool _offlineNextbotActive = true;
+    private bool _isLocalNavMeshAuthority;
+    private float _nextLocalNavMeshUploadTime;
+    private bool _hasRoomStateParkourPatrolTarget;
+    private Vector3 _roomStateParkourPatrolTarget;
+    private float _roomStateParkourPatrolWaitUntil;
+    private float _parkourTargetHoldUntil;
+    private bool _hasLastSeenTargetPosition;
+    private Vector3 _lastSeenTargetPosition;
+    private Vector3 _lastSeenTargetDirection = Vector3.forward;
+    private float _lastSeenTargetExpiresAt = float.NegativeInfinity;
     private bool _hasOfflinePatrolTarget;
     private Vector3 _offlinePatrolTarget;
     private float _offlinePatrolWaitUntil;
@@ -221,12 +240,21 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (_navMeshAgent != null)
         {
             ConfigureAgentFromCurrentPosition();
+            _navMeshAgent.updatePosition = false;
             _navMeshAgent.updateRotation = false;
             _navMeshAgent.updateUpAxis = true;
             _navMeshAgent.speed = _moveSpeed;
             _navMeshAgent.acceleration = _acceleration;
             _navMeshAgent.stoppingDistance = _stoppingDistance;
             _navMeshAgent.angularSpeed = Mathf.Max(120f, _rotationSpeed * 45f);
+
+            if (_characterController != null)
+            {
+                // Give the agent a slightly smaller radius than the physical body (80%)
+                // to prevent it from getting stuck on the very edge of walls/gaps.
+                _navMeshAgent.radius = _characterController.radius * 0.8f;
+                _navMeshAgent.height = _characterController.height;
+            }
         }
 
         if (TryResolveGroundedPosition(transform.position, out Vector3 groundedStartPosition))
@@ -264,7 +292,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (_faceTargetPlayer && UpdateTargetFacingRotation())
+        if (ShouldUseTargetFacingVisuals() && UpdateTargetFacingRotation())
         {
             return;
         }
@@ -273,6 +301,11 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             UpdateBillboardRotation();
         }
+    }
+
+    private bool ShouldUseTargetFacingVisuals()
+    {
+        return _target != null && (_faceTargetPlayer || _roomStateAuthorityActive);
     }
 
     private bool UpdateActivationState()
@@ -491,7 +524,11 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         if (_roomStateAuthorityActive == isActive)
         {
-            if (isActive && _navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+            if (isActive
+                && !ShouldUseParkourLocalNavMeshPresentation()
+                && _navMeshAgent != null
+                && _navMeshAgent.enabled
+                && _navMeshAgent.isOnNavMesh)
             {
                 _navMeshAgent.nextPosition = transform.position;
             }
@@ -506,11 +543,15 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        bool useParkourLocalPresentation = isActive && IsParkourMap();
         _navMeshAgent.updatePosition = !isActive;
         if (_navMeshAgent.isOnNavMesh)
         {
-            _navMeshAgent.isStopped = isActive;
-            _navMeshAgent.ResetPath();
+            _navMeshAgent.isStopped = isActive && !useParkourLocalPresentation;
+            if (!useParkourLocalPresentation)
+            {
+                _navMeshAgent.ResetPath();
+            }
             _navMeshAgent.nextPosition = transform.position;
         }
     }
@@ -522,6 +563,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!isActive || nextbotState == null)
         {
+            _isLocalNavMeshAuthority = false;
             if (nextbotState != null)
             {
                 Vector3 hiddenPosition = ResolveGroundedRoomStatePosition(nextbotState);
@@ -538,18 +580,73 @@ public class NextbotFollowPlayer : MonoBehaviour
             return true;
         }
 
+        bool hadLocalNavMeshAuthority = _isLocalNavMeshAuthority;
+        _isLocalNavMeshAuthority = false;
         Vector3 rawTargetPosition = new Vector3(nextbotState.x, nextbotState.y, nextbotState.z);
         Vector3 targetPosition = ResolveGroundedRoomStatePosition(nextbotState);
         Quaternion targetRotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
         Vector3 targetVelocity = new Vector3(nextbotState.velocityX, nextbotState.velocityY, nextbotState.velocityZ);
 
+        bool shouldUseParkourLocalPresentation = ShouldUseParkourLocalNavMeshPresentation();
         if (TryGetServerAssignedTarget(nextbotState.targetSessionId, out Transform targetTransform, out PlayerController targetController))
         {
-            AssignTarget(targetTransform, targetController);
+            if (shouldUseParkourLocalPresentation
+                && _target != targetTransform
+                && IsTargetClaimedByOtherNextbot(targetTransform))
+            {
+                ClearTarget();
+            }
+            else if (_target != targetTransform || _targetController != targetController)
+            {
+                AssignTarget(targetTransform, targetController);
+            }
+            else
+            {
+                _parkourTargetHoldUntil = Time.time + Mathf.Max(0f, _parkourTargetHoldSeconds);
+            }
         }
         else
         {
-            ClearTarget();
+            bool canHoldParkourTarget = shouldUseParkourLocalPresentation
+                && _target != null
+                && _targetController != null
+                && _targetController.enabled
+                && !_targetController.IsInjuredOrHitReacting()
+                && Time.time <= _parkourTargetHoldUntil;
+            if (!canHoldParkourTarget)
+            {
+                ClearTarget();
+            }
+        }
+
+        _isLocalNavMeshAuthority = shouldUseParkourLocalPresentation;
+        if (shouldUseParkourLocalPresentation)
+        {
+            bool shouldResyncToServer = !_hasAppliedRoomState;
+            if (shouldResyncToServer)
+            {
+                ApplyRoomStatePosition(targetPosition, true);
+                transform.rotation = targetRotation;
+                _remotePresentationVelocity = Vector3.zero;
+                if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+                {
+                    _navMeshAgent.nextPosition = transform.position;
+                }
+            }
+
+            _hasAppliedRoomState = true;
+            _isJumping = false;
+            _jumpVelocity = Vector3.zero;
+            _isTraversingOffMeshLink = false;
+            EnsureAgentOnNavMesh();
+
+            return false;
+        }
+
+        if (hadLocalNavMeshAuthority)
+        {
+            _hasAppliedRoomState = false;
+            _remotePresentationVelocity = Vector3.zero;
         }
 
         StopAgent();
@@ -646,6 +743,35 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return true;
+    }
+
+    private bool ShouldUseParkourLocalNavMeshChase(NextbotState nextbotState)
+    {
+        if (nextbotState == null || _target == null)
+        {
+            return false;
+        }
+
+        return IsParkourMap();
+    }
+
+    private bool ShouldUseParkourLocalNavMeshChase()
+    {
+        return _target != null
+            && IsParkourMap();
+    }
+
+    private bool ShouldUseParkourLocalNavMeshPresentation()
+    {
+        return _roomStateAuthorityActive
+            && IsParkourMap();
+    }
+
+    private bool IsParkourMap()
+    {
+        NetworkManager networkManager = NetworkManager.Instance;
+        return networkManager != null
+            && string.Equals(networkManager.CurrentMapId, "parkour", StringComparison.OrdinalIgnoreCase);
     }
 
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
@@ -889,7 +1015,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool IsUsingRemoteRoomStateProfile()
     {
-        return false;
+        return !_isLocalNavMeshAuthority;
     }
 
     private void ApplyRoomStatePosition(Vector3 targetPosition, bool constrainMovement = true)
@@ -941,7 +1067,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void RefreshTargetIfNeeded()
     {
-        if (_roomStateAuthorityActive)
+        if (_roomStateAuthorityActive && !ShouldUseParkourLocalNavMeshPresentation())
         {
             return;
         }
@@ -968,6 +1094,11 @@ public class NextbotFollowPlayer : MonoBehaviour
     private void EvaluateTargetSelection()
     {
         ScoredTarget? bestTarget = FindBestTarget();
+        if (!bestTarget.HasValue && ShouldUseParkourLocalNavMeshPresentation())
+        {
+            bestTarget = FindBestParkourFallbackTarget();
+        }
+
         if (!bestTarget.HasValue)
         {
             ClearTarget();
@@ -1025,6 +1156,49 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
     }
 
+    private ScoredTarget? FindBestParkourFallbackTarget()
+    {
+        Transform bestTransform = null;
+        PlayerController bestController = null;
+        float bestDistance = float.PositiveInfinity;
+
+        PlayerController[] playerControllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        for (int i = 0; i < playerControllers.Length; i++)
+        {
+            PlayerController playerController = playerControllers[i];
+            if (playerController == null
+                || !playerController.enabled
+                || playerController.transform == transform
+                || playerController.IsInjuredOrHitReacting()
+                || IsTargetClaimedByOtherNextbot(playerController.transform))
+            {
+                continue;
+            }
+
+            float planarDistance = GetPlanarDistance(transform.position, playerController.transform.position);
+            if (planarDistance < bestDistance)
+            {
+                bestDistance = planarDistance;
+                bestTransform = playerController.transform;
+                bestController = playerController;
+            }
+        }
+
+        if (bestTransform == null || bestController == null)
+        {
+            return null;
+        }
+
+        return new ScoredTarget
+        {
+            Transform = bestTransform,
+            Controller = bestController,
+            PathDistance = bestDistance,
+            HasLineOfSight = true,
+            Score = Mathf.Max(0f, _distanceScoreBase - bestDistance),
+        };
+    }
+
     private ScoredTarget? FindBestTarget()
     {
         Transform bestTransform = null;
@@ -1080,13 +1254,18 @@ public class NextbotFollowPlayer : MonoBehaviour
             return null;
         }
 
-        if (_forceOfflineLocalAuthority && IsOfflineTargetClaimedByOtherNextbot(candidateTransform))
+        if ((_forceOfflineLocalAuthority || ShouldUseParkourLocalNavMeshPresentation())
+            && !isCurrentTarget
+            && IsTargetClaimedByOtherNextbot(candidateTransform))
         {
             return null;
         }
 
-        float pathDistance = GetPathDistance(candidateTransform.position);
-        if (float.IsInfinity(pathDistance) || pathDistance > _maxChaseRange)
+        float pathDistance = GetTargetSelectionDistance(candidateTransform.position);
+        float maxChaseRange = ShouldUseParkourLocalNavMeshPresentation()
+            ? Mathf.Max(_maxChaseRange, _parkourMaxChaseRange)
+            : _maxChaseRange;
+        if (float.IsInfinity(pathDistance) || pathDistance > maxChaseRange)
         {
             return null;
         }
@@ -1146,13 +1325,27 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
-        if (_forceOfflineLocalAuthority && IsOfflineTargetClaimedByOtherNextbot(_target))
+        if ((_forceOfflineLocalAuthority || ShouldUseParkourLocalNavMeshPresentation())
+            && IsTargetClaimedByOtherNextbot(_target))
         {
             return false;
         }
 
-        float pathDistance = GetPathDistance(_target.position);
-        return !float.IsInfinity(pathDistance) && pathDistance <= _maxChaseRange;
+        float pathDistance = GetTargetSelectionDistance(_target.position);
+        float maxChaseRange = ShouldUseParkourLocalNavMeshPresentation()
+            ? Mathf.Max(_maxChaseRange, _parkourMaxChaseRange)
+            : _maxChaseRange;
+        return !float.IsInfinity(pathDistance) && pathDistance <= maxChaseRange;
+    }
+
+    private float GetTargetSelectionDistance(Vector3 destination)
+    {
+        if (ShouldUseParkourLocalNavMeshPresentation())
+        {
+            return GetPlanarDistance(transform.position, destination);
+        }
+
+        return GetPathDistance(destination);
     }
 
     private void ApplyOfflineMultiplayerTuning()
@@ -1173,6 +1366,11 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool IsOfflineTargetClaimedByOtherNextbot(Transform candidateTransform)
     {
+        return IsTargetClaimedByOtherNextbot(candidateTransform);
+    }
+
+    private bool IsTargetClaimedByOtherNextbot(Transform candidateTransform)
+    {
         if (candidateTransform == null)
         {
             return false;
@@ -1182,7 +1380,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         for (int i = 0; i < nextbots.Length; i++)
         {
             NextbotFollowPlayer nextbot = nextbots[i];
-            if (nextbot == null || nextbot == this || nextbot._target != candidateTransform)
+            if (nextbot == null || nextbot == this || !nextbot.enabled || nextbot._target != candidateTransform)
             {
                 continue;
             }
@@ -1273,6 +1471,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         _target = targetTransform;
         _targetController = controller;
+        _parkourTargetHoldUntil = Time.time + Mathf.Max(0f, _parkourTargetHoldSeconds);
         _targetLockedUntil = Time.time + _targetLockDuration;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
@@ -1284,6 +1483,9 @@ public class NextbotFollowPlayer : MonoBehaviour
         bool hadTarget = _target != null;
         _target = null;
         _targetController = null;
+        _hasLastSeenTargetPosition = false;
+        _lastSeenTargetExpiresAt = float.NegativeInfinity;
+        _parkourTargetHoldUntil = 0f;
         _targetLockedUntil = 0f;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
@@ -1292,6 +1494,13 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             ResetOfflinePatrolTarget();
         }
+    }
+
+    private void ResetRoomStateParkourPatrolTarget()
+    {
+        _hasRoomStateParkourPatrolTarget = false;
+        _roomStateParkourPatrolTarget = Vector3.zero;
+        _roomStateParkourPatrolWaitUntil = 0f;
     }
 
     private void ResetOfflinePatrolTarget()
@@ -1326,7 +1535,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             if (_offlinePatrolWaitUntil <= 0f)
             {
-                _offlinePatrolWaitUntil = Time.time + Random.Range(OfflinePatrolRetargetMinSeconds, OfflinePatrolRetargetMaxSeconds);
+                _offlinePatrolWaitUntil = Time.time + UnityEngine.Random.Range(OfflinePatrolRetargetMinSeconds, OfflinePatrolRetargetMaxSeconds);
                 StopAgent();
                 return true;
             }
@@ -1343,6 +1552,160 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         MoveTowardOfflinePatrolTarget(_offlinePatrolTarget);
         return true;
+    }
+
+    private bool TryUpdateRoomStateParkourPatrolMovement()
+    {
+        if (!ShouldUseParkourLocalNavMeshPresentation() || _target != null)
+        {
+            ResetRoomStateParkourPatrolTarget();
+            return false;
+        }
+
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null)
+        {
+            ResetRoomStateParkourPatrolTarget();
+            return false;
+        }
+
+        List<Vector3> patrolPositions = GetRoomStateParkourPatrolPositions(networkManager);
+        if (patrolPositions == null || patrolPositions.Count == 0)
+        {
+            ResetRoomStateParkourPatrolTarget();
+            return false;
+        }
+
+        if (!_hasRoomStateParkourPatrolTarget)
+        {
+            SetNextRoomStateParkourPatrolTarget(patrolPositions);
+        }
+
+        float distance = GetPlanarDistance(transform.position, _roomStateParkourPatrolTarget);
+        if (distance <= OfflinePatrolReachedDistance)
+        {
+            if (_roomStateParkourPatrolWaitUntil <= 0f)
+            {
+                _roomStateParkourPatrolWaitUntil = Time.time + UnityEngine.Random.Range(OfflinePatrolRetargetMinSeconds, OfflinePatrolRetargetMaxSeconds);
+                StopAgent();
+                return true;
+            }
+
+            if (Time.time < _roomStateParkourPatrolWaitUntil)
+            {
+                StopAgent();
+                return true;
+            }
+
+            SetNextRoomStateParkourPatrolTarget(patrolPositions);
+        }
+
+        MoveTowardOfflinePatrolTarget(_roomStateParkourPatrolTarget);
+        return true;
+    }
+
+    private List<Vector3> GetRoomStateParkourPatrolPositions(NetworkManager networkManager)
+    {
+        if (networkManager == null)
+        {
+            return null;
+        }
+
+        List<Vector3> patrolPositions = networkManager.GetConfiguredNextbotPatrolPositions();
+        if (patrolPositions != null && patrolPositions.Count > 0)
+        {
+            return patrolPositions;
+        }
+
+        List<Vector3> playerSpawnPositions = networkManager.GetConfiguredPlayerSpawnPositions();
+        if (playerSpawnPositions != null && playerSpawnPositions.Count > 0)
+        {
+            return playerSpawnPositions;
+        }
+
+        List<Vector3> nextbotSpawnPositions = networkManager.GetConfiguredNextbotSpawnPositions();
+        if (nextbotSpawnPositions != null && nextbotSpawnPositions.Count > 0)
+        {
+            return nextbotSpawnPositions;
+        }
+
+        return null;
+    }
+
+    private void SetNextRoomStateParkourPatrolTarget(List<Vector3> patrolPositions)
+    {
+        if (patrolPositions == null || patrolPositions.Count == 0)
+        {
+            ResetRoomStateParkourPatrolTarget();
+            return;
+        }
+
+        int botIndex = Mathf.Max(0, GetNextbotIndex());
+        int patrolCount = patrolPositions.Count;
+        int selectedIndex = botIndex % patrolCount;
+        Vector3 selectedPosition = patrolPositions[selectedIndex];
+        float selectedScore = GetRoomStateParkourPatrolScore(selectedPosition);
+        bool foundUsefulTarget = GetPlanarDistance(transform.position, selectedPosition) > OfflinePatrolReachedDistance;
+
+        int sampleCount = Mathf.Min(patrolCount, 6);
+        for (int offset = 1; offset < sampleCount; offset++)
+        {
+            int candidateIndex = (selectedIndex + offset + botIndex) % patrolCount;
+            Vector3 candidate = patrolPositions[candidateIndex];
+            float candidateScore = GetRoomStateParkourPatrolScore(candidate) + UnityEngine.Random.Range(0f, 6f);
+            bool candidateIsUseful = GetPlanarDistance(transform.position, candidate) > OfflinePatrolReachedDistance;
+            if ((!foundUsefulTarget && candidateIsUseful) || candidateScore > selectedScore)
+            {
+                selectedIndex = candidateIndex;
+                selectedPosition = candidate;
+                selectedScore = candidateScore;
+                foundUsefulTarget = candidateIsUseful;
+            }
+        }
+
+        if (!foundUsefulTarget)
+        {
+            selectedPosition = GetSyntheticParkourPatrolTarget(botIndex);
+        }
+
+        if (TryResolveGroundedPosition(selectedPosition, out Vector3 groundedPatrolTarget))
+        {
+            selectedPosition = groundedPatrolTarget;
+        }
+
+        _roomStateParkourPatrolTarget = selectedPosition;
+        _roomStateParkourPatrolWaitUntil = 0f;
+        _hasRoomStateParkourPatrolTarget = true;
+    }
+
+    private Vector3 GetSyntheticParkourPatrolTarget(int botIndex)
+    {
+        float angle = (botIndex * 137.5f + Time.time * 35f) * Mathf.Deg2Rad;
+        Vector3 offset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ParkourFallbackPatrolRadius;
+        return transform.position + offset;
+    }
+
+    private float GetRoomStateParkourPatrolScore(Vector3 candidate)
+    {
+        float distanceScore = GetPlanarDistance(transform.position, candidate);
+        float wallPenalty = IsRoomStatePatrolPathBlocked(candidate) ? 12f : 0f;
+        return distanceScore - wallPenalty;
+    }
+
+    private bool IsRoomStatePatrolPathBlocked(Vector3 candidate)
+    {
+        Vector3 origin = transform.position + Vector3.up * _eyeHeight;
+        Vector3 destination = candidate + Vector3.up * Mathf.Min(_targetEyeHeight, 0.5f);
+        Vector3 direction = destination - origin;
+        float distance = direction.magnitude;
+        if (distance <= 0.001f)
+        {
+            return false;
+        }
+
+        int wallMask = GetEffectiveWallDetectionMask();
+        return wallMask != 0
+            && Physics.Raycast(origin, direction / distance, distance, wallMask, QueryTriggerInteraction.Ignore);
     }
 
     private void SetNextOfflinePatrolTarget(OfflineModeManager offlineModeManager)
@@ -1399,9 +1762,17 @@ public class NextbotFollowPlayer : MonoBehaviour
             velocity.y = 0f;
             _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
 
+            float planarDistance = GetPlanarDistance(transform.position, patrolTarget);
+            if (ShouldUseParkourLocalNavMeshPresentation()
+                && _horizontalVelocity.sqrMagnitude < 0.05f
+                && planarDistance > _stoppingDistance + 0.5f)
+            {
+                ApplySmoothFallbackMovement(patrolTarget);
+                return;
+            }
+
             Vector3 agentGroundPos = _navMeshAgent.nextPosition;
-            Vector3 syncedPos = transform.position;
-            syncedPos.y = agentGroundPos.y;
+            Vector3 syncedPos = agentGroundPos;
             transform.position = syncedPos;
             _navMeshAgent.nextPosition = syncedPos;
             _lockedHeight = syncedPos.y;
@@ -1482,6 +1853,16 @@ public class NextbotFollowPlayer : MonoBehaviour
         return Mathf.Sqrt(dx * dx + dz * dz);
     }
 
+    private int GetNextbotIndex()
+    {
+        // e.g. "nextbot_0" -> 0, "nextbot_2" -> 2
+        if (TryParseTrailingIndex(_networkNextbotId, 0, out int index))
+        {
+            return index;
+        }
+        return -1;
+    }
+
     private bool TryGetServerAssignedTarget(string targetSessionId, out Transform targetTransform, out PlayerController targetController)
     {
         targetTransform = null;
@@ -1512,6 +1893,11 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         if (_target == null)
         {
+            if (TryUpdateRoomStateParkourPatrolMovement())
+            {
+                return;
+            }
+
             if (TryUpdateOfflinePatrolMovement())
             {
                 return;
@@ -1521,10 +1907,26 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        Vector3 targetPosition = _target.position;
+        Vector3 targetPosition = ResolveTargetChasePosition();
+        bool shouldUseParkourLocalPresentation = ShouldUseParkourLocalNavMeshPresentation();
 
-        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        if (_navMeshAgent != null && _navMeshAgent.enabled)
         {
+            if (shouldUseParkourLocalPresentation && !_navMeshAgent.isOnNavMesh)
+            {
+                if (!TryRecoverParkourLocalNavMeshPresentation())
+                {
+                    ApplySmoothFallbackMovement(targetPosition);
+                    return;
+                }
+            }
+
+            if (!_navMeshAgent.isOnNavMesh)
+            {
+                ApplySmoothFallbackMovement(targetPosition);
+                return;
+            }
+
             _navMeshAgent.speed = _moveSpeed;
             _navMeshAgent.acceleration = _acceleration;
             _navMeshAgent.stoppingDistance = _stoppingDistance;
@@ -1554,37 +1956,191 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             Vector3 velocity = _navMeshAgent.desiredVelocity;
             velocity.y = 0f;
+
+            // --- STUCK DETECTION ---
+            // If the agent is trying to move but its velocity is nearly zero (stuck on a wall/corner),
+            // and we are still far from the target, force some direct movement.
+            float planarDistance = Vector3.Distance(new Vector3(transform.position.x, 0f, transform.position.z), new Vector3(targetPosition.x, 0f, targetPosition.z));
+            if (velocity.sqrMagnitude < 0.5f && planarDistance > _stoppingDistance + 0.5f)
+            {
+                Vector3 directDir = (targetPosition - transform.position).normalized;
+                directDir.y = 0f;
+                // Use Move() to nudge the agent position directly, respecting NavMesh boundaries.
+                _navMeshAgent.Move(directDir * _moveSpeed * 0.5f * Time.deltaTime);
+                velocity = directDir * _moveSpeed * 0.5f;
+            }
+
             _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
 
-            // Sync Y from the NavMeshAgent's computed surface position so the nextbot
-            // correctly follows ramp slopes instead of driving horizontally through them.
-            Vector3 agentGroundPos = _navMeshAgent.nextPosition;
-            Vector3 syncedPos = transform.position;
-            syncedPos.y = agentGroundPos.y;
-            transform.position = syncedPos;
-            _navMeshAgent.nextPosition = syncedPos;
-            _lockedHeight = syncedPos.y;
+            // Sync the transform to the agent's next position.
+            Vector3 agentPos = _navMeshAgent.nextPosition;
+            transform.position = agentPos;
+            _lockedHeight = agentPos.y;
 
             UpdateBodyRotation(_horizontalVelocity);
             ApplySolidObstaclePush();
-            TryHitTarget(Vector3.Distance(new Vector3(targetPosition.x, 0f, targetPosition.z), new Vector3(transform.position.x, 0f, transform.position.z)));
+            EnsureAgentOnNavMesh();
+            TryHitTarget(planarDistance);
             return;
         }
+
+        // --- OFF-MESH FALLBACK ---
+        // If we are off the NavMesh, calculate a simple direct velocity toward the target
+        // so we can at least move toward the valid navigation area or hit the player.
+        ApplySmoothFallbackMovement(targetPosition);
+    }
+
+    private void ApplySmoothFallbackMovement(Vector3 targetPosition)
+    {
+        Vector3 fallbackPlanarOffset = targetPosition - transform.position;
+        fallbackPlanarOffset.y = 0f;
+        float fallbackDistance = fallbackPlanarOffset.magnitude;
+        Vector3 fallbackDir = fallbackDistance > 0.001f ? fallbackPlanarOffset / fallbackDistance : Vector3.zero;
+        Vector3 fallbackDesiredVelocity = fallbackDistance > _stoppingDistance ? fallbackDir * _moveSpeed : Vector3.zero;
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, fallbackDesiredVelocity, _acceleration * Time.deltaTime);
 
         if (_lockToStartingHeight)
         {
             targetPosition.y = _lockedHeight;
         }
 
-        Vector3 planarOffset = targetPosition - transform.position;
-        planarOffset.y = 0f;
-        float distance = planarOffset.magnitude;
-        Vector3 moveDirection = distance > 0.001f ? planarOffset / distance : Vector3.zero;
-        Vector3 desiredVelocity = distance > _stoppingDistance ? moveDirection * _moveSpeed : Vector3.zero;
-        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, _acceleration * Time.deltaTime);
-
         ApplyFallbackMovement(_horizontalVelocity);
-        TryHitTarget(distance);
+        TryHitTarget(fallbackDistance);
+    }
+
+    private bool TryRecoverParkourLocalNavMeshPresentation()
+    {
+        if (_navMeshAgent == null || !_navMeshAgent.enabled)
+        {
+            return false;
+        }
+
+        if (_navMeshAgent.isOnNavMesh)
+        {
+            return true;
+        }
+
+        if (!TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
+        {
+            return false;
+        }
+
+        float planarDistance = GetPlanarDistance(transform.position, navMeshPosition);
+        if (planarDistance > Mathf.Max(0.05f, _parkourNavMeshRejoinWarpDistance))
+        {
+            Vector3 nextPosition = Vector3.MoveTowards(transform.position, navMeshPosition, _moveSpeed * Time.deltaTime);
+            if (TryResolveGroundedPosition(nextPosition, out Vector3 groundedNextPosition))
+            {
+                nextPosition = groundedNextPosition;
+            }
+
+            transform.position = nextPosition;
+            return false;
+        }
+
+        _navMeshAgent.Warp(navMeshPosition);
+        return _navMeshAgent.isOnNavMesh;
+    }
+
+    private Vector3 ResolveTargetChasePosition()
+    {
+        if (_target == null)
+        {
+            return transform.position;
+        }
+
+        Vector3 targetPosition = _target.position;
+        if (!ShouldUseParkourLocalNavMeshChase())
+        {
+            return targetPosition;
+        }
+
+        if (TryGetVisibleTargetPosition(out Vector3 visibleTargetPosition))
+        {
+            CacheLastSeenTarget(visibleTargetPosition);
+            return visibleTargetPosition;
+        }
+
+        if (_hasLastSeenTargetPosition && Time.time <= _lastSeenTargetExpiresAt)
+        {
+            Vector3 lastSeenDestination = _lastSeenTargetPosition;
+            if (_lastSeenTargetDirection.sqrMagnitude > 0.0001f)
+            {
+                lastSeenDestination += _lastSeenTargetDirection.normalized * _lastSeenTargetLeadDistance;
+            }
+
+            if (GetPlanarDistance(transform.position, lastSeenDestination) <= _lastSeenTargetReachedDistance)
+            {
+                lastSeenDestination = _lastSeenTargetPosition;
+            }
+
+            return lastSeenDestination;
+        }
+
+        return targetPosition;
+    }
+
+    private bool TryGetVisibleTargetPosition(out Vector3 targetPosition)
+    {
+        targetPosition = Vector3.zero;
+        if (_target == null)
+        {
+            return false;
+        }
+
+        targetPosition = _target.position;
+        Vector3 origin = transform.position + Vector3.up * _eyeHeight;
+        Vector3 destination = targetPosition + Vector3.up * _targetEyeHeight;
+        Vector3 direction = destination - origin;
+        float distance = direction.magnitude;
+        if (distance <= 0.001f)
+        {
+            return true;
+        }
+
+        int wallMask = GetEffectiveWallDetectionMask();
+        if (wallMask == 0)
+        {
+            return true;
+        }
+
+        return !Physics.Raycast(origin, direction / distance, distance, wallMask, QueryTriggerInteraction.Ignore);
+    }
+
+    private void CacheLastSeenTarget(Vector3 visibleTargetPosition)
+    {
+        _lastSeenTargetPosition = visibleTargetPosition;
+
+        Vector3 targetVelocity = _targetController != null ? _targetController.GetVelocity() : Vector3.zero;
+        targetVelocity.y = 0f;
+        if (targetVelocity.sqrMagnitude > 0.0001f)
+        {
+            _lastSeenTargetDirection = targetVelocity.normalized;
+        }
+        else if (_target != null)
+        {
+            Vector3 targetForward = _target.forward;
+            targetForward.y = 0f;
+            if (targetForward.sqrMagnitude > 0.0001f)
+            {
+                _lastSeenTargetDirection = targetForward.normalized;
+            }
+        }
+
+        _hasLastSeenTargetPosition = true;
+        _lastSeenTargetExpiresAt = Time.time + Mathf.Max(0f, _lastSeenTargetMemorySeconds);
+    }
+
+    private int GetEffectiveWallDetectionMask()
+    {
+        int mask = _wallDetectionLayers.value;
+        int wallLayer = LayerMask.NameToLayer("Wall");
+        if (wallLayer >= 0)
+        {
+            mask |= 1 << wallLayer;
+        }
+
+        return mask;
     }
 
     private bool TryStartJumpToward(Vector3 targetPosition)
@@ -1887,6 +2443,11 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void TryHitTarget(float distanceToTarget)
     {
+        if (_roomStateAuthorityActive && !ShouldUseParkourLocalNavMeshPresentation())
+        {
+            return;
+        }
+
         if (_target == null || Time.time < _nextHitTime || distanceToTarget > _hitDistance)
         {
             return;
@@ -1907,6 +2468,15 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (targetController.TriggerNextbotHit(transform.position))
         {
+            if (!_forceOfflineLocalAuthority && NetworkManager.Instance != null && targetController.IsSimulationControlled() == false)
+            {
+                int nextbotIndex = GetNextbotIndex();
+                if (nextbotIndex >= 0)
+                {
+                    NetworkManager.Instance.SendNextbotHit(nextbotIndex);
+                }
+            }
+
             IgnoreCollisionWithPlayer(targetController);
             ClearTarget();
             _horizontalVelocity = Vector3.zero;
@@ -2057,12 +2627,8 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
-        float targetYaw = Mathf.Atan2(flattenedDirection.x, flattenedDirection.z) * Mathf.Rad2Deg;
-        Vector3 targetEuler = new Vector3(
-            _billboardRotationOffsetEuler.x,
-            targetYaw,
-            _billboardRotationOffsetEuler.z);
-        Quaternion targetRotation = Quaternion.Euler(targetEuler);
+        Quaternion targetRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up)
+            * Quaternion.Euler(_billboardRotationOffsetEuler);
         float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
         ApplyVisualRotation(targetRotation, rotationBlend);
         return true;
@@ -2431,6 +2997,11 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
+        if (ShouldUseParkourLocalNavMeshPresentation())
+        {
+            return;
+        }
+
         if (!TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
         {
             return;
@@ -2547,7 +3118,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         float distance = movement.magnitude;
         if (distance <= 0.0001f)
         {
-            return targetPosition;
+            return ResolveRoomStateOverlap(currentPosition, targetPosition);
         }
 
         int collisionMask = _roomStateCollisionLayers.value != 0 ? _roomStateCollisionLayers.value : Physics.DefaultRaycastLayers;
@@ -2621,10 +3192,11 @@ public class NextbotFollowPlayer : MonoBehaviour
                 constrainedPlanarPosition += slideDirection * safeSlideDistance;
             }
 
-            return new Vector3(constrainedPlanarPosition.x, targetPosition.y, constrainedPlanarPosition.z);
+            Vector3 constrainedPosition = new Vector3(constrainedPlanarPosition.x, targetPosition.y, constrainedPlanarPosition.z);
+            return ResolveRoomStateOverlap(currentPosition, constrainedPosition);
         }
 
-        return targetPosition;
+        return ResolveRoomStateOverlap(currentPosition, targetPosition);
     }
 
     private bool IsIgnoredRoomStateCollisionHit(RaycastHit hit)
@@ -2635,6 +3207,73 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return hit.normal.y > 0.65f;
+    }
+
+    private Vector3 ResolveRoomStateOverlap(Vector3 fallbackPosition, Vector3 candidatePosition)
+    {
+        if (!IsRoomStatePositionOverlapping(candidatePosition))
+        {
+            return candidatePosition;
+        }
+
+        return fallbackPosition;
+    }
+
+    private bool IsRoomStatePositionOverlapping(Vector3 position)
+    {
+        int collisionMask = _roomStateCollisionLayers.value != 0 ? _roomStateCollisionLayers.value : Physics.DefaultRaycastLayers;
+        GetCollisionCapsule(position, out Vector3 capsuleStart, out Vector3 capsuleEnd, out float capsuleRadius);
+        int hitCount = Physics.OverlapCapsuleNonAlloc(
+            capsuleStart,
+            capsuleEnd,
+            capsuleRadius,
+            _roomStateOverlapBuffer,
+            collisionMask,
+            QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider overlap = _roomStateOverlapBuffer[i];
+            if (IsIgnoredRoomStateOverlap(overlap))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsIgnoredRoomStateOverlap(Collider overlap)
+    {
+        if (overlap == null)
+        {
+            return true;
+        }
+
+        Transform overlapTransform = overlap.transform;
+        if (overlapTransform == null)
+        {
+            return true;
+        }
+
+        if (overlapTransform == transform || overlapTransform.IsChildOf(transform))
+        {
+            return true;
+        }
+
+        if (overlap.GetComponentInParent<NextbotFollowPlayer>() != null)
+        {
+            return true;
+        }
+
+        if (overlap.GetComponentInParent<PlayerController>() != null)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private void GetCollisionCapsule(Vector3 centerPosition, out Vector3 capsuleStart, out Vector3 capsuleEnd, out float capsuleRadius)

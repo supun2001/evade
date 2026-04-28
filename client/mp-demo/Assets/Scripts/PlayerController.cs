@@ -193,7 +193,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _armWallHideDistance = 0.08f;
 
     [Header("Nextbot Warning Indicator")]
-    [SerializeField] private float _nextbotWarningRange = 24f;
+    [SerializeField] private float _nextbotWarningRange = 35f;
+    [SerializeField, Min(0f)] private float _nextbotHitWarningMemorySeconds = 1.25f;
     [SerializeField] private float _nextbotWarningRingRadius = 260f;
     [SerializeField] private float _nextbotWarningRingVerticalOffset = 48f;
     [SerializeField] private float _nextbotWarningMinOpacity = 0.42f;
@@ -306,6 +307,8 @@ public class PlayerController : MonoBehaviour
     private float _nextbotHitImpactTimer;
     private float _nextbotHitReactionSeed;
     private float _injuredFacingYaw = 180f;
+    private Vector3 _recentNextbotHitSource = Vector3.zero;
+    private float _recentNextbotHitSourceExpiresAt = float.NegativeInfinity;
 
     private CameraViewMode _currentViewMode;
     private CameraViewMode _preferredViewMode;
@@ -1603,8 +1606,14 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        Vector2 accumulatedDirection = Vector2.zero;
-        bool foundNextbot = false;
+        bool foundTargetingNextbot = false;
+        bool foundNearbyNextbot = false;
+        string localSessionId = networkManager.LocalSessionId;
+        Vector2 targetedDirection = Vector2.zero;
+        Vector2 nearbyDirection = Vector2.zero;
+        float nearestTargetedDistance = float.PositiveInfinity;
+        float nearestNearbyDistance = float.PositiveInfinity;
+
         foreach (string key in networkManager.Room.State.nextbots.Keys)
         {
             NextbotState nextbotState = networkManager.Room.State.nextbots[key];
@@ -1630,21 +1639,79 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            float weight = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, _nextbotWarningRange));
-            accumulatedDirection += candidateDirection.normalized * Mathf.Max(0.15f, weight);
-            nearestDistance = Mathf.Min(nearestDistance, distance);
-            foundNextbot = true;
+            bool isTargetingLocalPlayer = !string.IsNullOrEmpty(localSessionId)
+                && string.Equals(nextbotState.targetSessionId, localSessionId, StringComparison.Ordinal);
+
+            if (isTargetingLocalPlayer && distance < nearestTargetedDistance)
+            {
+                nearestTargetedDistance = distance;
+                targetedDirection = candidateDirection.normalized;
+                foundTargetingNextbot = true;
+            }
+
+            if (distance < nearestNearbyDistance)
+            {
+                nearestNearbyDistance = distance;
+                nearbyDirection = candidateDirection.normalized;
+                foundNearbyNextbot = true;
+            }
         }
 
-        if (!foundNextbot || accumulatedDirection.sqrMagnitude <= 0.0001f)
+        if (foundTargetingNextbot && targetedDirection.sqrMagnitude > 0.0001f)
         {
-            warningDirection = Vector2.zero;
-            nearestDistance = float.PositiveInfinity;
+            warningDirection = targetedDirection;
+            nearestDistance = nearestTargetedDistance;
+            return true;
+        }
+
+        if (foundNearbyNextbot && nearbyDirection.sqrMagnitude > 0.0001f)
+        {
+            warningDirection = nearbyDirection;
+            nearestDistance = nearestNearbyDistance;
+            return true;
+        }
+
+        if (Time.time < _recentNextbotHitSourceExpiresAt
+            && TryGetWarningDirectionFromWorldPosition(_recentNextbotHitSource, out Vector2 hitDirection, out float hitDistance))
+        {
+            warningDirection = hitDirection;
+            nearestDistance = hitDistance;
+            return true;
+        }
+
+        warningDirection = Vector2.zero;
+        nearestDistance = float.PositiveInfinity;
+        return false;
+    }
+
+    private bool TryGetWarningDirectionFromWorldPosition(Vector3 worldPosition, out Vector2 warningDirection, out float distance)
+    {
+        warningDirection = Vector2.zero;
+        distance = float.PositiveInfinity;
+
+        if (_transform == null || _gameplayCamera == null)
+        {
             return false;
         }
 
-        warningDirection = accumulatedDirection.normalized;
-        return foundNextbot;
+        Vector3 worldOffset = worldPosition - _transform.position;
+        worldOffset.y = 0f;
+
+        distance = worldOffset.magnitude;
+        if (distance <= 0.001f || distance > _nextbotWarningRange)
+        {
+            return false;
+        }
+
+        Vector3 cameraRelativeOffset = _gameplayCamera.transform.InverseTransformDirection(worldOffset.normalized);
+        Vector2 candidateDirection = new Vector2(cameraRelativeOffset.x, cameraRelativeOffset.z);
+        if (candidateDirection.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        warningDirection = candidateDirection.normalized;
+        return true;
     }
 
     private void SetNextbotWarningIndicatorVisible(bool visible)
@@ -3975,6 +4042,9 @@ public class PlayerController : MonoBehaviour
         {
             return false;
         }
+
+        _recentNextbotHitSource = sourcePosition;
+        _recentNextbotHitSourceExpiresAt = Time.time + Mathf.Max(0f, _nextbotHitWarningMemorySeconds);
 
         ClearOfflineCarryStateBeforeNextbotHit();
         CacheNextbotHitLimbTransforms();

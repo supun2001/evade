@@ -36,6 +36,9 @@ public class RoundHudController : MonoBehaviour
     private VisualElement _roundAnnouncementContainer;
     private Label _roundAnnouncementTitleLabel;
     private Label _roundAnnouncementSubtitleLabel;
+    private VisualElement _nextbotThreatContainer;
+    private Label _nextbotThreatTitleLabel;
+    private Label _nextbotThreatValueLabel;
     private VisualElement _roundResultsOverlay;
     private Label _roundResultsTitleLabel;
     private Label _roundResultsBestTimeValue;
@@ -113,6 +116,7 @@ public class RoundHudController : MonoBehaviour
         RefreshBackgroundMusic();
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
+        RefreshNextbotThreatDisplay();
         RefreshResultsDisplay();
     }
 
@@ -159,6 +163,9 @@ public class RoundHudController : MonoBehaviour
         _roundAnnouncementContainer = _hudRoot?.Q<VisualElement>("round-announcement-container");
         _roundAnnouncementTitleLabel = _hudRoot?.Q<Label>("round-announcement-title-label");
         _roundAnnouncementSubtitleLabel = _hudRoot?.Q<Label>("round-announcement-subtitle-label");
+        _nextbotThreatContainer = _hudRoot?.Q<VisualElement>("nextbot-threat-container");
+        _nextbotThreatTitleLabel = _hudRoot?.Q<Label>("nextbot-threat-title-label");
+        _nextbotThreatValueLabel = _hudRoot?.Q<Label>("nextbot-threat-value-label");
         _roundResultsOverlay = _hudRoot?.Q<VisualElement>("round-results-overlay");
         _roundResultsTitleLabel = _hudRoot?.Q<Label>("round-results-title-label");
         _roundResultsBestTimeValue = _hudRoot?.Q<Label>("round-results-best-time-value");
@@ -174,6 +181,7 @@ public class RoundHudController : MonoBehaviour
 
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
+        RefreshNextbotThreatDisplay();
         RefreshResultsDisplay();
         RefreshTabScoreboardDisplay();
     }
@@ -247,6 +255,7 @@ public class RoundHudController : MonoBehaviour
         _showResults = false;
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
+        RefreshNextbotThreatDisplay();
         RefreshResultsDisplay();
     }
 
@@ -702,6 +711,90 @@ public class RoundHudController : MonoBehaviour
 
         _roundAnnouncementTitleLabel.text = _announcementTitle;
         _roundAnnouncementSubtitleLabel.text = _announcementSubtitle;
+    }
+
+    private void RefreshNextbotThreatDisplay()
+    {
+        if (_nextbotThreatContainer == null || _nextbotThreatValueLabel == null)
+        {
+            return;
+        }
+
+        if (_networkManager == null
+            || _networkManager.Room == null
+            || _networkManager.Room.State == null
+            || _networkManager.Room.State.nextbots == null
+            || string.IsNullOrWhiteSpace(_networkManager.LocalSessionId))
+        {
+            _nextbotThreatContainer.style.display = DisplayStyle.None;
+            return;
+        }
+
+        List<string> hunterNames = new List<string>();
+        foreach (string nextbotId in _networkManager.Room.State.nextbots.Keys)
+        {
+            if (string.IsNullOrWhiteSpace(nextbotId))
+            {
+                continue;
+            }
+
+            NextbotState nextbotState = _networkManager.Room.State.nextbots[nextbotId];
+            if (nextbotState == null
+                || !nextbotState.isActive
+                || !string.Equals(nextbotState.targetSessionId, _networkManager.LocalSessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            hunterNames.Add(FormatNextbotDisplayName(nextbotId));
+        }
+
+        if (hunterNames.Count == 0)
+        {
+            _nextbotThreatContainer.style.display = DisplayStyle.None;
+            return;
+        }
+
+        hunterNames.Sort(StringComparer.OrdinalIgnoreCase);
+        _nextbotThreatContainer.style.display = DisplayStyle.Flex;
+        if (_nextbotThreatTitleLabel != null)
+        {
+            _nextbotThreatTitleLabel.text = hunterNames.Count == 1 ? "HUNTED BY" : "HUNTED BY";
+        }
+
+        _nextbotThreatValueLabel.text = string.Join(", ", hunterNames);
+    }
+
+    private static string FormatNextbotDisplayName(string nextbotId)
+    {
+        if (string.IsNullOrWhiteSpace(nextbotId))
+        {
+            return "Unknown";
+        }
+
+        string[] parts = nextbotId
+            .Replace("-", " ")
+            .Replace("_", " ")
+            .Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return nextbotId;
+        }
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string part = parts[i];
+            if (part.Length == 0)
+            {
+                continue;
+            }
+
+            parts[i] = part.Length == 1
+                ? part.ToUpperInvariant()
+                : char.ToUpperInvariant(part[0]) + part.Substring(1);
+        }
+
+        return string.Join(" ", parts);
     }
 
     private void RefreshResultsDisplay()

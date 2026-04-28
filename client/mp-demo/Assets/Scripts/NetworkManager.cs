@@ -628,6 +628,18 @@ public class NetworkManager : MonoBehaviour
         });
     }
 
+    public void SendNextbotHit(int nextbotId)
+    {
+        if (room == null || !room.Connection.IsOpen)
+        {
+            return;
+        }
+
+        room.Send("nextbotHit", new {
+            id = nextbotId
+        });
+    }
+
     public List<Vector3> GetConfiguredNextbotPatrolPositions()
     {
         List<Vector3> patrolPositions = new List<Vector3>(nextbotPatrolPoints.Count);
@@ -691,6 +703,7 @@ public class NetworkManager : MonoBehaviour
 
     private Dictionary<string, object> BuildRoomOptions()
     {
+        AutoDiscoverSpawnPoints();
         List<object> serializedSpawnPoints = new List<object>();
         for (int i = 0; i < nextbotSpawnPoints.Count; i++)
         {
@@ -731,10 +744,16 @@ public class NetworkManager : MonoBehaviour
         }
 
         List<object> serializedNextbotIds = BuildSerializedNextbotIds();
+        if (serializedNextbotIds.Count == 0)
+        {
+            Debug.LogWarning("NetworkManager: No nextbot IDs found in registry! Adding fallback 'angry_munci'.");
+            serializedNextbotIds.Add("angry_munci");
+        }
+
         List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
         List<object> serializedObstacles = BuildSerializedObstacleBounds();
         List<object> serializedFloorSamples = BuildSerializedFloorSamples(nextbotSpawnPoints, playerSpawnPoints, nextbotPatrolPoints);
-        Debug.Log($"NetworkManager: joining map {ResolveCurrentMapId()} with {serializedObstacles.Count} nextbot obstacles and {serializedFloorSamples.Count} floor samples.");
+        Debug.Log($"NetworkManager: joining map {ResolveCurrentMapId()} with {serializedSpawnPoints.Count} spawn points, {serializedNextbotIds.Count} bots, {serializedObstacles.Count} obstacles and {serializedFloorSamples.Count} floor samples.");
 
         return new Dictionary<string, object>
         {
@@ -1435,4 +1454,89 @@ public class NetworkManager : MonoBehaviour
     // Called from index.html to keep the connection alive/active
     public void OnWindowBlur() { /* Keep running */ }
     public void OnWindowFocus() { /* Regain focus */ }
+    private void AutoDiscoverSpawnPoints()
+    {
+        // If we already have points assigned and we are NOT on the parkour map, don't override.
+        // But for the parkour map, we want to make sure we have valid points from the scene.
+        bool isParkour = string.Equals(ResolveCurrentMapId(), "parkour", StringComparison.OrdinalIgnoreCase);
+        
+        if (!isParkour && (nextbotSpawnPoints.Count > 2 || playerSpawnPoints.Count > 2))
+        {
+            return;
+        }
+
+        List<NextbotSpawnPointConfig> discoveredNextbotSpawns = new List<NextbotSpawnPointConfig>();
+        List<PlayerSpawnPointConfig> discoveredPlayerSpawns = new List<PlayerSpawnPointConfig>();
+        List<NextbotPatrolPointConfig> discoveredPatrolSpawns = new List<NextbotPatrolPointConfig>();
+        Transform patrolRoot = FindNamedRootTransform("PatrolPoints");
+
+        // Search for transforms by name since the config structs aren't components themselves.
+        Transform[] allTransforms = FindObjectsOfType<Transform>();
+        foreach (Transform t in allTransforms)
+        {
+            if (t == null) continue;
+
+            string name = t.name;
+            if (name.IndexOf("Nextbot Spawn", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discoveredNextbotSpawns.Add(new NextbotSpawnPointConfig { anchor = t, position = t.position });
+            }
+            else if (name.IndexOf("Player Spawn", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discoveredPlayerSpawns.Add(new PlayerSpawnPointConfig { anchor = t, position = t.position });
+            }
+            else if (name.IndexOf("Patrol", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discoveredPatrolSpawns.Add(new NextbotPatrolPointConfig { anchor = t, position = t.position });
+            }
+            else if (isParkour
+                && patrolRoot != null
+                && t != patrolRoot
+                && t.IsChildOf(patrolRoot)
+                && t.name.StartsWith("Point", StringComparison.OrdinalIgnoreCase))
+            {
+                discoveredPatrolSpawns.Add(new NextbotPatrolPointConfig { anchor = t, position = t.position });
+            }
+        }
+
+        if (discoveredNextbotSpawns.Count > 0)
+        {
+            nextbotSpawnPoints = discoveredNextbotSpawns;
+        }
+
+        if (discoveredPlayerSpawns.Count > 0)
+        {
+            playerSpawnPoints = discoveredPlayerSpawns;
+        }
+
+        if (discoveredPatrolSpawns.Count > 0)
+        {
+            nextbotPatrolPoints = discoveredPatrolSpawns;
+        }
+    }
+
+    private static Transform FindNamedRootTransform(string targetName)
+    {
+        if (string.IsNullOrWhiteSpace(targetName))
+        {
+            return null;
+        }
+
+        Transform[] allTransforms = FindObjectsOfType<Transform>();
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            Transform candidate = allTransforms[i];
+            if (candidate == null || candidate.parent != null)
+            {
+                continue;
+            }
+
+            if (string.Equals(candidate.name, targetName, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
 }

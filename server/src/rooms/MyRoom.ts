@@ -31,6 +31,7 @@ const NEXTBOT_BLOCKED_MOVE_EPSILON = 0.05;
 const NEXTBOT_PREDICTION_TIME = 0.28;
 const NEXTBOT_MAX_CHASE_RANGE = 70;
 const NEXTBOT_ACQUIRE_RANGE = 80;
+const NEXTBOT_PARKOUR_ACQUIRE_RANGE = 1000;
 const NEXTBOT_MAX_VERTICAL_DELTA = 12;
 const NEXTBOT_STALE_TARGET_TIMEOUT_MS = 1500;
 const NEXTBOT_DISTANCE_SCORE_BASE = 120;
@@ -67,6 +68,7 @@ const NEXTBOT_PATH_REPLAN_INTERVAL_MS = 800;
 const NEXTBOT_PATH_REPLAN_TARGET_DISTANCE = 1.8;
 const NEXTBOT_PATH_MAX_NEAREST_CELL_RADIUS = 8;
 const NEXTBOT_MAX_ALLOWED_ASCENT = 3;
+const NEXTBOT_MIN_SPAWN_POINT_SEPARATION = 3.5;
 const NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT = 4;
 const NEXTBOT_FLOOR_BLEND_RADIUS = 3.5;
 const NEXTBOT_DROP_START_HEIGHT = 0.9;
@@ -293,6 +295,10 @@ export class MyRoom extends Room<MyRoomState> {
     this.setMetadata({ mapId: this.mapId });
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
     this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(options);
+    this.nextbotSpawnPoints = this.ensureSufficientNextbotSpawnPoints(
+      this.nextbotSpawnPoints,
+      this.nextbotPatrolPoints,
+      MAX_ACTIVE_NEXTBOTS);
     this.nextbotObstacles = this.resolveNextbotObstacles(options);
     this.nextbotFloorSamples = this.resolveNextbotFloorSamples(options);
     this.nextbotIds = this.resolveNextbotIds(options);
@@ -429,27 +435,6 @@ export class MyRoom extends Room<MyRoomState> {
 
       if (!wasInjured && player.isInjured) {
         this.recordPlayerDowned(client.sessionId, now);
-      }
-    });
-
-    this.onMessage("nextbotUpdate", (client, message: any) => {
-      if (!message || typeof message.id !== "number") return;
-      const nextbot = this.state.nextbots.at(message.id);
-      const controller = this.nextbotControllers[message.id];
-      if (!nextbot || !controller) return;
-
-      // Only allow the target client OR the host (client 0) to update the nextbot
-      const isHost = this.clients.length > 0 && this.clients[0].sessionId === client.sessionId;
-      const isTarget = nextbot.targetSessionId === client.sessionId;
-      
-      if (isHost || isTarget) {
-        nextbot.x = message.x;
-        nextbot.y = message.y;
-        nextbot.z = message.z;
-        if (typeof message.rotationY === "number") {
-          nextbot.rotationY = message.rotationY;
-        }
-        controller.pathComputedAt = Date.now() + 1000; // Suspend server movement briefly
       }
     });
 
@@ -770,12 +755,8 @@ export class MyRoom extends Room<MyRoomState> {
       if (target != null && currentScoredTarget != null && currentScoredTarget.eligible) {
         nextbot.targetSessionId = target.sessionId;
         const predictedTarget = currentScoredTarget.predicted;
-        
-        let movedDistance = 0;
-        if (now >= controller.pathComputedAt) {
-          const groundY = this.getGroundYForPosition(predictedTarget.x, predictedTarget.z, controller.groundedY);
-          movedDistance = this.moveNextbotTowardsPosition(controller, nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
-        }
+        const groundY = this.getGroundYForPosition(predictedTarget.x, predictedTarget.z, controller.groundedY);
+        const movedDistance = this.moveNextbotTowardsPosition(controller, nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
 
         if (this.shouldRetargetBlockedMove(controller, movedDistance, predictedTarget.distance, now)) {
           controller.unreachableTargetSessionId = target.sessionId;
@@ -796,9 +777,7 @@ export class MyRoom extends Room<MyRoomState> {
 
       controller.currentTargetSessionId = "";
       nextbot.targetSessionId = "";
-      if (now >= controller.pathComputedAt) {
-        this.moveNextbotOnPatrol(controller, nextbot, deltaSeconds);
-      }
+      this.moveNextbotOnPatrol(controller, nextbot, deltaSeconds);
     }
   }
 
@@ -806,8 +785,21 @@ export class MyRoom extends Room<MyRoomState> {
     this.state.nextbots.clear();
     this.nextbotControllers = [];
 
-    for (let index = 0; index < this.nextbotIds.length; index++) {
-      const botId = this.getNextbotId(index);
+    const isParkour = this.mapId === "parkour";
+    let nextbotIdsToUse = this.nextbotIds;
+
+    // Fallback if no IDs were provided by the client
+    if (nextbotIdsToUse.length === 0) {
+        nextbotIdsToUse = DEFAULT_NEXTBOT_IDS;
+    }
+
+    // If it's parkour, try to use obunga, but only if the client actually has it.
+    if (isParkour && nextbotIdsToUse.includes("obunga")) {
+        nextbotIdsToUse = ["obunga"];
+    }
+
+    for (let index = 0; index < nextbotIdsToUse.length; index++) {
+      const botId = nextbotIdsToUse[index];
       const spawnPoint = this.getNextbotSpawnPoint(index);
       const nextbotState = new NextbotState();
       nextbotState.x = spawnPoint.x;
@@ -821,10 +813,14 @@ export class MyRoom extends Room<MyRoomState> {
       nextbotState.velocityZ = 0;
       nextbotState.sampleTimeMs = 0;
       this.state.nextbots.set(botId, nextbotState);
+
+      const baseSpeed = this.getConfiguredNextbotMoveSpeed(botId);
+      const speedMultiplier = isParkour ? 1.5 : 1.0;
+
       this.nextbotControllers.push({
         id: botId,
-        moveSpeed: this.getConfiguredNextbotMoveSpeed(botId),
-        spawnIndex: index,
+        moveSpeed: baseSpeed * speedMultiplier,
+        spawnIndex: isParkour ? 0 : index,
         groundedY: spawnPoint.y,
         verticalVelocity: 0,
         isAirborne: false,
@@ -973,9 +969,10 @@ export class MyRoom extends Room<MyRoomState> {
       }
 
       const scoredTarget = this.buildScoredTarget(player, now, nextbot, false);
+      const acquireRange = this.mapId === "parkour" ? NEXTBOT_PARKOUR_ACQUIRE_RANGE : NEXTBOT_ACQUIRE_RANGE;
       if (scoredTarget == null
         || !scoredTarget.eligible
-        || scoredTarget.predicted.distance > NEXTBOT_ACQUIRE_RANGE) {
+        || scoredTarget.predicted.distance > acquireRange) {
         return;
       }
 
@@ -1420,11 +1417,19 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private tryInjurePlayer(controller: NextbotControllerState, nextbot: NextbotState, target: Player, now: number) {
+    if (this.mapId === "parkour") {
+      return;
+    }
+
     const dx = target.x - nextbot.x;
     const dz = target.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
 
     if (distance > NEXTBOT_INJURY_DISTANCE || now < controller.nextInjuryAt || target.isInjured || target.isHitReacting || target.isEliminated) {
+      return;
+    }
+
+    if (this.wouldNextbotMoveHitObstacle(nextbot.x, nextbot.z, target.x, target.z, nextbot.y, target.y)) {
       return;
     }
 
@@ -1606,8 +1611,73 @@ export class MyRoom extends Room<MyRoomState> {
 
   private getNextbotSpawnPoint(spawnIndex: number): SpawnPoint {
     const spawnPoints = this.nextbotSpawnPoints.length > 0 ? this.nextbotSpawnPoints : DEFAULT_NEXTBOT_SPAWN_POINTS;
+    if (this.mapId === "parkour") {
+      const parkourSpawn = spawnPoints[0];
+      return {
+        x: parkourSpawn.x,
+        y: parkourSpawn.y,
+        z: parkourSpawn.z,
+      };
+    }
+
     const normalizedIndex = ((spawnIndex % spawnPoints.length) + spawnPoints.length) % spawnPoints.length;
     return spawnPoints[normalizedIndex];
+  }
+
+  private ensureSufficientNextbotSpawnPoints(
+    spawnPoints: SpawnPoint[],
+    patrolPoints: SpawnPoint[],
+    minimumCount: number,
+  ) {
+    const normalizedSpawnPoints = spawnPoints.length > 0
+      ? spawnPoints.map((point) => ({ x: point.x, y: point.y, z: point.z }))
+      : [];
+    const result = normalizedSpawnPoints;
+
+    const tryAddPoint = (point: SpawnPoint) => {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+        return false;
+      }
+
+      for (const existingPoint of result) {
+        if (Math.hypot(existingPoint.x - point.x, existingPoint.z - point.z) < NEXTBOT_MIN_SPAWN_POINT_SEPARATION) {
+          return false;
+        }
+      }
+
+      result.push({ x: point.x, y: point.y, z: point.z });
+      return true;
+    };
+
+    for (const patrolPoint of patrolPoints) {
+      if (result.length >= minimumCount) {
+        break;
+      }
+
+      tryAddPoint(patrolPoint);
+    }
+
+    if (result.length === 0) {
+      return DEFAULT_NEXTBOT_SPAWN_POINTS.slice(0, minimumCount);
+    }
+
+    if (result.length >= minimumCount) {
+      return result;
+    }
+
+    const anchorPoint = result[0];
+    const radialDistance = Math.max(NEXTBOT_MIN_SPAWN_POINT_SEPARATION, NEXTBOT_STOPPING_DISTANCE * 4);
+    for (let index = 0; result.length < minimumCount && index < minimumCount * 4; index++) {
+      const angle = (Math.PI * 2 * index) / Math.max(minimumCount, 1);
+      const candidate = {
+        x: anchorPoint.x + Math.cos(angle) * radialDistance,
+        y: anchorPoint.y,
+        z: anchorPoint.z + Math.sin(angle) * radialDistance,
+      };
+      tryAddPoint(candidate);
+    }
+
+    return result;
   }
 
   private assignRandomPatrolTargets() {
@@ -1639,9 +1709,11 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private getRandomPatrolTarget(originX: number, originY: number, originZ: number, requestingController?: NextbotControllerState): SpawnPoint {
-    const patrolAreaPoints = this.nextbotPatrolPoints.length > 0
-      ? this.nextbotPatrolPoints
-      : this.getAutomaticPatrolAreaPoints();
+    if (this.nextbotPatrolPoints.length > 0) {
+      return this.getConfiguredPatrolTarget(originX, originY, originZ, requestingController);
+    }
+
+    const patrolAreaPoints = this.getAutomaticPatrolAreaPoints();
 
     let minX = Number.POSITIVE_INFINITY;
     let maxX = Number.NEGATIVE_INFINITY;
@@ -1662,11 +1734,12 @@ export class MyRoom extends Room<MyRoomState> {
     let bestTargetZ = originZ;
     let bestScore = Number.NEGATIVE_INFINITY;
 
-    for (let attempts = 0; attempts < NEXTBOT_PATROL_CANDIDATE_SAMPLES; attempts++) {
+    const sampleAttempts = NEXTBOT_PATROL_CANDIDATE_SAMPLES * 2;
+    for (let attempts = 0; attempts < sampleAttempts; attempts++) {
       const candidateX = minX + Math.random() * (maxX - minX);
       const candidateZ = minZ + Math.random() * (maxZ - minZ);
       const travelDistance = Math.hypot(candidateX - originX, candidateZ - originZ);
-      if (travelDistance < NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE) {
+      if (travelDistance < NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE * 0.5) {
         continue;
       }
 
@@ -1713,6 +1786,54 @@ export class MyRoom extends Room<MyRoomState> {
       x: bestTargetX,
       y: originY,
       z: bestTargetZ,
+    };
+  }
+
+  private getConfiguredPatrolTarget(originX: number, originY: number, originZ: number, requestingController?: NextbotControllerState): SpawnPoint {
+    let bestTarget: SpawnPoint | undefined;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (const patrolPoint of this.nextbotPatrolPoints) {
+      const candidateX = patrolPoint.x;
+      const candidateZ = patrolPoint.z;
+      const travelDistance = Math.hypot(candidateX - originX, candidateZ - originZ);
+      if (travelDistance < NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE * 0.5) {
+        continue;
+      }
+
+      const obstacleClearance = this.getNearestNextbotObstacleClearance2D(candidateX, candidateZ, originY, patrolPoint.y);
+      if (obstacleClearance < NEXTBOT_PATROL_MIN_OBSTACLE_CLEARANCE) {
+        continue;
+      }
+
+      if (!this.canNextbotReachPosition(originX, originZ, candidateX, candidateZ, originY, patrolPoint.y)) {
+        continue;
+      }
+
+      const separationDistance = this.getPatrolTargetSeparationDistance(candidateX, candidateZ, requestingController);
+      const separationPenalty = separationDistance < NEXTBOT_PATROL_SEPARATION_RADIUS
+        ? (NEXTBOT_PATROL_SEPARATION_RADIUS - separationDistance) * 1000
+        : 0;
+      const clearanceBonus = Math.min(obstacleClearance, NEXTBOT_WALL_AVOIDANCE_DISTANCE * 2) * NEXTBOT_PATROL_CLEARANCE_SCORE_WEIGHT;
+      const score = separationDistance * 10 + travelDistance + clearanceBonus - separationPenalty;
+      if (score > bestScore) {
+        bestScore = score;
+        bestTarget = patrolPoint;
+      }
+    }
+
+    if (bestTarget != null) {
+      return {
+        x: bestTarget.x,
+        y: bestTarget.y,
+        z: bestTarget.z,
+      };
+    }
+
+    return {
+      x: originX,
+      y: originY,
+      z: originZ,
     };
   }
 
