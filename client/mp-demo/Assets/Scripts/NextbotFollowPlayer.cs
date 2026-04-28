@@ -5,6 +5,16 @@ using UnityEngine.AI;
 
 public class NextbotFollowPlayer : MonoBehaviour
 {
+    [Serializable]
+    private class MapNextbotSettings
+    {
+        public string mapId = string.Empty;
+        public bool useLocalRoomStateNavMesh = false;
+        public float targetHoldSeconds = 0f;
+        public float maxChaseRange = 70f;
+        public float navMeshRejoinWarpDistance = 0.3f;
+    }
+
     private const int MaxGroundHitBufferSize = 16;
     private const float MultiplayerNextbotStoppingDistance = 0.7f;
     private const float MultiplayerNextbotInjuryDistance = 0.95f;
@@ -49,8 +59,25 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _stoppingDistance = 1.4f;
     [SerializeField] private float _targetRefreshInterval = 0.2f;
     [SerializeField] private bool _followNearestPlayer = true;
-    [SerializeField, Min(0f)] private float _parkourTargetHoldSeconds = 1f;
-    [SerializeField, Min(1f)] private float _parkourMaxChaseRange = 1000f;
+    [SerializeField] private MapNextbotSettings _defaultMapNextbotSettings = new MapNextbotSettings
+    {
+        mapId = "",
+        useLocalRoomStateNavMesh = false,
+        targetHoldSeconds = 0f,
+        maxChaseRange = 70f,
+        navMeshRejoinWarpDistance = 0.3f,
+    };
+    [SerializeField] private MapNextbotSettings[] _mapSpecificNextbotSettings =
+    {
+        new MapNextbotSettings
+        {
+            mapId = "parkour",
+            useLocalRoomStateNavMesh = true,
+            targetHoldSeconds = 1f,
+            maxChaseRange = 1000f,
+            navMeshRejoinWarpDistance = 0.3f,
+        },
+    };
 
     [Header("Target Score")]
     [SerializeField] private float _maxChaseRange = 70f;
@@ -75,7 +102,6 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     [Header("NavMesh")]
     [SerializeField] private float _navMeshSnapDistance = 8f;
-    [SerializeField] private float _parkourNavMeshRejoinWarpDistance = 0.3f;
     [SerializeField] private string _walkableAreaName = "Walkable";
     [SerializeField] private bool _useOffMeshLinks = true;
     [SerializeField] private float _offMeshLinkDuration = 0.35f;
@@ -192,7 +218,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool _hasRoomStateParkourPatrolTarget;
     private Vector3 _roomStateParkourPatrolTarget;
     private float _roomStateParkourPatrolWaitUntil;
-    private float _parkourTargetHoldUntil;
+    private float _mapTargetHoldUntil;
     private bool _hasLastSeenTargetPosition;
     private Vector3 _lastSeenTargetPosition;
     private Vector3 _lastSeenTargetDirection = Vector3.forward;
@@ -525,7 +551,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (_roomStateAuthorityActive == isActive)
         {
             if (isActive
-                && !ShouldUseParkourLocalNavMeshPresentation()
+                && !ShouldUseMapLocalNavMeshPresentation()
                 && _navMeshAgent != null
                 && _navMeshAgent.enabled
                 && _navMeshAgent.isOnNavMesh)
@@ -543,7 +569,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        bool useParkourLocalPresentation = isActive && IsParkourMap();
+        bool useParkourLocalPresentation = isActive && CurrentMapUsesLocalRoomStateNavMesh();
         _navMeshAgent.updatePosition = !isActive;
         if (_navMeshAgent.isOnNavMesh)
         {
@@ -587,7 +613,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         Quaternion targetRotation = Quaternion.Euler(0f, nextbotState.rotationY, 0f);
         Vector3 targetVelocity = new Vector3(nextbotState.velocityX, nextbotState.velocityY, nextbotState.velocityZ);
 
-        bool shouldUseParkourLocalPresentation = ShouldUseParkourLocalNavMeshPresentation();
+        bool shouldUseParkourLocalPresentation = ShouldUseMapLocalNavMeshPresentation();
         if (TryGetServerAssignedTarget(nextbotState.targetSessionId, out Transform targetTransform, out PlayerController targetController))
         {
             if (shouldUseParkourLocalPresentation
@@ -602,7 +628,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             }
             else
             {
-                _parkourTargetHoldUntil = Time.time + Mathf.Max(0f, _parkourTargetHoldSeconds);
+                _mapTargetHoldUntil = Time.time + GetCurrentMapTargetHoldSeconds();
             }
         }
         else
@@ -612,7 +638,7 @@ public class NextbotFollowPlayer : MonoBehaviour
                 && _targetController != null
                 && _targetController.enabled
                 && !_targetController.IsInjuredOrHitReacting()
-                && Time.time <= _parkourTargetHoldUntil;
+                && Time.time <= _mapTargetHoldUntil;
             if (!canHoldParkourTarget)
             {
                 ClearTarget();
@@ -745,33 +771,69 @@ public class NextbotFollowPlayer : MonoBehaviour
         return true;
     }
 
-    private bool ShouldUseParkourLocalNavMeshChase(NextbotState nextbotState)
+    private MapNextbotSettings GetCurrentMapNextbotSettings()
+    {
+        string currentMapId = NetworkManager.Instance != null
+            ? NetworkManager.Instance.CurrentMapId
+            : string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(currentMapId) && _mapSpecificNextbotSettings != null)
+        {
+            for (int i = 0; i < _mapSpecificNextbotSettings.Length; i++)
+            {
+                MapNextbotSettings candidate = _mapSpecificNextbotSettings[i];
+                if (candidate != null
+                    && !string.IsNullOrWhiteSpace(candidate.mapId)
+                    && string.Equals(candidate.mapId, currentMapId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return _defaultMapNextbotSettings ?? new MapNextbotSettings();
+    }
+
+    private bool CurrentMapUsesLocalRoomStateNavMesh()
+    {
+        return GetCurrentMapNextbotSettings().useLocalRoomStateNavMesh;
+    }
+
+    private bool ShouldUseMapLocalNavMeshChase(NextbotState nextbotState)
     {
         if (nextbotState == null || _target == null)
         {
             return false;
         }
 
-        return IsParkourMap();
+        return CurrentMapUsesLocalRoomStateNavMesh();
     }
 
-    private bool ShouldUseParkourLocalNavMeshChase()
+    private bool ShouldUseMapLocalNavMeshChase()
     {
         return _target != null
-            && IsParkourMap();
+            && CurrentMapUsesLocalRoomStateNavMesh();
     }
 
-    private bool ShouldUseParkourLocalNavMeshPresentation()
+    private bool ShouldUseMapLocalNavMeshPresentation()
     {
         return _roomStateAuthorityActive
-            && IsParkourMap();
+            && CurrentMapUsesLocalRoomStateNavMesh();
     }
 
-    private bool IsParkourMap()
+    private float GetCurrentMapTargetHoldSeconds()
     {
-        NetworkManager networkManager = NetworkManager.Instance;
-        return networkManager != null
-            && string.Equals(networkManager.CurrentMapId, "parkour", StringComparison.OrdinalIgnoreCase);
+        return Mathf.Max(0f, GetCurrentMapNextbotSettings().targetHoldSeconds);
+    }
+
+    private float GetCurrentMapMaxChaseRange()
+    {
+        return Mathf.Max(_maxChaseRange, GetCurrentMapNextbotSettings().maxChaseRange);
+    }
+
+    private float GetCurrentMapNavMeshRejoinWarpDistance()
+    {
+        return Mathf.Max(0.05f, GetCurrentMapNextbotSettings().navMeshRejoinWarpDistance);
     }
 
     private Vector3 ResolveGroundedRoomStatePosition(NextbotState nextbotState)
@@ -1067,7 +1129,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void RefreshTargetIfNeeded()
     {
-        if (_roomStateAuthorityActive && !ShouldUseParkourLocalNavMeshPresentation())
+        if (_roomStateAuthorityActive && !ShouldUseMapLocalNavMeshPresentation())
         {
             return;
         }
@@ -1094,7 +1156,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private void EvaluateTargetSelection()
     {
         ScoredTarget? bestTarget = FindBestTarget();
-        if (!bestTarget.HasValue && ShouldUseParkourLocalNavMeshPresentation())
+        if (!bestTarget.HasValue && ShouldUseMapLocalNavMeshPresentation())
         {
             bestTarget = FindBestParkourFallbackTarget();
         }
@@ -1254,7 +1316,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return null;
         }
 
-        if ((_forceOfflineLocalAuthority || ShouldUseParkourLocalNavMeshPresentation())
+        if ((_forceOfflineLocalAuthority || ShouldUseMapLocalNavMeshPresentation())
             && !isCurrentTarget
             && IsTargetClaimedByOtherNextbot(candidateTransform))
         {
@@ -1262,9 +1324,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         float pathDistance = GetTargetSelectionDistance(candidateTransform.position);
-        float maxChaseRange = ShouldUseParkourLocalNavMeshPresentation()
-            ? Mathf.Max(_maxChaseRange, _parkourMaxChaseRange)
-            : _maxChaseRange;
+        float maxChaseRange = GetCurrentMapMaxChaseRange();
         if (float.IsInfinity(pathDistance) || pathDistance > maxChaseRange)
         {
             return null;
@@ -1325,22 +1385,20 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
-        if ((_forceOfflineLocalAuthority || ShouldUseParkourLocalNavMeshPresentation())
+        if ((_forceOfflineLocalAuthority || ShouldUseMapLocalNavMeshPresentation())
             && IsTargetClaimedByOtherNextbot(_target))
         {
             return false;
         }
 
         float pathDistance = GetTargetSelectionDistance(_target.position);
-        float maxChaseRange = ShouldUseParkourLocalNavMeshPresentation()
-            ? Mathf.Max(_maxChaseRange, _parkourMaxChaseRange)
-            : _maxChaseRange;
+        float maxChaseRange = GetCurrentMapMaxChaseRange();
         return !float.IsInfinity(pathDistance) && pathDistance <= maxChaseRange;
     }
 
     private float GetTargetSelectionDistance(Vector3 destination)
     {
-        if (ShouldUseParkourLocalNavMeshPresentation())
+        if (ShouldUseMapLocalNavMeshPresentation())
         {
             return GetPlanarDistance(transform.position, destination);
         }
@@ -1471,7 +1529,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         _target = targetTransform;
         _targetController = controller;
-        _parkourTargetHoldUntil = Time.time + Mathf.Max(0f, _parkourTargetHoldSeconds);
+        _mapTargetHoldUntil = Time.time + GetCurrentMapTargetHoldSeconds();
         _targetLockedUntil = Time.time + _targetLockDuration;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
@@ -1485,7 +1543,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _targetController = null;
         _hasLastSeenTargetPosition = false;
         _lastSeenTargetExpiresAt = float.NegativeInfinity;
-        _parkourTargetHoldUntil = 0f;
+        _mapTargetHoldUntil = 0f;
         _targetLockedUntil = 0f;
         _pendingSwitchTarget = null;
         _pendingSwitchStartedAt = 0f;
@@ -1556,7 +1614,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool TryUpdateRoomStateParkourPatrolMovement()
     {
-        if (!ShouldUseParkourLocalNavMeshPresentation() || _target != null)
+        if (!ShouldUseMapLocalNavMeshPresentation() || _target != null)
         {
             ResetRoomStateParkourPatrolTarget();
             return false;
@@ -1763,7 +1821,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
 
             float planarDistance = GetPlanarDistance(transform.position, patrolTarget);
-            if (ShouldUseParkourLocalNavMeshPresentation()
+            if (ShouldUseMapLocalNavMeshPresentation()
                 && _horizontalVelocity.sqrMagnitude < 0.05f
                 && planarDistance > _stoppingDistance + 0.5f)
             {
@@ -1908,7 +1966,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         Vector3 targetPosition = ResolveTargetChasePosition();
-        bool shouldUseParkourLocalPresentation = ShouldUseParkourLocalNavMeshPresentation();
+        bool shouldUseParkourLocalPresentation = ShouldUseMapLocalNavMeshPresentation();
 
         if (_navMeshAgent != null && _navMeshAgent.enabled)
         {
@@ -2026,7 +2084,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         float planarDistance = GetPlanarDistance(transform.position, navMeshPosition);
-        if (planarDistance > Mathf.Max(0.05f, _parkourNavMeshRejoinWarpDistance))
+        if (planarDistance > GetCurrentMapNavMeshRejoinWarpDistance())
         {
             Vector3 nextPosition = Vector3.MoveTowards(transform.position, navMeshPosition, _moveSpeed * Time.deltaTime);
             if (TryResolveGroundedPosition(nextPosition, out Vector3 groundedNextPosition))
@@ -2050,7 +2108,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         Vector3 targetPosition = _target.position;
-        if (!ShouldUseParkourLocalNavMeshChase())
+        if (!ShouldUseMapLocalNavMeshChase())
         {
             return targetPosition;
         }
@@ -2443,7 +2501,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void TryHitTarget(float distanceToTarget)
     {
-        if (_roomStateAuthorityActive && !ShouldUseParkourLocalNavMeshPresentation())
+        if (_roomStateAuthorityActive && !ShouldUseMapLocalNavMeshPresentation())
         {
             return;
         }
@@ -2996,7 +3054,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        if (ShouldUseParkourLocalNavMeshPresentation())
+        if (ShouldUseMapLocalNavMeshPresentation())
         {
             return;
         }

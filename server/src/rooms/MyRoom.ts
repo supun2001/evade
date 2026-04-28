@@ -192,6 +192,29 @@ type RoundResultsMessage = {
   roundDurationMs: number;
   entries: RoundResultEntry[];
 };
+type MapNextbotConfig = {
+  acquireRange: number;
+  speedMultiplier: number;
+  useSharedSpawnPoint: boolean;
+  useClientReportedHits: boolean;
+  preferredSingleNextbotId: string;
+};
+
+const DEFAULT_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
+  acquireRange: NEXTBOT_ACQUIRE_RANGE,
+  speedMultiplier: 1,
+  useSharedSpawnPoint: false,
+  useClientReportedHits: false,
+  preferredSingleNextbotId: "",
+};
+
+const PARKOUR_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
+  acquireRange: NEXTBOT_PARKOUR_ACQUIRE_RANGE,
+  speedMultiplier: 1.5,
+  useSharedSpawnPoint: true,
+  useClientReportedHits: true,
+  preferredSingleNextbotId: "obunga",
+};
 
 function readPlayerUpdateNumber(message: PlayerUpdateMessage, index: number, key: string): number {
   if (Array.isArray(message)) {
@@ -287,6 +310,14 @@ export class MyRoom extends Room<MyRoomState> {
 
   private logRoomEvent(message: string) {
     console.log(`[room ${this.roomId}] ${message}`);
+  }
+
+  private getMapNextbotConfig(): MapNextbotConfig {
+    if (this.mapId === "parkour") {
+      return PARKOUR_MAP_NEXTBOT_CONFIG;
+    }
+
+    return DEFAULT_MAP_NEXTBOT_CONFIG;
   }
 
   onCreate(options: any) {
@@ -576,7 +607,8 @@ export class MyRoom extends Room<MyRoomState> {
     });
 
     this.onMessage("nextbotHit", (client, message) => {
-      if (this.mapId !== "parkour" || this.currentPhase !== "round" || !this.state.isGameStarted) {
+      const mapConfig = this.getMapNextbotConfig();
+      if (!mapConfig.useClientReportedHits || this.currentPhase !== "round" || !this.state.isGameStarted) {
         return;
       }
 
@@ -829,7 +861,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.state.nextbots.clear();
     this.nextbotControllers = [];
 
-    const isParkour = this.mapId === "parkour";
+    const mapConfig = this.getMapNextbotConfig();
     let nextbotIdsToUse = this.nextbotIds;
 
     // Fallback if no IDs were provided by the client
@@ -838,8 +870,8 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     // If it's parkour, try to use obunga, but only if the client actually has it.
-    if (isParkour && nextbotIdsToUse.includes("obunga")) {
-        nextbotIdsToUse = ["obunga"];
+    if (mapConfig.preferredSingleNextbotId && nextbotIdsToUse.includes(mapConfig.preferredSingleNextbotId)) {
+        nextbotIdsToUse = [mapConfig.preferredSingleNextbotId];
     }
 
     for (let index = 0; index < nextbotIdsToUse.length; index++) {
@@ -859,12 +891,10 @@ export class MyRoom extends Room<MyRoomState> {
       this.state.nextbots.set(botId, nextbotState);
 
       const baseSpeed = this.getConfiguredNextbotMoveSpeed(botId);
-      const speedMultiplier = isParkour ? 1.5 : 1.0;
-
       this.nextbotControllers.push({
         id: botId,
-        moveSpeed: baseSpeed * speedMultiplier,
-        spawnIndex: isParkour ? 0 : index,
+        moveSpeed: baseSpeed * mapConfig.speedMultiplier,
+        spawnIndex: mapConfig.useSharedSpawnPoint ? 0 : index,
         groundedY: spawnPoint.y,
         verticalVelocity: 0,
         isAirborne: false,
@@ -1013,7 +1043,7 @@ export class MyRoom extends Room<MyRoomState> {
       }
 
       const scoredTarget = this.buildScoredTarget(player, now, nextbot, false);
-      const acquireRange = this.mapId === "parkour" ? NEXTBOT_PARKOUR_ACQUIRE_RANGE : NEXTBOT_ACQUIRE_RANGE;
+      const acquireRange = this.getMapNextbotConfig().acquireRange;
       if (scoredTarget == null
         || !scoredTarget.eligible
         || scoredTarget.predicted.distance > acquireRange) {
@@ -1461,7 +1491,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private tryInjurePlayer(controller: NextbotControllerState, nextbot: NextbotState, target: Player, now: number) {
-    if (this.mapId === "parkour") {
+    if (this.getMapNextbotConfig().useClientReportedHits) {
       return;
     }
 
@@ -1691,12 +1721,12 @@ export class MyRoom extends Room<MyRoomState> {
 
   private getNextbotSpawnPoint(spawnIndex: number): SpawnPoint {
     const spawnPoints = this.nextbotSpawnPoints.length > 0 ? this.nextbotSpawnPoints : DEFAULT_NEXTBOT_SPAWN_POINTS;
-    if (this.mapId === "parkour") {
-      const parkourSpawn = spawnPoints[0];
+    if (this.getMapNextbotConfig().useSharedSpawnPoint) {
+      const sharedSpawn = spawnPoints[0];
       return {
-        x: parkourSpawn.x,
-        y: parkourSpawn.y,
-        z: parkourSpawn.z,
+        x: sharedSpawn.x,
+        y: sharedSpawn.y,
+        z: sharedSpawn.z,
       };
     }
 

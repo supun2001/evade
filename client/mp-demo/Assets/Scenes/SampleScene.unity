@@ -27776,6 +27776,7 @@ MonoBehaviour:
   localServerUrl: ws://localhost:2567
   productionServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
   useProductionServerInEditor: 0
+  mapIdOverride: 
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
     position: {x: -567.05, y: 3, z: 259.59}
