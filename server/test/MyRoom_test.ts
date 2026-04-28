@@ -291,4 +291,51 @@ describe("testing your Colyseus app", () => {
 
     assert.strictEqual(target.isInjured, false);
   });
+
+  it("applies parkour nextbot hits reported by the chased player", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      mapId: "parkour",
+    });
+    const client = await colyseus.connectTo(room);
+
+    await room.waitForNextPatch();
+
+    const roomAny = room as any;
+    roomAny.currentPhase = "round";
+    roomAny.phaseEndsAt = Date.now() + 30_000;
+    room.state.isGameStarted = true;
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    player!.isReady = true;
+    player!.isSpectator = false;
+    player!.isInjured = false;
+    player!.isHitReacting = false;
+    roomAny.playerSafeUntil.set(client.sessionId, 0);
+
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    nextbot!.isActive = true;
+    nextbot!.x = player!.x + 20;
+    nextbot!.y = player!.y;
+    nextbot!.z = player!.z + 20;
+    controller.currentTargetSessionId = client.sessionId;
+    controller.nextInjuryAt = 0;
+
+    client.send("nextbotHit", {
+      id: "nextbot_0",
+      x: player!.x + 0.2,
+      y: player!.y,
+      z: player!.z,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(player!.isInjured, true);
+    assert.strictEqual(player!.hitTriggerId > 0, true);
+  });
 });

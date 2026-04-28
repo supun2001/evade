@@ -628,7 +628,7 @@ public class NetworkManager : MonoBehaviour
         });
     }
 
-    public void SendNextbotHit(int nextbotId)
+    public void SendNextbotHit(string nextbotId, Vector3 hitSourcePosition)
     {
         if (room == null || !room.Connection.IsOpen)
         {
@@ -636,7 +636,10 @@ public class NetworkManager : MonoBehaviour
         }
 
         room.Send("nextbotHit", new {
-            id = nextbotId
+            id = nextbotId,
+            x = hitSourcePosition.x,
+            y = hitSourcePosition.y,
+            z = hitSourcePosition.z,
         });
     }
 

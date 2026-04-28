@@ -4554,6 +4554,11 @@ public class PlayerController : MonoBehaviour
         return _isHitReacting || IsInjured();
     }
 
+    public bool IsAwaitingAuthoritativeNextbotHit()
+    {
+        return _isHitReacting && Time.time < _recentNextbotHitSourceExpiresAt;
+    }
+
     public CharacterController GetCharacterController()
     {
         return _characterController;

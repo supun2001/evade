@@ -19,6 +19,7 @@ const DEFAULT_PLAYER_SPAWN_POINTS = [
 const NEXTBOT_MOVE_SPEED = 9;
 const NEXTBOT_STOPPING_DISTANCE = 0.7;
 const NEXTBOT_INJURY_DISTANCE = 0.95;
+const NEXTBOT_REPORTED_HIT_DISTANCE = 1.8;
 const NEXTBOT_INJURY_COOLDOWN_MS = 1200;
 const NEXTBOT_START_GRACE_MS = 3500;
 const NEXTBOT_SCAN_INTERVAL_MS = 250;
@@ -572,6 +573,49 @@ export class MyRoom extends Room<MyRoomState> {
 
     this.onMessage("syncNextbotConfigs", (_client, payload) => {
       this.applyNextbotConfigOverrides(payload);
+    });
+
+    this.onMessage("nextbotHit", (client, message) => {
+      if (this.mapId !== "parkour" || this.currentPhase !== "round" || !this.state.isGameStarted) {
+        return;
+      }
+
+      const target = this.state.players.get(client.sessionId);
+      if (!target || target.isSpectator || !target.isReady) {
+        return;
+      }
+
+      const rawNextbotId = typeof message?.id === "string" ? message.id : "";
+      const rawNextbotIndex = typeof message?.id === "number" ? message.id : -1;
+      const nextbotIndex = rawNextbotId
+        ? this.nextbotControllers.findIndex((controller) => controller.id === rawNextbotId)
+        : (Number.isFinite(rawNextbotIndex) ? Math.floor(rawNextbotIndex) : -1);
+      if (nextbotIndex < 0) {
+        return;
+      }
+
+      const controller = this.nextbotControllers[nextbotIndex];
+      const nextbot = rawNextbotId ? this.state.nextbots.get(rawNextbotId) : this.getNextbotState(nextbotIndex);
+      if (controller == null || nextbot == null || !nextbot.isActive) {
+        return;
+      }
+
+      if (controller.currentTargetSessionId !== client.sessionId && nextbot.targetSessionId !== client.sessionId) {
+        return;
+      }
+
+      const hitSourceX = this.readFiniteMessageNumber(message?.x, nextbot.x);
+      const hitSourceY = this.readFiniteMessageNumber(message?.y, nextbot.y);
+      const hitSourceZ = this.readFiniteMessageNumber(message?.z, nextbot.z);
+      this.tryApplyNextbotInjuryAtPosition(
+        controller,
+        nextbot,
+        target,
+        Date.now(),
+        hitSourceX,
+        hitSourceY,
+        hitSourceZ,
+        NEXTBOT_REPORTED_HIT_DISTANCE);
     });
   }
 
@@ -1421,15 +1465,47 @@ export class MyRoom extends Room<MyRoomState> {
       return;
     }
 
-    const dx = target.x - nextbot.x;
-    const dz = target.z - nextbot.z;
-    const distance = Math.hypot(dx, dz);
+    this.tryApplyNextbotInjury(controller, nextbot, target, now);
+  }
 
-    if (distance > NEXTBOT_INJURY_DISTANCE || now < controller.nextInjuryAt || target.isInjured || target.isHitReacting || target.isEliminated) {
+  private tryApplyNextbotInjury(controller: NextbotControllerState, nextbot: NextbotState, target: Player, now: number) {
+    this.tryApplyNextbotInjuryAtPosition(
+      controller,
+      nextbot,
+      target,
+      now,
+      nextbot.x,
+      nextbot.y,
+      nextbot.z,
+      NEXTBOT_INJURY_DISTANCE);
+  }
+
+  private tryApplyNextbotInjuryAtPosition(
+    controller: NextbotControllerState,
+    nextbot: NextbotState,
+    target: Player,
+    now: number,
+    sourceX: number,
+    sourceY: number,
+    sourceZ: number,
+    maxDistance: number,
+  ) {
+    const dx = target.x - sourceX;
+    const dz = target.z - sourceZ;
+    const distance = Math.hypot(dx, dz);
+    const safeUntil = this.playerSafeUntil.get(target.sessionId) ?? 0;
+
+    if (distance > maxDistance
+      || now < controller.nextInjuryAt
+      || safeUntil > now
+      || target.isInjured
+      || target.isHitReacting
+      || target.isEliminated
+      || Math.abs(target.y - sourceY) > NEXTBOT_MAX_VERTICAL_DELTA) {
       return;
     }
 
-    if (this.wouldNextbotMoveHitObstacle(nextbot.x, nextbot.z, target.x, target.z, nextbot.y, target.y)) {
+    if (this.wouldNextbotMoveHitObstacle(sourceX, sourceZ, target.x, target.z, sourceY, target.y)) {
       return;
     }
 
@@ -1444,9 +1520,13 @@ export class MyRoom extends Room<MyRoomState> {
     target.hitReactionSeed = 0;
     this.playerForcedInjuredUntil.set(target.sessionId, now + PLAYER_INJURY_SYNC_GRACE_MS);
     target.hitTriggerId += 1;
-    target.hitSourceX = nextbot.x;
-    target.hitSourceY = nextbot.y;
-    target.hitSourceZ = nextbot.z;
+    target.hitSourceX = sourceX;
+    target.hitSourceY = sourceY;
+    target.hitSourceZ = sourceZ;
+  }
+
+  private readFiniteMessageNumber(value: unknown, fallback: number) {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
   }
 
   private buildScoredTarget(player: Player, now: number, nextbot: NextbotState, isCurrentTarget: boolean): ScoredTarget | undefined {

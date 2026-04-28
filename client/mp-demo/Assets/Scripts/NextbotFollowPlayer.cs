@@ -2470,10 +2470,9 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             if (!_forceOfflineLocalAuthority && NetworkManager.Instance != null && targetController.IsSimulationControlled() == false)
             {
-                int nextbotIndex = GetNextbotIndex();
-                if (nextbotIndex >= 0)
+                if (!string.IsNullOrWhiteSpace(_networkNextbotId))
                 {
-                    NetworkManager.Instance.SendNextbotHit(nextbotIndex);
+                    NetworkManager.Instance.SendNextbotHit(_networkNextbotId, transform.position);
                 }
             }
 

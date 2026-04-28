@@ -109,7 +109,11 @@ public class NetworkPlayer : MonoBehaviour
             {
                 controller.ApplyNetworkInjured();
             }
-            else if (!playerState.isInjured && !playerState.isEliminated && controller != null && controller.IsInjuredOrHitReacting())
+            else if (!playerState.isInjured
+                && !playerState.isEliminated
+                && controller != null
+                && controller.IsInjuredOrHitReacting()
+                && !controller.IsAwaitingAuthoritativeNextbotHit())
             {
                 controller.ApplyNetworkRevive();
             }
