@@ -530,7 +530,7 @@ public class RoundHudController : MonoBehaviour
         avatar.style.borderBottomRightRadius = 2f;
         avatar.style.backgroundColor = new Color(1f, 1f, 1f, 0.08f);
         avatar.style.unityBackgroundScaleMode = ScaleMode.ScaleToFit;
-        Texture2D avatarTexture = GetScoreboardPreviewTexture(Mathf.RoundToInt(rowData.Player.skinIndex));
+        Texture2D avatarTexture = GetScoreboardIconTexture(index);
         if (avatarTexture != null)
         {
             avatar.style.backgroundImage = new StyleBackground(avatarTexture);
@@ -647,19 +647,20 @@ public class RoundHudController : MonoBehaviour
         return new Color(0.52f, 1f, 0.48f);
     }
 
-    private Texture2D GetScoreboardPreviewTexture(int skinIndex)
+    private Texture2D GetScoreboardIconTexture(int rowIndex)
     {
-        if (skinIndex == 0 && _greenScoreboardIcon != null)
-        {
-            return _greenScoreboardIcon;
-        }
-
-        if (skinIndex == 1 && _pinkScoreboardIcon != null)
+        bool usePinkIcon = rowIndex % 2 != 0;
+        if (usePinkIcon && _pinkScoreboardIcon != null)
         {
             return _pinkScoreboardIcon;
         }
 
-        return null;
+        if (!usePinkIcon && _greenScoreboardIcon != null)
+        {
+            return _greenScoreboardIcon;
+        }
+
+        return _greenScoreboardIcon != null ? _greenScoreboardIcon : _pinkScoreboardIcon;
     }
 
     private void RefreshPhaseDisplay()
