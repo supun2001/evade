@@ -1,19 +1,9 @@
 fileFormatVersion: 2
-guid: 5ebfd1b4d21344e609a196bf110fb76b
+guid: 1ee5c3f91190e42c9852dee42b507c5a
 ModelImporter:
   serializedVersion: 24200
   internalIDToNameTable: []
-  externalObjects:
-  - first:
-      type: UnityEngine:Material
-      assembly: UnityEngine.CoreModule
-      name: dark_gray_arena
-    second: {fileID: 2100000, guid: a73944a9ac6c24736aae141730142062, type: 2}
-  - first:
-      type: UnityEngine:Material
-      assembly: UnityEngine.CoreModule
-      name: yellow_arena
-    second: {fileID: 2100000, guid: 1ecdf6f5912024e138b4e207270196da, type: 2}
+  externalObjects: {}
   materials:
     materialImportMode: 2
     materialName: 0
@@ -44,7 +34,7 @@ ModelImporter:
   meshes:
     lODScreenPercentages: []
     globalScale: 1
-    meshCompression: 3
+    meshCompression: 0
     addColliders: 1
     useSRGBMaterialColor: 1
     sortHierarchyByName: 1

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Colyseus.Schema;
 using System;
 using System.Collections;
+using UnityEngine.SceneManagement;
 
 [Serializable]
 public struct NextbotSpawnPointConfig
@@ -67,6 +68,9 @@ public class NetworkManager : MonoBehaviour
     private const int PlayerUpdateFieldCount = 29;
     private const string WalkableLayerName = "Walkable";
     private const string RampLayerName = "Ramp";
+    private const float MinServerObstacleThickness = 0.25f;
+    private const int MaxServerFloorSamples = 2048;
+    private const float MaxServerObstacleEnclosingSpan = 45f;
 
     public static NetworkManager Instance;
     
@@ -79,6 +83,8 @@ public class NetworkManager : MonoBehaviour
     [Tooltip("Use the production URL even while running in the Unity Editor.")]
     [SerializeField] private bool useProductionServerInEditor = false;
     [Header("Gameplay Configuration")]
+    [Tooltip("Optional matchmaking map id. Empty uses the active scene name.")]
+    [SerializeField] private string mapIdOverride = "";
     [Tooltip("Server-authoritative nextbot spawn points used when this client creates the room.")]
     [SerializeField] private List<NextbotSpawnPointConfig> nextbotSpawnPoints = new()
     {
@@ -133,6 +139,7 @@ public class NetworkManager : MonoBehaviour
     private readonly Dictionary<string, Player> simulatedPlayerStates = new Dictionary<string, Player>();
     private readonly float[] playerUpdatePayload = new float[PlayerUpdateFieldCount];
     private string simulatedLocalSessionId = string.Empty;
+    private string selectedMapId = string.Empty;
     public GameObject PlayerPrefab => playerPrefab;
 
     private bool ShouldUseCompactPlayerUpdatePayload
@@ -155,6 +162,7 @@ public class NetworkManager : MonoBehaviour
     { 
         if (Instance != null && Instance != this) 
         { 
+            Instance.ApplySceneConfigurationFrom(this);
             Destroy(gameObject); 
             return; 
         } 
@@ -179,6 +187,7 @@ public class NetworkManager : MonoBehaviour
     public event Action<RoundResultsMessageData> RoundResultsReceived;
     public event Action RoomLeftEvent;
     public string LocalSessionId => room != null ? room.SessionId : simulatedLocalSessionId;
+    public string CurrentMapId => ResolveCurrentMapId();
     public Dictionary<string, Player> SimulatedPlayerStates => simulatedPlayerStates;
     public bool HasSimulatedPlayerStates => simulatedPlayerStates.Count > 0;
     public int IntermissionDurationMilliseconds => IntermissionDurationMs;
@@ -186,6 +195,73 @@ public class NetworkManager : MonoBehaviour
     private bool _hasReceivedRoundPhaseFromServer;
     private Coroutine _fallbackRoundFlowCoroutine;
     private Coroutine _localRoundResetCoroutine;
+
+    public void SetSelectedMapId(string mapId)
+    {
+        selectedMapId = SanitizeMapId(mapId);
+    }
+
+    private string ResolveCurrentMapId()
+    {
+        if (!string.IsNullOrWhiteSpace(selectedMapId))
+        {
+            return selectedMapId;
+        }
+
+        return ResolveSceneMapId();
+    }
+
+    private string ResolveSceneMapId()
+    {
+        if (!string.IsNullOrWhiteSpace(mapIdOverride))
+        {
+            return mapIdOverride.Trim();
+        }
+
+        string sceneName = SceneManager.GetActiveScene().name;
+        return string.IsNullOrWhiteSpace(sceneName) ? "SampleScene" : sceneName;
+    }
+
+    private static string SanitizeMapId(string mapId)
+    {
+        return string.IsNullOrWhiteSpace(mapId) ? string.Empty : mapId.Trim();
+    }
+
+    private void ApplySceneConfigurationFrom(NetworkManager sceneManager)
+    {
+        if (sceneManager == null || sceneManager == this)
+        {
+            return;
+        }
+
+        localServerUrl = sceneManager.localServerUrl;
+        productionServerUrl = sceneManager.productionServerUrl;
+        useProductionServerInEditor = sceneManager.useProductionServerInEditor;
+        mapIdOverride = sceneManager.mapIdOverride;
+        nextbotSpawnPoints = new List<NextbotSpawnPointConfig>(sceneManager.nextbotSpawnPoints);
+        playerSpawnPoints = new List<PlayerSpawnPointConfig>(sceneManager.playerSpawnPoints);
+        spawnGroundProbeHeight = sceneManager.spawnGroundProbeHeight;
+        spawnGroundProbeDistance = sceneManager.spawnGroundProbeDistance;
+        spawnGroundOffset = sceneManager.spawnGroundOffset;
+        spawnGroundLayers = sceneManager.spawnGroundLayers;
+        serverFloorSampleSpacing = sceneManager.serverFloorSampleSpacing;
+        serverFloorSamplePadding = sceneManager.serverFloorSamplePadding;
+        nextbotPatrolPoints = new List<NextbotPatrolPointConfig>(sceneManager.nextbotPatrolPoints);
+        intermissionDurationSeconds = sceneManager.intermissionDurationSeconds;
+        roundDurationSeconds = sceneManager.roundDurationSeconds;
+        roomName = sceneManager.roomName;
+        playerPrefab = sceneManager.playerPrefab;
+
+        if (string.IsNullOrWhiteSpace(selectedMapId))
+        {
+            selectedMapId = sceneManager.ResolveSceneMapId();
+        }
+
+        if (room == null)
+        {
+            client = CreateClient();
+        }
+    }
 
     private void OnPlayerAdded(string id, Player player)
     {
@@ -536,6 +612,22 @@ public class NetworkManager : MonoBehaviour
         return spawnPositions;
     }
 
+    public void SendNextbotUpdate(int nextbotId, Vector3 position, float rotationY)
+    {
+        if (room == null || !room.Connection.IsOpen)
+        {
+            return;
+        }
+
+        room.Send("nextbotUpdate", new {
+            id = nextbotId,
+            x = position.x,
+            y = position.y,
+            z = position.z,
+            rotationY = rotationY
+        });
+    }
+
     public List<Vector3> GetConfiguredNextbotPatrolPositions()
     {
         List<Vector3> patrolPositions = new List<Vector3>(nextbotPatrolPoints.Count);
@@ -642,6 +734,7 @@ public class NetworkManager : MonoBehaviour
         List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
         List<object> serializedObstacles = BuildSerializedObstacleBounds();
         List<object> serializedFloorSamples = BuildSerializedFloorSamples(nextbotSpawnPoints, playerSpawnPoints, nextbotPatrolPoints);
+        Debug.Log($"NetworkManager: joining map {ResolveCurrentMapId()} with {serializedObstacles.Count} nextbot obstacles and {serializedFloorSamples.Count} floor samples.");
 
         return new Dictionary<string, object>
         {
@@ -654,6 +747,7 @@ public class NetworkManager : MonoBehaviour
             ["playerSpawnPoints"] = serializedPlayerSpawnPoints,
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
+            ["mapId"] = ResolveCurrentMapId(),
             ["username"] = string.IsNullOrWhiteSpace(AuthenticatedUsername) ? "Player" : AuthenticatedUsername,
         };
     }
@@ -673,7 +767,7 @@ public class NetworkManager : MonoBehaviour
                 continue;
             }
 
-            Bounds bounds = collider.bounds;
+            Bounds bounds = ExpandThinServerObstacleBounds(collider.bounds);
             serializedObstacles.Add(new Dictionary<string, object>
             {
                 ["minX"] = bounds.min.x,
@@ -688,14 +782,26 @@ public class NetworkManager : MonoBehaviour
         return serializedObstacles;
     }
 
+    private static Bounds ExpandThinServerObstacleBounds(Bounds bounds)
+    {
+        Vector3 size = bounds.size;
+        if (size.x < MinServerObstacleThickness)
+        {
+            size.x = MinServerObstacleThickness;
+        }
+
+        if (size.z < MinServerObstacleThickness)
+        {
+            size.z = MinServerObstacleThickness;
+        }
+
+        bounds.size = size;
+        return bounds;
+    }
+
     private static bool ShouldIncludeServerObstacle(Collider collider, int walkableLayer, int rampLayer)
     {
         if (collider == null || !collider.enabled || !collider.gameObject.activeInHierarchy || collider.isTrigger)
-        {
-            return false;
-        }
-
-        if (walkableLayer >= 0 && collider.gameObject.layer == walkableLayer)
         {
             return false;
         }
@@ -714,13 +820,27 @@ public class NetworkManager : MonoBehaviour
         }
 
         Bounds bounds = collider.bounds;
-        if (bounds.size.x <= 0.1f || bounds.size.z <= 0.1f || bounds.size.y <= 0.25f)
+        bool hasHorizontalBlockerExtent = bounds.size.x > 0.1f || bounds.size.z > 0.1f;
+        if (!hasHorizontalBlockerExtent || bounds.size.y <= 0.25f)
+        {
+            return false;
+        }
+
+        bool isFlatWalkableSurface = bounds.size.y <= 1.5f;
+        if (walkableLayer >= 0 && collider.gameObject.layer == walkableLayer && isFlatWalkableSurface)
         {
             return false;
         }
 
         // Skip very large flat surfaces like ground planes; the server only needs blockers.
-        if (bounds.size.y <= 1.5f && (bounds.size.x >= 25f || bounds.size.z >= 25f))
+        if (isFlatWalkableSurface && (bounds.size.x >= 25f || bounds.size.z >= 25f))
+        {
+            return false;
+        }
+
+        bool isLargeEnclosingBounds = bounds.size.x >= MaxServerObstacleEnclosingSpan
+            && bounds.size.z >= MaxServerObstacleEnclosingSpan;
+        if (isLargeEnclosingBounds)
         {
             return false;
         }
@@ -774,11 +894,30 @@ public class NetworkManager : MonoBehaviour
         minZ -= serverFloorSamplePadding;
         maxZ += serverFloorSamplePadding;
 
+        float width = Mathf.Max(0f, maxX - minX);
+        float depth = Mathf.Max(0f, maxZ - minZ);
+        int estimatedColumnCount = Mathf.Max(1, Mathf.CeilToInt(width / spacing) + 1);
+        int estimatedRowCount = Mathf.Max(1, Mathf.CeilToInt(depth / spacing) + 1);
+        long estimatedSampleCount = (long)estimatedColumnCount * estimatedRowCount;
+        int maxGridSamples = Mathf.Max(1, MaxServerFloorSamples - areaPoints.Count);
+        if (estimatedSampleCount > maxGridSamples)
+        {
+            float sampleArea = Mathf.Max(width * depth, spacing * spacing);
+            float adjustedSpacing = Mathf.Sqrt(sampleArea / maxGridSamples);
+            spacing = Mathf.Max(spacing, adjustedSpacing);
+            Debug.LogWarning($"NetworkManager: reduced server floor samples from about {estimatedSampleCount} to {maxGridSamples} for map {ResolveCurrentMapId()} using {spacing:0.##}m spacing.");
+        }
+
         HashSet<string> dedup = new HashSet<string>();
         for (float x = minX; x <= maxX + 0.01f; x += spacing)
         {
             for (float z = minZ; z <= maxZ + 0.01f; z += spacing)
             {
+                if (serializedSamples.Count >= maxGridSamples)
+                {
+                    break;
+                }
+
                 Vector3 grounded = ResolveGroundedSpawnPosition(new Vector3(x, 0f, z));
                 string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
                 if (!dedup.Add(key))
@@ -793,10 +932,20 @@ public class NetworkManager : MonoBehaviour
                     ["z"] = grounded.z,
                 });
             }
+
+            if (serializedSamples.Count >= maxGridSamples)
+            {
+                break;
+            }
         }
 
         for (int i = 0; i < areaPoints.Count; i++)
         {
+            if (serializedSamples.Count >= MaxServerFloorSamples)
+            {
+                break;
+            }
+
             Vector3 grounded = ResolveGroundedSpawnPosition(areaPoints[i]);
             string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
             if (!dedup.Add(key))
@@ -1022,6 +1171,15 @@ public class NetworkManager : MonoBehaviour
         
         // Setup Handlers 
         room.OnStateChange += OnStateChange;
+        room.OnLeave += (code) =>
+        {
+            Debug.LogWarning($"Disconnected from room {currentRoomId} with code {code}.");
+            CleanupRoomState();
+        };
+        room.OnError += (code, message) =>
+        {
+            Debug.LogWarning($"Room error {code}: {message}");
+        };
         
         // Listen for Start Game
         room.OnMessage<string>("startGame", (message) => {
@@ -1245,15 +1403,32 @@ public class NetworkManager : MonoBehaviour
             }
             finally
             {
-                room = null;
-                currentRoomId = "";
-                _hasReceivedRoundPhaseFromServer = false;
-                StopFallbackRoundFlow();
-                // Clear players
-                foreach(var p in players.Values) Destroy(p);
-                players.Clear();
-                RoomLeftEvent?.Invoke();
+                CleanupRoomState();
             }
+        }
+    }
+
+    private void CleanupRoomState()
+    {
+        bool hadRoomState = room != null || !string.IsNullOrEmpty(currentRoomId) || players.Count > 0;
+        room = null;
+        currentRoomId = "";
+        _hasReceivedRoundPhaseFromServer = false;
+        StopFallbackRoundFlow();
+
+        foreach (GameObject playerObject in players.Values)
+        {
+            if (playerObject != null)
+            {
+                Destroy(playerObject);
+            }
+        }
+
+        players.Clear();
+
+        if (hadRoomState)
+        {
+            RoomLeftEvent?.Invoke();
         }
     }
 

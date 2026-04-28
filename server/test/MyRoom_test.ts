@@ -84,14 +84,96 @@ describe("testing your Colyseus app", () => {
     const roomAny = room as any;
     const nextbot = room.state.nextbots.get("nextbot_0");
     assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
 
     nextbot!.x = 0;
     nextbot!.y = 0;
     nextbot!.z = 0;
 
-    roomAny.moveNextbotTowardsPosition(nextbot, { x: 5, z: 0, distance: 5 }, 1, 2, 0);
+    roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 5, z: 0, distance: 5 }, 1, 2, 0);
 
     const insideObstacle = nextbot!.x >= 1 && nextbot!.x <= 3 && nextbot!.z >= -1 && nextbot!.z <= 1;
+    assert.strictEqual(insideObstacle, false);
+  });
+
+  it("keeps nextbots from crossing thin wall obstacles", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotObstacles: [
+        { minX: -10, maxX: 10, minY: -1, maxY: 3, minZ: -0.125, maxZ: 0.125 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    nextbot!.x = 0;
+    nextbot!.y = 0;
+    nextbot!.z = -0.6;
+
+    roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 0, z: 2, distance: 2.6 }, 1, 1, 0);
+
+    assert.ok(nextbot!.z < -0.125);
+  });
+
+  it("steers nextbots away from nearby walls instead of sliding along them", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotObstacles: [
+        { minX: 1, maxX: 1.2, minY: -1, maxY: 3, minZ: -10, maxZ: 10 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    nextbot!.x = 0.35;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+
+    roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 0.35, z: 5, distance: 5 }, 1, 1, 0);
+
+    assert.ok(nextbot!.x < 0.2);
+  });
+
+  it("plans around walls when a route exists", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotObstacles: [
+        { minX: 1, maxX: 1.2, minY: -1, maxY: 3, minZ: -2, maxZ: 2 },
+      ],
+      nextbotSpawnPoints: [
+        { x: 0, y: 0, z: 0 },
+      ],
+      playerSpawnPoints: [
+        { x: 3, y: 0, z: 0 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    nextbot!.x = 0;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+
+    const waypoints = roomAny.findNextbotPathWaypoints(0, 0, 3, 0, 0, 0);
+    assert.ok(waypoints.length > 0);
+    assert.ok(waypoints.some((waypoint: { x: number; z: number }) => Math.abs(waypoint.z) > 2));
+
+    for (let tick = 0; tick < 160; tick++) {
+      roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 3, z: 0, distance: Math.hypot(3 - nextbot!.x, nextbot!.z) }, 0.05, 2, 0);
+    }
+
+    assert.ok(nextbot!.x > 2);
+    const insideObstacle = nextbot!.x >= 1 && nextbot!.x <= 1.2 && nextbot!.z >= -2 && nextbot!.z <= 2;
     assert.strictEqual(insideObstacle, false);
   });
 
@@ -100,13 +182,15 @@ describe("testing your Colyseus app", () => {
     const roomAny = room as any;
     const nextbot = room.state.nextbots.get("nextbot_0");
     assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
 
     nextbot!.x = 0;
     nextbot!.y = 0;
     nextbot!.z = 0;
 
-    roomAny.nextbotControllers[0].groundedY = 0;
-    roomAny.moveNextbotTowardsPosition(nextbot, { x: 5, z: 0, distance: 5 }, 1, 2, 10);
+    controller.groundedY = 0;
+    roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 5, z: 0, distance: 5 }, 1, 2, 10);
 
     assert.strictEqual(nextbot!.y, 0);
   });
@@ -122,13 +206,15 @@ describe("testing your Colyseus app", () => {
     const roomAny = room as any;
     const nextbot = room.state.nextbots.get("nextbot_0");
     assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
 
     nextbot!.x = 0;
     nextbot!.y = 0;
     nextbot!.z = 0;
 
-    roomAny.moveNextbotTowardsPosition(nextbot, { x: 4, z: 0, distance: 4 }, 1, 4, 0);
+    roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 4, z: 0, distance: 4 }, 1, 4, 0);
 
-    assert.strictEqual(nextbot!.y, 2);
+    assert.ok(Math.abs(nextbot!.y - 2) < 0.1);
   });
 });

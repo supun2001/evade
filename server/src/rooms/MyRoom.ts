@@ -26,6 +26,8 @@ const NEXTBOT_TARGET_LOCK_MS = 1400;
 const NEXTBOT_SWITCH_SCORE_THRESHOLD = 20;
 const NEXTBOT_SWITCH_CONFIRM_MS = 300;
 const NEXTBOT_UNREACHABLE_TIMEOUT_MS = 1800;
+const NEXTBOT_BLOCKED_RETARGET_MS = 650;
+const NEXTBOT_BLOCKED_MOVE_EPSILON = 0.05;
 const NEXTBOT_PREDICTION_TIME = 0.28;
 const NEXTBOT_MAX_CHASE_RANGE = 70;
 const NEXTBOT_ACQUIRE_RANGE = 80;
@@ -47,8 +49,23 @@ const NEXTBOT_PATROL_SEPARATION_RADIUS = 6;
 const NEXTBOT_PATROL_CANDIDATE_SAMPLES = 40;
 const NEXTBOT_PATROL_WAIT_MIN_MS = 1000;
 const NEXTBOT_PATROL_WAIT_MAX_MS = 2000;
-const NEXTBOT_OBSTACLE_PADDING = 0.7;
+const NEXTBOT_OBSTACLE_PADDING = 0.85;
+const NEXTBOT_WALL_AVOIDANCE_DISTANCE = 1.6;
+const NEXTBOT_WALL_CLEARANCE_SCORE_WEIGHT = 12;
+const NEXTBOT_WALL_CLOSER_SCORE_WEIGHT = 0; // Unused – kept for reference only
+const NEXTBOT_PATROL_MIN_OBSTACLE_CLEARANCE = 0.85;
+const NEXTBOT_PATROL_CLEARANCE_SCORE_WEIGHT = 3;
 const NEXTBOT_OBSTACLE_HEIGHT_PADDING = 1.5;
+const NEXTBOT_MAX_ENCLOSING_OBSTACLE_SPAN = 45;
+const NEXTBOT_PATH_GRID_SIZE = 1.2;
+const NEXTBOT_PATH_MAX_CELLS = 10_000;
+const NEXTBOT_PATH_MAX_SEARCH_NODES = 4_000;
+const NEXTBOT_PATH_SEARCH_PADDING = 4;
+const NEXTBOT_PATH_OBSTACLE_PADDING = 0.5;
+const NEXTBOT_PATH_WAYPOINT_REACHED_DISTANCE = 0.9;
+const NEXTBOT_PATH_REPLAN_INTERVAL_MS = 800;
+const NEXTBOT_PATH_REPLAN_TARGET_DISTANCE = 1.8;
+const NEXTBOT_PATH_MAX_NEAREST_CELL_RADIUS = 8;
 const NEXTBOT_MAX_ALLOWED_ASCENT = 3;
 const NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT = 4;
 const NEXTBOT_FLOOR_BLEND_RADIUS = 3.5;
@@ -71,6 +88,7 @@ const PLAYER_MAX_DOWNS_BEFORE_ELIMINATION = 3;
 const DEFAULT_INTERMISSION_DURATION_MS = 30_000;
 const DEFAULT_ROUND_DURATION_MS = 180_000;
 const PLAYER_SPAWN_ROTATION_Y = 180;
+const DEFAULT_MAP_ID = "SampleScene";
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;
 const PLAYER_UPDATE_Z = 2;
@@ -105,6 +123,9 @@ type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
 type ObstacleRect = { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number };
 type FloorSample = { x: number; y: number; z: number };
+type PathWaypoint = { x: number; z: number };
+type PathBounds = { minX: number; maxX: number; minZ: number; maxZ: number; cellSize: number; columns: number; rows: number };
+type PathSearchNode = { x: number; z: number; g: number; f: number; parentKey?: string; closed?: boolean };
 type RoundPhase = "waiting" | "intermission" | "round";
 type ScoredTarget = {
   player: Player;
@@ -125,6 +146,13 @@ type NextbotControllerState = {
   patrolWaitUntil: number;
   nextInjuryAt: number;
   currentTargetSessionId: string;
+  blockedMoveStartedAt: number;
+  unreachableTargetSessionId: string;
+  unreachableTargetUntil: number;
+  pathWaypoints: PathWaypoint[];
+  pathTargetX: number;
+  pathTargetZ: number;
+  pathComputedAt: number;
 };
 type PlayerUpdateMessage = Record<string, unknown> | number[];
 type PlayerRoundStats = {
@@ -194,6 +222,15 @@ function sanitizeDisplayName(value: unknown, fallback: string): string {
   return trimmed.slice(0, 24);
 }
 
+function sanitizeMapId(value: unknown): string {
+  if (typeof value !== "string") {
+    return DEFAULT_MAP_ID;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 64) : DEFAULT_MAP_ID;
+}
+
 function quantizeNumber(value: number, step: number): number {
   if (!Number.isFinite(value)) {
     return 0;
@@ -219,6 +256,7 @@ export class MyRoom extends Room<MyRoomState> {
   private nextbotMoveSpeeds = new Map<string, number>();
   private nextbotControllers: NextbotControllerState[] = [];
   private playerSpawnPoints = DEFAULT_PLAYER_SPAWN_POINTS;
+  private mapId = DEFAULT_MAP_ID;
   private nextTargetScanAt = 0;
   private playerRevivedUntil = new Map<string, number>();
   private playerForcedInjuredUntil = new Map<string, number>();
@@ -251,6 +289,8 @@ export class MyRoom extends Room<MyRoomState> {
   onCreate(options: any) {
     this.roomCreatedAt = Date.now();
     this.nextbotDiagnosticWindowStartedAt = this.roomCreatedAt;
+    this.mapId = sanitizeMapId(options?.mapId);
+    this.setMetadata({ mapId: this.mapId });
     this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
     this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(options);
     this.nextbotObstacles = this.resolveNextbotObstacles(options);
@@ -265,7 +305,7 @@ export class MyRoom extends Room<MyRoomState> {
 
     //Room ID
     this.roomId = Math.floor(1000 + Math.random() * 9000).toString();
-    this.logRoomEvent(`created (${this.clients.length}/${this.maxClients} players)`);
+    this.logRoomEvent(`created for map ${this.mapId} (${this.clients.length}/${this.maxClients} players)`);
 
     //Handle player movement
     this.onMessage("playerUpdate", (client, message) => {
@@ -389,6 +429,27 @@ export class MyRoom extends Room<MyRoomState> {
 
       if (!wasInjured && player.isInjured) {
         this.recordPlayerDowned(client.sessionId, now);
+      }
+    });
+
+    this.onMessage("nextbotUpdate", (client, message: any) => {
+      if (!message || typeof message.id !== "number") return;
+      const nextbot = this.state.nextbots.at(message.id);
+      const controller = this.nextbotControllers[message.id];
+      if (!nextbot || !controller) return;
+
+      // Only allow the target client OR the host (client 0) to update the nextbot
+      const isHost = this.clients.length > 0 && this.clients[0].sessionId === client.sessionId;
+      const isTarget = nextbot.targetSessionId === client.sessionId;
+      
+      if (isHost || isTarget) {
+        nextbot.x = message.x;
+        nextbot.y = message.y;
+        nextbot.z = message.z;
+        if (typeof message.rotationY === "number") {
+          nextbot.rotationY = message.rotationY;
+        }
+        controller.pathComputedAt = Date.now() + 1000; // Suspend server movement briefly
       }
     });
 
@@ -693,15 +754,38 @@ export class MyRoom extends Room<MyRoomState> {
         continue;
       }
 
+      if (nextbot.y < -100) {
+        this.resetSingleNextbotToSpawnPoint(index);
+        continue;
+      }
+
       const target = controller.currentTargetSessionId
         ? this.state.players.get(controller.currentTargetSessionId)
         : undefined;
 
-      if (target != null && this.isScoreEligibleTarget(target, now, nextbot)) {
+      const currentScoredTarget = target != null
+        ? this.buildScoredTarget(target, now, nextbot, true)
+        : undefined;
+
+      if (target != null && currentScoredTarget != null && currentScoredTarget.eligible) {
         nextbot.targetSessionId = target.sessionId;
-        const predictedTarget = this.getPredictedTargetPosition(target, nextbot);
-        const groundY = this.getGroundYForPosition(predictedTarget.x, predictedTarget.z, controller.groundedY);
-        this.moveNextbotTowardsPosition(controller, nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
+        const predictedTarget = currentScoredTarget.predicted;
+        
+        let movedDistance = 0;
+        if (now >= controller.pathComputedAt) {
+          const groundY = this.getGroundYForPosition(predictedTarget.x, predictedTarget.z, controller.groundedY);
+          movedDistance = this.moveNextbotTowardsPosition(controller, nextbot, predictedTarget, deltaSeconds, controller.moveSpeed, groundY);
+        }
+
+        if (this.shouldRetargetBlockedMove(controller, movedDistance, predictedTarget.distance, now)) {
+          controller.unreachableTargetSessionId = target.sessionId;
+          controller.unreachableTargetUntil = now + NEXTBOT_UNREACHABLE_TIMEOUT_MS;
+          controller.currentTargetSessionId = "";
+          nextbot.targetSessionId = "";
+          this.setNextPatrolTargetFromCurrentPosition(controller, nextbot);
+          continue;
+        }
+
         this.tryInjurePlayer(controller, nextbot, target, now);
         continue;
       }
@@ -712,7 +796,9 @@ export class MyRoom extends Room<MyRoomState> {
 
       controller.currentTargetSessionId = "";
       nextbot.targetSessionId = "";
-      this.moveNextbotOnPatrol(controller, nextbot, deltaSeconds);
+      if (now >= controller.pathComputedAt) {
+        this.moveNextbotOnPatrol(controller, nextbot, deltaSeconds);
+      }
     }
   }
 
@@ -748,42 +834,59 @@ export class MyRoom extends Room<MyRoomState> {
         patrolWaitUntil: 0,
         nextInjuryAt: 0,
         currentTargetSessionId: "",
+        blockedMoveStartedAt: 0,
+        unreachableTargetSessionId: "",
+        unreachableTargetUntil: 0,
+        pathWaypoints: [],
+        pathTargetX: spawnPoint.x,
+        pathTargetZ: spawnPoint.z,
+        pathComputedAt: 0,
       });
     }
 
     this.assignRandomPatrolTargets();
   }
 
-  private resetNextbotsToSpawnPoints() {
-    for (let index = 0; index < this.nextbotControllers.length; index++) {
-      const controller = this.nextbotControllers[index];
-      const nextbot = this.getNextbotState(index);
-      if (nextbot == null) {
-        continue;
-      }
-
-      const spawnPoint = this.getNextbotSpawnPoint(controller.spawnIndex);
-      nextbot.x = spawnPoint.x;
-      nextbot.y = spawnPoint.y;
-      nextbot.z = spawnPoint.z;
-      nextbot.rotationY = 0;
-      nextbot.targetSessionId = "";
-      nextbot.isActive = false;
-      nextbot.velocityX = 0;
-      nextbot.velocityY = 0;
-      nextbot.velocityZ = 0;
-      nextbot.sampleTimeMs = 0;
-      controller.currentTargetSessionId = "";
-      controller.nextInjuryAt = 0;
-      controller.groundedY = spawnPoint.y;
-      controller.verticalVelocity = 0;
-      controller.isAirborne = false;
-      controller.patrolTargetX = spawnPoint.x;
-      controller.patrolTargetY = spawnPoint.y;
-      controller.patrolTargetZ = spawnPoint.z;
-      controller.patrolWaitUntil = 0;
+  private resetSingleNextbotToSpawnPoint(index: number) {
+    const controller = this.nextbotControllers[index];
+    const nextbot = this.getNextbotState(index);
+    if (nextbot == null || controller == null) {
+      return;
     }
 
+    const spawnPoint = this.getNextbotSpawnPoint(controller.spawnIndex);
+    nextbot.x = spawnPoint.x;
+    nextbot.y = spawnPoint.y;
+    nextbot.z = spawnPoint.z;
+    nextbot.rotationY = 0;
+    nextbot.targetSessionId = "";
+    nextbot.isActive = false;
+    nextbot.velocityX = 0;
+    nextbot.velocityY = 0;
+    nextbot.velocityZ = 0;
+    nextbot.sampleTimeMs = 0;
+    controller.currentTargetSessionId = "";
+    controller.nextInjuryAt = 0;
+    controller.groundedY = spawnPoint.y;
+    controller.verticalVelocity = 0;
+    controller.isAirborne = false;
+    controller.patrolTargetX = spawnPoint.x;
+    controller.patrolTargetY = spawnPoint.y;
+    controller.patrolTargetZ = spawnPoint.z;
+    controller.patrolWaitUntil = 0;
+    controller.blockedMoveStartedAt = 0;
+    controller.unreachableTargetSessionId = "";
+    controller.unreachableTargetUntil = 0;
+    controller.pathWaypoints = [];
+    controller.pathTargetX = spawnPoint.x;
+    controller.pathTargetZ = spawnPoint.z;
+    controller.pathComputedAt = 0;
+  }
+
+  private resetNextbotsToSpawnPoints() {
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      this.resetSingleNextbotToSpawnPoint(index);
+    }
     this.assignRandomPatrolTargets();
   }
 
@@ -798,6 +901,7 @@ export class MyRoom extends Room<MyRoomState> {
           nextbot.velocityY = 0;
           nextbot.velocityZ = 0;
           nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
+          this.nextbotControllers[index].pathWaypoints = [];
         }
       }
     }
@@ -813,16 +917,23 @@ export class MyRoom extends Room<MyRoomState> {
         ? this.state.players.get(controller.currentTargetSessionId)
         : undefined;
 
+      const currentScoredTarget = nextbot != null && currentTarget != null
+        ? this.buildScoredTarget(currentTarget, now, nextbot, true)
+        : undefined;
+
       if (nextbot != null
         && currentTarget != null
-        && !claimedTargets.has(currentTarget.sessionId)
-        && this.isScoreEligibleTarget(currentTarget, now, nextbot)) {
+        && currentScoredTarget != null
+        && currentScoredTarget.eligible
+        && !claimedTargets.has(currentTarget.sessionId)) {
         claimedTargets.add(currentTarget.sessionId);
         nextbot.targetSessionId = currentTarget.sessionId;
         continue;
       }
 
       controller.currentTargetSessionId = "";
+      controller.blockedMoveStartedAt = 0;
+      controller.pathWaypoints = [];
       if (nextbot != null) {
         nextbot.targetSessionId = "";
       }
@@ -840,7 +951,14 @@ export class MyRoom extends Room<MyRoomState> {
         continue;
       }
 
+      if (controller.unreachableTargetSessionId === bestCandidate.player.sessionId
+        && controller.unreachableTargetUntil > now) {
+        continue;
+      }
+
       controller.currentTargetSessionId = bestCandidate.player.sessionId;
+      controller.blockedMoveStartedAt = 0;
+      controller.pathWaypoints = [];
       nextbot.targetSessionId = bestCandidate.player.sessionId;
       claimedTargets.add(bestCandidate.player.sessionId);
     }
@@ -870,12 +988,12 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private moveNextbotOnPatrol(controller: NextbotControllerState, nextbot: NextbotState, deltaSeconds: number) {
-    const patrolTarget = {
+    const currentPatrolPoint = {
       x: controller.patrolTargetX,
       y: controller.patrolTargetY,
       z: controller.patrolTargetZ,
     };
-    const distance = Math.hypot(patrolTarget.x - nextbot.x, patrolTarget.z - nextbot.z);
+    const distance = Math.hypot(currentPatrolPoint.x - nextbot.x, currentPatrolPoint.z - nextbot.z);
     if (distance <= NEXTBOT_PATROL_REACHED_DISTANCE) {
       if (controller.patrolWaitUntil <= 0) {
         controller.patrolWaitUntil = Date.now() + this.getRandomPatrolWaitMs();
@@ -894,11 +1012,124 @@ export class MyRoom extends Room<MyRoomState> {
       y: controller.patrolTargetY,
       z: controller.patrolTargetZ,
     };
-    this.moveNextbotTowardsPosition(controller, nextbot, {
+    const patrolTarget = {
       x: nextPatrolTarget.x,
       z: nextPatrolTarget.z,
       distance: Math.hypot(nextPatrolTarget.x - nextbot.x, nextPatrolTarget.z - nextbot.z),
-    }, deltaSeconds, controller.moveSpeed, this.getGroundYForPosition(nextPatrolTarget.x, nextPatrolTarget.z, controller.groundedY));
+    };
+    const movedDistance = this.moveNextbotTowardsPosition(
+      controller,
+      nextbot,
+      patrolTarget,
+      deltaSeconds,
+      controller.moveSpeed,
+      this.getGroundYForPosition(nextPatrolTarget.x, nextPatrolTarget.z, controller.groundedY));
+    if (this.shouldRetargetBlockedMove(controller, movedDistance, patrolTarget.distance, Date.now())) {
+      this.setNextPatrolTargetFromCurrentPosition(controller, nextbot);
+    }
+  }
+
+  private getNextbotSteeringTarget(
+    controller: NextbotControllerState,
+    nextbot: NextbotState,
+    target: PredictedTargetPosition,
+    targetY?: number,
+  ): PredictedTargetPosition {
+    if (this.nextbotObstacles.length === 0) {
+      controller.pathWaypoints = [];
+      return target;
+    }
+
+    if (!this.wouldNextbotMoveHitObstacle(nextbot.x, nextbot.z, target.x, target.z, nextbot.y, targetY)) {
+      controller.pathWaypoints = [];
+      controller.pathTargetX = target.x;
+      controller.pathTargetZ = target.z;
+      return target;
+    }
+
+    const now = Date.now();
+    const targetMoved = Math.hypot(target.x - controller.pathTargetX, target.z - controller.pathTargetZ)
+      >= NEXTBOT_PATH_REPLAN_TARGET_DISTANCE;
+    const pathExpired = controller.pathComputedAt <= 0
+      || now - controller.pathComputedAt >= NEXTBOT_PATH_REPLAN_INTERVAL_MS;
+    const firstWaypoint = controller.pathWaypoints[0];
+    const pathBlocked = firstWaypoint != null
+      && this.wouldNextbotMoveHitObstacleWithPadding(
+        nextbot.x,
+        nextbot.z,
+        firstWaypoint.x,
+        firstWaypoint.z,
+        nextbot.y,
+        targetY,
+        NEXTBOT_PATH_OBSTACLE_PADDING);
+
+    if (controller.pathWaypoints.length === 0 || targetMoved || pathExpired || pathBlocked) {
+      controller.pathWaypoints = this.findNextbotPathWaypoints(
+        nextbot.x,
+        nextbot.z,
+        target.x,
+        target.z,
+        nextbot.y,
+        targetY);
+      controller.pathTargetX = target.x;
+      controller.pathTargetZ = target.z;
+      controller.pathComputedAt = now;
+    }
+
+    this.discardReachedNextbotPathWaypoints(controller, nextbot);
+    this.shortcutNextbotPathWaypoints(controller, nextbot, targetY);
+
+    const waypoint = controller.pathWaypoints[0];
+    if (waypoint != null) {
+      return {
+        x: waypoint.x,
+        z: waypoint.z,
+        distance: Math.hypot(waypoint.x - nextbot.x, waypoint.z - nextbot.z),
+      };
+    }
+
+    const avoidance = this.getNextbotObstacleAvoidanceVector2D(nextbot.x, nextbot.z, nextbot.y, targetY);
+    if (avoidance.strength > 0) {
+      const fallbackDistance = Math.max(NEXTBOT_PATH_WAYPOINT_REACHED_DISTANCE, NEXTBOT_WALL_AVOIDANCE_DISTANCE);
+      const fallbackX = nextbot.x + avoidance.x * fallbackDistance;
+      const fallbackZ = nextbot.z + avoidance.z * fallbackDistance;
+      return {
+        x: fallbackX,
+        z: fallbackZ,
+        distance: Math.hypot(fallbackX - nextbot.x, fallbackZ - nextbot.z),
+      };
+    }
+
+    return target;
+  }
+
+  private discardReachedNextbotPathWaypoints(controller: NextbotControllerState, nextbot: NextbotState) {
+    while (controller.pathWaypoints.length > 0) {
+      const waypoint = controller.pathWaypoints[0];
+      if (Math.hypot(waypoint.x - nextbot.x, waypoint.z - nextbot.z) > NEXTBOT_PATH_WAYPOINT_REACHED_DISTANCE) {
+        return;
+      }
+
+      controller.pathWaypoints.shift();
+    }
+  }
+
+  private shortcutNextbotPathWaypoints(controller: NextbotControllerState, nextbot: NextbotState, targetY?: number) {
+    while (controller.pathWaypoints.length > 1) {
+      const nextWaypoint = controller.pathWaypoints[1];
+      if (this.wouldNextbotMoveHitObstacleWithPadding(
+        nextbot.x,
+        nextbot.z,
+        nextWaypoint.x,
+        nextWaypoint.z,
+        nextbot.y,
+        targetY,
+        NEXTBOT_PATH_OBSTACLE_PADDING)) {
+        return;
+      }
+
+      controller.pathWaypoints.shift();
+    }
   }
 
   private moveNextbotTowardsPosition(
@@ -913,8 +1144,9 @@ export class MyRoom extends Room<MyRoomState> {
     const previousY = nextbot.y;
     const previousZ = nextbot.z;
     const effectiveMoveSpeed = Number.isFinite(moveSpeed) && moveSpeed > 0 ? moveSpeed : NEXTBOT_MOVE_SPEED;
-    const dx = target.x - nextbot.x;
-    const dz = target.z - nextbot.z;
+    const steeringTarget = this.getNextbotSteeringTarget(controller, nextbot, target, targetY);
+    const dx = steeringTarget.x - nextbot.x;
+    const dz = steeringTarget.z - nextbot.z;
     const distance = Math.hypot(dx, dz);
 
     if (distance <= 0.0001) {
@@ -925,7 +1157,7 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot.velocityY = (nextbot.y - previousY) / stationarySafeDeltaSeconds;
       nextbot.velocityZ = (nextbot.z - previousZ) / stationarySafeDeltaSeconds;
       nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
-      return;
+      return 0;
     }
 
     nextbot.rotationY = Math.atan2(dx, dz) * (180 / Math.PI);
@@ -938,13 +1170,13 @@ export class MyRoom extends Room<MyRoomState> {
       nextbot.velocityY = (nextbot.y - previousY) / stoppingSafeDeltaSeconds;
       nextbot.velocityZ = (nextbot.z - previousZ) / stoppingSafeDeltaSeconds;
       nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
-      return;
+      return 0;
     }
 
     const moveDistance = Math.min(distance - NEXTBOT_STOPPING_DISTANCE, effectiveMoveSpeed * deltaSeconds);
     const desiredMoveX = (dx / distance) * moveDistance;
     const desiredMoveZ = (dz / distance) * moveDistance;
-    const resolvedMove = this.resolveNextbotObstacleAwareMove(nextbot, target, desiredMoveX, desiredMoveZ, targetY);
+    const resolvedMove = this.resolveNextbotObstacleAwareMove(nextbot, steeringTarget, desiredMoveX, desiredMoveZ, targetY);
     nextbot.x += resolvedMove.x;
     nextbot.z += resolvedMove.z;
     if (Math.hypot(resolvedMove.x, resolvedMove.z) > 0.0001) {
@@ -964,6 +1196,31 @@ export class MyRoom extends Room<MyRoomState> {
     nextbot.velocityY = (nextbot.y - previousY) / safeDeltaSeconds;
     nextbot.velocityZ = (nextbot.z - previousZ) / safeDeltaSeconds;
     nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
+    return Math.hypot(nextbot.x - previousX, nextbot.z - previousZ);
+  }
+
+  private shouldRetargetBlockedMove(
+    controller: NextbotControllerState,
+    movedDistance: number,
+    remainingDistance: number,
+    now: number,
+  ) {
+    if (remainingDistance <= NEXTBOT_STOPPING_DISTANCE + 0.35) {
+      controller.blockedMoveStartedAt = 0;
+      return false;
+    }
+
+    if (movedDistance >= NEXTBOT_BLOCKED_MOVE_EPSILON) {
+      controller.blockedMoveStartedAt = 0;
+      return false;
+    }
+
+    if (controller.blockedMoveStartedAt <= 0) {
+      controller.blockedMoveStartedAt = now;
+      return false;
+    }
+
+    return now - controller.blockedMoveStartedAt >= NEXTBOT_BLOCKED_RETARGET_MS;
   }
 
   private getRoomElapsedTimeMs() {
@@ -1035,19 +1292,51 @@ export class MyRoom extends Room<MyRoomState> {
       return { x: 0, z: 0 };
     }
 
-    const candidates = [
-      { x: desiredMoveX, z: desiredMoveZ },
-      { x: desiredMoveX, z: 0 },
-      { x: 0, z: desiredMoveZ },
-    ];
+    const candidates: Array<{ x: number; z: number }> = [];
+    const addCandidate = (x: number, z: number) => {
+      if (!Number.isFinite(x) || !Number.isFinite(z) || Math.hypot(x, z) <= 0.0001) {
+        return;
+      }
+
+      candidates.push({ x, z });
+    };
+    const addCandidateFromDirection = (directionX: number, directionZ: number, distance: number = desiredDistance) => {
+      const directionLength = Math.hypot(directionX, directionZ);
+      if (directionLength <= 0.0001) {
+        return;
+      }
+
+      const candidateDistance = Math.min(desiredDistance, distance);
+      addCandidate(
+        (directionX / directionLength) * candidateDistance,
+        (directionZ / directionLength) * candidateDistance,
+      );
+    };
+
+    addCandidate(desiredMoveX, desiredMoveZ);
+    addCandidate(desiredMoveX, 0);
+    addCandidate(0, desiredMoveZ);
 
     const tangentX = -desiredMoveZ / desiredDistance * Math.max(Math.abs(desiredMoveX), Math.abs(desiredMoveZ));
     const tangentZ = desiredMoveX / desiredDistance * Math.max(Math.abs(desiredMoveX), Math.abs(desiredMoveZ));
-    candidates.push({ x: tangentX, z: tangentZ });
-    candidates.push({ x: -tangentX, z: -tangentZ });
+    addCandidate(tangentX, tangentZ);
+    addCandidate(-tangentX, -tangentZ);
+
+    const desiredDirectionX = desiredMoveX / desiredDistance;
+    const desiredDirectionZ = desiredMoveZ / desiredDistance;
+    const avoidance = this.getNextbotObstacleAvoidanceVector2D(currentX, currentZ, nextbot.y, targetY);
+    if (avoidance.strength > 0) {
+      addCandidateFromDirection(
+        desiredDirectionX + avoidance.x * 1.8,
+        desiredDirectionZ + avoidance.z * 1.8,
+      );
+      addCandidateFromDirection(avoidance.x, avoidance.z);
+    }
 
     let bestMove = { x: 0, z: 0 };
     let bestScore = Number.POSITIVE_INFINITY;
+    // Cache current clearance once – avoids re-iterating all obstacles per candidate.
+    const currentClearance = this.getNearestNextbotObstacleClearance2D(currentX, currentZ, nextbot.y, targetY);
 
     for (const candidate of candidates) {
       const nextX = currentX + candidate.x;
@@ -1058,7 +1347,14 @@ export class MyRoom extends Room<MyRoomState> {
 
       const remainingDistance = Math.hypot(target.x - nextX, target.z - nextZ);
       const movementPenalty = Math.hypot(candidate.x, candidate.z) * -0.05;
-      const score = remainingDistance + movementPenalty;
+      // Only compute clearance for the end position; omit the wall-clinging
+      // "moving closer" penalty which caused bots to hug walls.
+      const clearance = this.getNearestNextbotObstacleClearance2D(nextX, nextZ, nextbot.y, targetY);
+      const clearanceDeficit = Number.isFinite(clearance)
+        ? Math.max(0, NEXTBOT_WALL_AVOIDANCE_DISTANCE - clearance)
+        : 0;
+      const clearancePenalty = clearanceDeficit * NEXTBOT_WALL_CLEARANCE_SCORE_WEIGHT;
+      const score = remainingDistance + movementPenalty + clearancePenalty;
       if (score < bestScore) {
         bestScore = score;
         bestMove = candidate;
@@ -1154,6 +1450,10 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     const predicted = this.getPredictedTargetPosition(player, nextbot);
+    if (!this.canNextbotReachPosition(nextbot.x, nextbot.z, predicted.x, predicted.z, nextbot.y, player.y)) {
+      return undefined;
+    }
+
     const distanceScore = Math.max(0, NEXTBOT_DISTANCE_SCORE_BASE - predicted.distance);
     const visibilityProxyBonus = predicted.distance <= NEXTBOT_VISIBLE_PROXY_RANGE ? NEXTBOT_VISIBLE_PROXY_BONUS : 0;
     const facingBonus = this.isTargetInFront(predicted, nextbot) ? NEXTBOT_FRONT_BONUS : 0;
@@ -1272,6 +1572,8 @@ export class MyRoom extends Room<MyRoomState> {
     for (let index = 0; index < this.nextbotControllers.length; index++) {
       const controller = this.nextbotControllers[index];
       controller.currentTargetSessionId = "";
+      controller.blockedMoveStartedAt = 0;
+      controller.pathWaypoints = [];
       const nextbot = this.getNextbotState(index);
       if (nextbot != null) {
         nextbot.targetSessionId = "";
@@ -1317,6 +1619,7 @@ export class MyRoom extends Room<MyRoomState> {
       controller.patrolTargetY = patrolTarget.y;
       controller.patrolTargetZ = patrolTarget.z;
       controller.patrolWaitUntil = 0;
+      controller.pathWaypoints = [];
     }
   }
 
@@ -1326,6 +1629,8 @@ export class MyRoom extends Room<MyRoomState> {
     controller.patrolTargetY = patrolTarget.y;
     controller.patrolTargetZ = patrolTarget.z;
     controller.patrolWaitUntil = 0;
+    controller.blockedMoveStartedAt = 0;
+    controller.pathWaypoints = [];
   }
 
   private getRandomPatrolWaitMs() {
@@ -1365,11 +1670,21 @@ export class MyRoom extends Room<MyRoomState> {
         continue;
       }
 
+      const obstacleClearance = this.getNearestNextbotObstacleClearance2D(candidateX, candidateZ, originY, originY);
+      if (obstacleClearance < NEXTBOT_PATROL_MIN_OBSTACLE_CLEARANCE) {
+        continue;
+      }
+
+      if (!this.canNextbotReachPosition(originX, originZ, candidateX, candidateZ, originY, originY)) {
+        continue;
+      }
+
       const separationDistance = this.getPatrolTargetSeparationDistance(candidateX, candidateZ, requestingController);
       const separationPenalty = separationDistance < NEXTBOT_PATROL_SEPARATION_RADIUS
         ? (NEXTBOT_PATROL_SEPARATION_RADIUS - separationDistance) * 1000
         : 0;
-      const score = separationDistance * 10 + travelDistance - separationPenalty;
+      const clearanceBonus = Math.min(obstacleClearance, NEXTBOT_WALL_AVOIDANCE_DISTANCE * 2) * NEXTBOT_PATROL_CLEARANCE_SCORE_WEIGHT;
+      const score = separationDistance * 10 + travelDistance + clearanceBonus - separationPenalty;
 
       if (score > bestScore) {
         bestScore = score;
@@ -1383,7 +1698,10 @@ export class MyRoom extends Room<MyRoomState> {
         const candidateX = minX + Math.random() * (maxX - minX);
         const candidateZ = minZ + Math.random() * (maxZ - minZ);
         const travelDistance = Math.hypot(candidateX - originX, candidateZ - originZ);
-        if (travelDistance >= NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE) {
+        const obstacleClearance = this.getNearestNextbotObstacleClearance2D(candidateX, candidateZ, originY, originY);
+        if (travelDistance >= NEXTBOT_PATROL_MIN_TRAVEL_DISTANCE
+          && obstacleClearance >= NEXTBOT_OBSTACLE_PADDING
+          && this.canNextbotReachPosition(originX, originZ, candidateX, candidateZ, originY, originY)) {
           bestTargetX = candidateX;
           bestTargetZ = candidateZ;
           break;
@@ -1526,6 +1844,12 @@ export class MyRoom extends Room<MyRoomState> {
           return undefined;
         }
 
+        const width = maxX - minX;
+        const depth = maxZ - minZ;
+        if (width >= NEXTBOT_MAX_ENCLOSING_OBSTACLE_SPAN && depth >= NEXTBOT_MAX_ENCLOSING_OBSTACLE_SPAN) {
+          return undefined;
+        }
+
         return { minX, maxX, minY, maxY, minZ, maxZ };
       })
       .filter((obstacle): obstacle is ObstacleRect => obstacle !== undefined);
@@ -1605,6 +1929,354 @@ export class MyRoom extends Room<MyRoomState> {
     return closest.sample.y;
   }
 
+  private canNextbotReachPosition(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    currentY: number,
+    targetY?: number,
+  ) {
+    if (this.nextbotObstacles.length === 0) {
+      return true;
+    }
+
+    if (!this.wouldNextbotMoveHitObstacle(startX, startZ, endX, endZ, currentY, targetY)) {
+      return true;
+    }
+
+    return this.findNextbotPathWaypoints(startX, startZ, endX, endZ, currentY, targetY).length > 0;
+  }
+
+  private findNextbotPathWaypoints(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    currentY: number,
+    targetY?: number,
+  ): PathWaypoint[] {
+    if (this.nextbotObstacles.length === 0) {
+      return [{ x: endX, z: endZ }];
+    }
+
+    if (!this.wouldNextbotMoveHitObstacleWithPadding(
+      startX,
+      startZ,
+      endX,
+      endZ,
+      currentY,
+      targetY,
+      NEXTBOT_PATH_OBSTACLE_PADDING)) {
+      return [{ x: endX, z: endZ }];
+    }
+
+    const bounds = this.getNextbotPathBounds(startX, startZ, endX, endZ);
+    const startCell = this.findNearestNextbotPathCell(this.worldToNextbotPathCell(startX, startZ, bounds), bounds, currentY, targetY);
+    const goalCell = this.findNearestNextbotPathCell(this.worldToNextbotPathCell(endX, endZ, bounds), bounds, currentY, targetY);
+    if (startCell == null || goalCell == null) {
+      return [];
+    }
+
+    const goalKey = this.getNextbotPathCellKey(goalCell.x, goalCell.z);
+    const openKeys: string[] = [];
+    const nodes = new Map<string, PathSearchNode>();
+    const startKey = this.getNextbotPathCellKey(startCell.x, startCell.z);
+    nodes.set(startKey, {
+      x: startCell.x,
+      z: startCell.z,
+      g: 0,
+      f: this.getNextbotPathCellHeuristic(startCell.x, startCell.z, goalCell.x, goalCell.z, bounds),
+    });
+    openKeys.push(startKey);
+
+    const directions = [
+      { x: 1, z: 0, cost: 1 },
+      { x: -1, z: 0, cost: 1 },
+      { x: 0, z: 1, cost: 1 },
+      { x: 0, z: -1, cost: 1 },
+      { x: 1, z: 1, cost: Math.SQRT2 },
+      { x: 1, z: -1, cost: Math.SQRT2 },
+      { x: -1, z: 1, cost: Math.SQRT2 },
+      { x: -1, z: -1, cost: Math.SQRT2 },
+    ];
+
+    let searchedNodeCount = 0;
+    while (openKeys.length > 0 && searchedNodeCount < NEXTBOT_PATH_MAX_SEARCH_NODES) {
+      let bestOpenIndex = 0;
+      let bestOpenScore = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < openKeys.length; index++) {
+        const candidate = nodes.get(openKeys[index]);
+        if (candidate != null && candidate.f < bestOpenScore) {
+          bestOpenScore = candidate.f;
+          bestOpenIndex = index;
+        }
+      }
+
+      const currentKey = openKeys.splice(bestOpenIndex, 1)[0];
+      const currentNode = nodes.get(currentKey);
+      if (currentNode == null || currentNode.closed) {
+        continue;
+      }
+
+      currentNode.closed = true;
+      searchedNodeCount += 1;
+
+      if (currentKey === goalKey) {
+        return this.buildNextbotPathWaypoints(nodes, currentNode, bounds, startX, startZ, endX, endZ, currentY, targetY);
+      }
+
+      for (const direction of directions) {
+        const neighborX = currentNode.x + direction.x;
+        const neighborZ = currentNode.z + direction.z;
+        if (!this.isNextbotPathCellInsideBounds(neighborX, neighborZ, bounds)
+          || this.isNextbotPathCellBlocked(neighborX, neighborZ, bounds, currentY, targetY)) {
+          continue;
+        }
+
+        if (direction.x !== 0 && direction.z !== 0
+          && (this.isNextbotPathCellBlocked(currentNode.x + direction.x, currentNode.z, bounds, currentY, targetY)
+            || this.isNextbotPathCellBlocked(currentNode.x, currentNode.z + direction.z, bounds, currentY, targetY))) {
+          continue;
+        }
+
+        const neighborKey = this.getNextbotPathCellKey(neighborX, neighborZ);
+        const existingNode = nodes.get(neighborKey);
+        if (existingNode?.closed) {
+          continue;
+        }
+
+        const nextG = currentNode.g + direction.cost * bounds.cellSize;
+        if (existingNode != null && nextG >= existingNode.g) {
+          continue;
+        }
+
+        const heuristic = this.getNextbotPathCellHeuristic(neighborX, neighborZ, goalCell.x, goalCell.z, bounds);
+        nodes.set(neighborKey, {
+          x: neighborX,
+          z: neighborZ,
+          g: nextG,
+          f: nextG + heuristic,
+          parentKey: currentKey,
+        });
+
+        if (existingNode == null) {
+          openKeys.push(neighborKey);
+        }
+      }
+    }
+
+    return [];
+  }
+
+  private getNextbotPathBounds(startX: number, startZ: number, endX: number, endZ: number): PathBounds {
+    let minX = Math.min(startX, endX);
+    let maxX = Math.max(startX, endX);
+    let minZ = Math.min(startZ, endZ);
+    let maxZ = Math.max(startZ, endZ);
+
+    const includePoint = (x: number, z: number) => {
+      if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        return;
+      }
+
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minZ = Math.min(minZ, z);
+      maxZ = Math.max(maxZ, z);
+    };
+
+    for (const point of this.nextbotSpawnPoints) {
+      includePoint(point.x, point.z);
+    }
+
+    for (const point of this.playerSpawnPoints) {
+      includePoint(point.x, point.z);
+    }
+
+    for (const point of this.nextbotPatrolPoints) {
+      includePoint(point.x, point.z);
+    }
+
+    for (const sample of this.nextbotFloorSamples) {
+      includePoint(sample.x, sample.z);
+    }
+
+    for (const obstacle of this.nextbotObstacles) {
+      includePoint(obstacle.minX, obstacle.minZ);
+      includePoint(obstacle.maxX, obstacle.maxZ);
+    }
+
+    minX -= NEXTBOT_PATH_SEARCH_PADDING;
+    maxX += NEXTBOT_PATH_SEARCH_PADDING;
+    minZ -= NEXTBOT_PATH_SEARCH_PADDING;
+    maxZ += NEXTBOT_PATH_SEARCH_PADDING;
+
+    const width = Math.max(NEXTBOT_PATH_GRID_SIZE, maxX - minX);
+    const depth = Math.max(NEXTBOT_PATH_GRID_SIZE, maxZ - minZ);
+    let cellSize = NEXTBOT_PATH_GRID_SIZE;
+    let columns = Math.max(2, Math.ceil(width / cellSize) + 1);
+    let rows = Math.max(2, Math.ceil(depth / cellSize) + 1);
+    if (columns * rows > NEXTBOT_PATH_MAX_CELLS) {
+      cellSize = Math.max(NEXTBOT_PATH_GRID_SIZE, Math.sqrt((width * depth) / NEXTBOT_PATH_MAX_CELLS));
+      columns = Math.max(2, Math.ceil(width / cellSize) + 1);
+      rows = Math.max(2, Math.ceil(depth / cellSize) + 1);
+    }
+
+    return { minX, maxX, minZ, maxZ, cellSize, columns, rows };
+  }
+
+  private worldToNextbotPathCell(x: number, z: number, bounds: PathBounds) {
+    return {
+      x: Math.max(0, Math.min(bounds.columns - 1, Math.round((x - bounds.minX) / bounds.cellSize))),
+      z: Math.max(0, Math.min(bounds.rows - 1, Math.round((z - bounds.minZ) / bounds.cellSize))),
+    };
+  }
+
+  private getNextbotPathCellCenter(cellX: number, cellZ: number, bounds: PathBounds): PathWaypoint {
+    return {
+      x: bounds.minX + cellX * bounds.cellSize,
+      z: bounds.minZ + cellZ * bounds.cellSize,
+    };
+  }
+
+  private findNearestNextbotPathCell(
+    originCell: { x: number; z: number },
+    bounds: PathBounds,
+    currentY: number,
+    targetY?: number,
+  ) {
+    for (let radius = 0; radius <= NEXTBOT_PATH_MAX_NEAREST_CELL_RADIUS; radius++) {
+      let bestCell: { x: number; z: number } | undefined;
+      let bestDistanceSq = Number.POSITIVE_INFINITY;
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== radius) {
+            continue;
+          }
+
+          const candidateX = originCell.x + dx;
+          const candidateZ = originCell.z + dz;
+          if (!this.isNextbotPathCellInsideBounds(candidateX, candidateZ, bounds)
+            || this.isNextbotPathCellBlocked(candidateX, candidateZ, bounds, currentY, targetY)) {
+            continue;
+          }
+
+          const distanceSq = (dx * dx) + (dz * dz);
+          if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestCell = { x: candidateX, z: candidateZ };
+          }
+        }
+      }
+
+      if (bestCell != null) {
+        return bestCell;
+      }
+    }
+
+    return undefined;
+  }
+
+  private isNextbotPathCellInsideBounds(cellX: number, cellZ: number, bounds: PathBounds) {
+    return cellX >= 0 && cellX < bounds.columns && cellZ >= 0 && cellZ < bounds.rows;
+  }
+
+  private isNextbotPathCellBlocked(
+    cellX: number,
+    cellZ: number,
+    bounds: PathBounds,
+    currentY: number,
+    targetY?: number,
+  ) {
+    const center = this.getNextbotPathCellCenter(cellX, cellZ, bounds);
+    return this.isNextbotPathPointBlocked(center.x, center.z, currentY, targetY);
+  }
+
+  private isNextbotPathPointBlocked(x: number, z: number, currentY: number, targetY?: number) {
+    for (const obstacle of this.nextbotObstacles) {
+      if (!this.isObstacleRelevantForNextbotHeight(obstacle, currentY, targetY)) {
+        continue;
+      }
+
+      if (this.isPointInsideObstacle2D(x, z, {
+        minX: obstacle.minX - NEXTBOT_PATH_OBSTACLE_PADDING,
+        maxX: obstacle.maxX + NEXTBOT_PATH_OBSTACLE_PADDING,
+        minZ: obstacle.minZ - NEXTBOT_PATH_OBSTACLE_PADDING,
+        maxZ: obstacle.maxZ + NEXTBOT_PATH_OBSTACLE_PADDING,
+      })) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private getNextbotPathCellKey(cellX: number, cellZ: number) {
+    return `${cellX}:${cellZ}`;
+  }
+
+  private getNextbotPathCellHeuristic(cellX: number, cellZ: number, goalX: number, goalZ: number, bounds: PathBounds) {
+    return Math.hypot(goalX - cellX, goalZ - cellZ) * bounds.cellSize;
+  }
+
+  private buildNextbotPathWaypoints(
+    nodes: Map<string, PathSearchNode>,
+    goalNode: PathSearchNode,
+    bounds: PathBounds,
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    currentY: number,
+    targetY?: number,
+  ): PathWaypoint[] {
+    const cells: PathWaypoint[] = [];
+    let currentNode: PathSearchNode | undefined = goalNode;
+    while (currentNode != null) {
+      cells.push(this.getNextbotPathCellCenter(currentNode.x, currentNode.z, bounds));
+      currentNode = currentNode.parentKey != null ? nodes.get(currentNode.parentKey) : undefined;
+    }
+    cells.reverse();
+
+    const rawWaypoints = cells.slice(1);
+    if (rawWaypoints.length === 0) {
+      return [];
+    }
+
+    if (!this.isNextbotPathPointBlocked(endX, endZ, currentY, targetY)) {
+      rawWaypoints[rawWaypoints.length - 1] = { x: endX, z: endZ };
+    }
+
+    const smoothedWaypoints: PathWaypoint[] = [];
+    let anchor = { x: startX, z: startZ };
+    let waypointIndex = 0;
+    while (waypointIndex < rawWaypoints.length) {
+      let furthestReachableIndex = waypointIndex;
+      for (let index = rawWaypoints.length - 1; index >= waypointIndex; index--) {
+        const candidate = rawWaypoints[index];
+        if (!this.wouldNextbotMoveHitObstacleWithPadding(
+          anchor.x,
+          anchor.z,
+          candidate.x,
+          candidate.z,
+          currentY,
+          targetY,
+          NEXTBOT_PATH_OBSTACLE_PADDING)) {
+          furthestReachableIndex = index;
+          break;
+        }
+      }
+
+      const waypoint = rawWaypoints[furthestReachableIndex];
+      smoothedWaypoints.push(waypoint);
+      anchor = waypoint;
+      waypointIndex = furthestReachableIndex + 1;
+    }
+
+    return smoothedWaypoints;
+  }
+
   private wouldNextbotMoveHitObstacle(
     startX: number,
     startZ: number,
@@ -1613,20 +2285,57 @@ export class MyRoom extends Room<MyRoomState> {
     currentY: number,
     targetY?: number,
   ) {
+    return this.wouldNextbotMoveHitObstacleWithPadding(startX, startZ, endX, endZ, currentY, targetY, NEXTBOT_OBSTACLE_PADDING);
+  }
+
+  private wouldNextbotMoveHitObstacleWithPadding(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    currentY: number,
+    targetY: number | undefined,
+    obstaclePadding: number,
+  ) {
     for (const obstacle of this.nextbotObstacles) {
       if (!this.isObstacleRelevantForNextbotHeight(obstacle, currentY, targetY)) {
         continue;
       }
 
       const inflatedObstacle = {
-        minX: obstacle.minX - NEXTBOT_OBSTACLE_PADDING,
-        maxX: obstacle.maxX + NEXTBOT_OBSTACLE_PADDING,
-        minZ: obstacle.minZ - NEXTBOT_OBSTACLE_PADDING,
-        maxZ: obstacle.maxZ + NEXTBOT_OBSTACLE_PADDING,
+        minX: obstacle.minX - obstaclePadding,
+        maxX: obstacle.maxX + obstaclePadding,
+        minZ: obstacle.minZ - obstaclePadding,
+        maxZ: obstacle.maxZ + obstaclePadding,
       };
 
-      const startInside = this.isPointInsideObstacle2D(startX, startZ, inflatedObstacle);
-      if (!startInside && this.doesSegmentIntersectObstacle2D(startX, startZ, endX, endZ, inflatedObstacle)) {
+      const startInsideObstacle = this.isPointInsideObstacle2D(startX, startZ, obstacle);
+      if (startInsideObstacle) {
+        const endInsideObstacle = this.isPointInsideObstacle2D(endX, endZ, obstacle);
+        if (endInsideObstacle
+          && this.getObstacleEscapeDistance2D(endX, endZ, obstacle) > this.getObstacleEscapeDistance2D(startX, startZ, obstacle) + 0.001) {
+          return true;
+        }
+
+        continue;
+      }
+
+      const startInsideInflated = this.isPointInsideObstacle2D(startX, startZ, inflatedObstacle);
+      if (startInsideInflated) {
+        if (this.doesSegmentIntersectObstacle2D(startX, startZ, endX, endZ, obstacle)) {
+          return true;
+        }
+
+        const endInsideInflated = this.isPointInsideObstacle2D(endX, endZ, inflatedObstacle);
+        if (endInsideInflated
+          && this.getObstacleEscapeDistance2D(endX, endZ, inflatedObstacle) > this.getObstacleEscapeDistance2D(startX, startZ, inflatedObstacle) + 0.001) {
+          return true;
+        }
+
+        continue;
+      }
+
+      if (this.doesSegmentIntersectObstacle2D(startX, startZ, endX, endZ, inflatedObstacle)) {
         return true;
       }
     }
@@ -1642,6 +2351,116 @@ export class MyRoom extends Room<MyRoomState> {
 
   private isPointInsideObstacle2D(x: number, z: number, obstacle: { minX: number; maxX: number; minZ: number; maxZ: number }) {
     return x >= obstacle.minX && x <= obstacle.maxX && z >= obstacle.minZ && z <= obstacle.maxZ;
+  }
+
+  private getObstacleEscapeDistance2D(x: number, z: number, obstacle: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+    if (!this.isPointInsideObstacle2D(x, z, obstacle)) {
+      return 0;
+    }
+
+    return Math.min(
+      x - obstacle.minX,
+      obstacle.maxX - x,
+      z - obstacle.minZ,
+      obstacle.maxZ - z,
+    );
+  }
+
+  private getNearestNextbotObstacleClearance2D(
+    x: number,
+    z: number,
+    currentY: number,
+    targetY?: number,
+  ) {
+    let nearestClearance = Number.POSITIVE_INFINITY;
+
+    for (const obstacle of this.nextbotObstacles) {
+      if (!this.isObstacleRelevantForNextbotHeight(obstacle, currentY, targetY)) {
+        continue;
+      }
+
+      nearestClearance = Math.min(nearestClearance, this.getObstacleClearance2D(x, z, obstacle));
+    }
+
+    return nearestClearance;
+  }
+
+  private getObstacleClearance2D(x: number, z: number, obstacle: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+    if (this.isPointInsideObstacle2D(x, z, obstacle)) {
+      return -this.getObstacleEscapeDistance2D(x, z, obstacle);
+    }
+
+    const nearestX = Math.max(obstacle.minX, Math.min(x, obstacle.maxX));
+    const nearestZ = Math.max(obstacle.minZ, Math.min(z, obstacle.maxZ));
+    return Math.hypot(x - nearestX, z - nearestZ);
+  }
+
+  private getNextbotObstacleAvoidanceVector2D(
+    x: number,
+    z: number,
+    currentY: number,
+    targetY?: number,
+  ) {
+    let avoidanceX = 0;
+    let avoidanceZ = 0;
+
+    for (const obstacle of this.nextbotObstacles) {
+      if (!this.isObstacleRelevantForNextbotHeight(obstacle, currentY, targetY)) {
+        continue;
+      }
+
+      const clearance = this.getObstacleClearance2D(x, z, obstacle);
+      if (clearance >= NEXTBOT_WALL_AVOIDANCE_DISTANCE) {
+        continue;
+      }
+
+      const awayDirection = this.getObstacleAwayDirection2D(x, z, obstacle);
+      const strength = (NEXTBOT_WALL_AVOIDANCE_DISTANCE - Math.max(0, clearance)) / NEXTBOT_WALL_AVOIDANCE_DISTANCE;
+      avoidanceX += awayDirection.x * strength;
+      avoidanceZ += awayDirection.z * strength;
+    }
+
+    const avoidanceLength = Math.hypot(avoidanceX, avoidanceZ);
+    if (avoidanceLength <= 0.0001) {
+      return { x: 0, z: 0, strength: 0 };
+    }
+
+    return {
+      x: avoidanceX / avoidanceLength,
+      z: avoidanceZ / avoidanceLength,
+      strength: Math.min(1, avoidanceLength),
+    };
+  }
+
+  private getObstacleAwayDirection2D(x: number, z: number, obstacle: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+    if (this.isPointInsideObstacle2D(x, z, obstacle)) {
+      const sides = [
+        { distance: Math.abs(x - obstacle.minX), x: -1, z: 0 },
+        { distance: Math.abs(obstacle.maxX - x), x: 1, z: 0 },
+        { distance: Math.abs(z - obstacle.minZ), x: 0, z: -1 },
+        { distance: Math.abs(obstacle.maxZ - z), x: 0, z: 1 },
+      ];
+      sides.sort((left, right) => left.distance - right.distance);
+      return { x: sides[0].x, z: sides[0].z };
+    }
+
+    const nearestX = Math.max(obstacle.minX, Math.min(x, obstacle.maxX));
+    const nearestZ = Math.max(obstacle.minZ, Math.min(z, obstacle.maxZ));
+    const awayX = x - nearestX;
+    const awayZ = z - nearestZ;
+    const awayLength = Math.hypot(awayX, awayZ);
+    if (awayLength > 0.0001) {
+      return { x: awayX / awayLength, z: awayZ / awayLength };
+    }
+
+    const sideDistances = [
+      { distance: Math.abs(x - obstacle.minX), x: -1, z: 0 },
+      { distance: Math.abs(obstacle.maxX - x), x: 1, z: 0 },
+      { distance: Math.abs(z - obstacle.minZ), x: 0, z: -1 },
+      { distance: Math.abs(obstacle.maxZ - z), x: 0, z: 1 },
+    ];
+    sideDistances.sort((left, right) => left.distance - right.distance);
+    return { x: sideDistances[0].x, z: sideDistances[0].z };
   }
 
   private doesSegmentIntersectObstacle2D(
@@ -1774,6 +2593,16 @@ export class MyRoom extends Room<MyRoomState> {
   private applyNextbotConfigOverrides(options: any) {
     const refreshedMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
     this.nextbotMoveSpeeds = refreshedMoveSpeeds;
+
+    const refreshedObstacles = this.resolveNextbotObstacles(options);
+    if (refreshedObstacles.length > 0) {
+      this.nextbotObstacles = refreshedObstacles;
+    }
+
+    const refreshedFloorSamples = this.resolveNextbotFloorSamples(options);
+    if (refreshedFloorSamples.length > 0) {
+      this.nextbotFloorSamples = refreshedFloorSamples;
+    }
 
     for (let index = 0; index < this.nextbotControllers.length; index++) {
       const controller = this.nextbotControllers[index];

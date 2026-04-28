@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5feb501878edbcc4f86dcc9577797343, type: 3}
+  m_Name: EditorSceneLoaderSettings
+  m_EditorClassIdentifier: Assembly-CSharp-Editor::Blink.ThirdParty.EditorSceneLoader.EditorSceneLoaderSettings
+  sceneEntries:
+  - displayName: Main Menu
+    scene: {fileID: 102900000, guid: 99c9720ab356a0642a771bea13969a05, type: 3}
+  - displayName: Scene 1
+    scene: {fileID: 102900000, guid: a88a920fa294f4137878aeb3381337fa, type: 3}
+  - displayName: Scene 2
+    scene: {fileID: 102900000, guid: 88b1c96b5ab4f4582b1df3e2ef8c1bca, type: 3}

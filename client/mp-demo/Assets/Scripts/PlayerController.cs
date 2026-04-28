@@ -513,6 +513,7 @@ public class PlayerController : MonoBehaviour
         if (!_isSimulationControlled)
         {
             HandlePauseMenuToggle();
+            CheckMapBounds();
         }
 
         if (_isSpectating)
@@ -599,6 +600,42 @@ public class PlayerController : MonoBehaviour
         if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
         {
             SetPauseMenuVisible(!_isPauseMenuOpen);
+        }
+    }
+
+    private void CheckMapBounds()
+    {
+        if (_transform.position.y < -100f)
+        {
+            RespawnAtStart();
+        }
+    }
+
+    private void RespawnAtStart()
+    {
+        if (NetworkManager.Instance != null)
+        {
+            var spawns = NetworkManager.Instance.GetConfiguredPlayerSpawnPositions();
+            if (spawns != null && spawns.Count > 0)
+            {
+                int spawnIndex = UnityEngine.Random.Range(0, spawns.Count);
+                Vector3 spawnPoint = spawns[spawnIndex];
+                
+                if (_characterController != null)
+                {
+                    bool wasEnabled = _characterController.enabled;
+                    _characterController.enabled = false;
+                    _transform.position = spawnPoint;
+                    _characterController.enabled = wasEnabled;
+                }
+                else
+                {
+                    _transform.position = spawnPoint;
+                }
+
+                _verticalVelocity = 0f;
+                _horizontalVelocity = Vector3.zero;
+            }
         }
     }
 

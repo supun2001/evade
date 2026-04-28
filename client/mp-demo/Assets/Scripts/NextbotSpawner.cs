@@ -1,10 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class NextbotSpawner : MonoBehaviour
 {
     private const int FallbackNextbotCount = 5;
     private const string NextbotPrefabResourcePath = "Prefrabs/NextBots";
+
+    private static NextbotSpawner _instance;
 
     private NextbotRegistry _nextbotRegistry;
     private GameObject _nextbotPrefab;
@@ -12,13 +15,38 @@ public class NextbotSpawner : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void Bootstrap()
     {
-        if (FindFirstObjectByType<NextbotSpawner>() != null)
+        if (_instance != null || FindFirstObjectByType<NextbotSpawner>() != null)
         {
             return;
         }
 
         GameObject spawnerObject = new GameObject("NextbotSpawner");
         spawnerObject.AddComponent<NextbotSpawner>();
+    }
+
+    private void Awake()
+    {
+        if (_instance != null && _instance != this)
+        {
+            enabled = false;
+            Destroy(gameObject);
+            return;
+        }
+
+        _instance = this;
+        DontDestroyOnLoad(gameObject);
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+    }
+
+    private void OnDestroy()
+    {
+        if (_instance != this)
+        {
+            return;
+        }
+
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        _instance = null;
     }
 
     private void Start()
@@ -44,6 +72,11 @@ public class NextbotSpawner : MonoBehaviour
         }
 
         EnsureNetworkedNextbotInstances();
+    }
+
+    private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        RefreshNow();
     }
 
     private void EnsureNetworkedNextbotInstances()

@@ -560,7 +560,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (!_hasAppliedRoomState)
         {
             PushRoomStateSnapshot(rawTargetPosition, targetRotation, targetVelocity, nextbotState.sampleTimeMs, true);
-            ApplyRoomStatePosition(targetPosition, false);
+            ApplyRoomStatePosition(targetPosition, true);
             transform.rotation = targetRotation;
             _hasAppliedRoomState = true;
             return true;
@@ -600,9 +600,11 @@ public class NextbotFollowPlayer : MonoBehaviour
                 smoothedBufferedPlanarPosition.x,
                 smoothedBufferedY,
                 smoothedBufferedPlanarPosition.z);
+            smoothedBufferedPosition = ConstrainRoomStateMovement(transform.position, smoothedBufferedPosition);
             float bufferedRotationBlend = 1f - Mathf.Exp(-GetEffectiveRoomStateRotationLerpSpeed() * Time.deltaTime);
 
             transform.position = smoothedBufferedPosition;
+            ApplySolidObstaclePush();
             transform.rotation = Quaternion.Slerp(transform.rotation, bufferedRotation, bufferedRotationBlend);
             if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
             {
@@ -616,7 +618,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         float snapDistance = GetEffectiveRoomStateSnapDistance();
         if (positionError >= snapDistance)
         {
-            ApplyRoomStatePosition(targetPosition, false);
+            ApplyRoomStatePosition(targetPosition, true);
             transform.rotation = targetRotation;
             _remotePresentationVelocity = Vector3.zero;
             return true;
@@ -633,8 +635,10 @@ public class NextbotFollowPlayer : MonoBehaviour
         float positionBlend = 1f - Mathf.Exp(-effectivePositionLerpSpeed * Time.deltaTime);
         float rotationBlend = 1f - Mathf.Exp(-GetEffectiveRoomStateRotationLerpSpeed() * Time.deltaTime);
         Vector3 blendedPosition = Vector3.Lerp(transform.position, targetPosition, positionBlend);
+        blendedPosition = ConstrainRoomStateMovement(transform.position, blendedPosition);
 
         transform.position = blendedPosition;
+        ApplySolidObstaclePush();
         transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationBlend);
         if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
         {
@@ -898,6 +902,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _groundHeightVelocity = 0f;
 
         transform.position = targetPosition;
+        ApplySolidObstaclePush();
 
         if (_navMeshAgent == null || !_navMeshAgent.enabled)
         {
@@ -2535,7 +2540,10 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private Vector3 ConstrainRoomStateMovement(Vector3 currentPosition, Vector3 targetPosition)
     {
-        Vector3 movement = targetPosition - currentPosition;
+        Vector3 movement = new Vector3(
+            targetPosition.x - currentPosition.x,
+            0f,
+            targetPosition.z - currentPosition.z);
         float distance = movement.magnitude;
         if (distance <= 0.0001f)
         {
@@ -2546,22 +2554,87 @@ public class NextbotFollowPlayer : MonoBehaviour
         GetCollisionCapsule(currentPosition, out Vector3 capsuleStart, out Vector3 capsuleEnd, out float capsuleRadius);
         Vector3 direction = movement / distance;
 
-        if (Physics.CapsuleCast(
+        int hitCount = Physics.CapsuleCastNonAlloc(
                 capsuleStart,
                 capsuleEnd,
                 capsuleRadius,
                 direction,
-                out RaycastHit hit,
+                _groundHitBuffer,
                 distance,
                 collisionMask,
-                QueryTriggerInteraction.Ignore)
-            && !IsIgnoredGroundHit(hit))
+                QueryTriggerInteraction.Ignore);
+
+        RaycastHit nearestHit = default;
+        bool foundHit = false;
+        float nearestDistance = float.PositiveInfinity;
+        for (int i = 0; i < hitCount; i++)
         {
-            float safeDistance = Mathf.Max(0f, hit.distance - _roomStateCollisionSkinWidth);
-            return currentPosition + direction * safeDistance;
+            RaycastHit hit = _groundHitBuffer[i];
+            if (IsIgnoredRoomStateCollisionHit(hit))
+            {
+                continue;
+            }
+
+            if (hit.distance < nearestDistance)
+            {
+                nearestHit = hit;
+                nearestDistance = hit.distance;
+                foundHit = true;
+            }
+        }
+
+        if (foundHit)
+        {
+            float safeDistance = Mathf.Max(0f, nearestHit.distance - _roomStateCollisionSkinWidth);
+            Vector3 constrainedPlanarPosition = currentPosition + direction * safeDistance;
+            Vector3 remainingPlanarMovement = new Vector3(
+                targetPosition.x - constrainedPlanarPosition.x,
+                0f,
+                targetPosition.z - constrainedPlanarPosition.z);
+            Vector3 slide = Vector3.ProjectOnPlane(remainingPlanarMovement, nearestHit.normal);
+            if (slide.sqrMagnitude > 0.0001f)
+            {
+                float slideDistance = Mathf.Min(slide.magnitude, distance);
+                Vector3 slideDirection = slide.normalized;
+                GetCollisionCapsule(constrainedPlanarPosition, out Vector3 slideCapsuleStart, out Vector3 slideCapsuleEnd, out float slideCapsuleRadius);
+                int slideHitCount = Physics.CapsuleCastNonAlloc(
+                    slideCapsuleStart,
+                    slideCapsuleEnd,
+                    slideCapsuleRadius,
+                    slideDirection,
+                    _groundHitBuffer,
+                    slideDistance,
+                    collisionMask,
+                    QueryTriggerInteraction.Ignore);
+                float safeSlideDistance = slideDistance;
+                for (int i = 0; i < slideHitCount; i++)
+                {
+                    RaycastHit slideHit = _groundHitBuffer[i];
+                    if (IsIgnoredRoomStateCollisionHit(slideHit))
+                    {
+                        continue;
+                    }
+
+                    safeSlideDistance = Mathf.Min(safeSlideDistance, Mathf.Max(0f, slideHit.distance - _roomStateCollisionSkinWidth));
+                }
+
+                constrainedPlanarPosition += slideDirection * safeSlideDistance;
+            }
+
+            return new Vector3(constrainedPlanarPosition.x, targetPosition.y, constrainedPlanarPosition.z);
         }
 
         return targetPosition;
+    }
+
+    private bool IsIgnoredRoomStateCollisionHit(RaycastHit hit)
+    {
+        if (IsIgnoredGroundHit(hit))
+        {
+            return true;
+        }
+
+        return hit.normal.y > 0.65f;
     }
 
     private void GetCollisionCapsule(Vector3 centerPosition, out Vector3 capsuleStart, out Vector3 capsuleEnd, out float capsuleRadius)

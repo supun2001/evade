@@ -1,10 +1,12 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.UIElements;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 using TMPro;
 using UIButton = UnityEngine.UI.Button;
 using UIImage = UnityEngine.UI.Image;
@@ -66,6 +68,10 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _inventoryButton;
     private UIToolkitButton _spectateButton;
     private UIToolkitButton _comingSoonCloseButton;
+    private UIToolkitButton _mapClassicButton;
+    private UIToolkitButton _mapBackroomButton;
+    private UIToolkitButton _mapParkourButton;
+    private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
     private Label _comingSoonMessageLabel;
@@ -86,6 +92,8 @@ public class LobbyUI : MonoBehaviour
     private VisualElement _loginCard;
     private VisualElement _comingSoonOverlay;
     private VisualElement _shopOverlay;
+    private VisualElement _mapSelectionOverlay;
+    private VisualElement _mapSelectionCard;
     private VisualElement _shopHomeView;
     private VisualElement _shopSkinsView;
     private VisualElement _shopPreviewPanel;
@@ -96,10 +104,12 @@ public class LobbyUI : MonoBehaviour
     private bool _settingsPopupVisible;
     private bool _loginPopupVisible;
     private bool _shopVisible;
+    private bool _mapSelectionVisible;
     private ShopPage _shopPage = ShopPage.Home;
     private bool _menuEventsBound;
     private bool _pendingSpectateJoin;
     private bool _isSpectatingFromMenu;
+    private Coroutine _mapLoadCoroutine;
     private readonly List<UIToolkitButton> _hoverButtons = new();
     private readonly List<UIToolkitButton> _shopSkinButtons = new();
     private readonly List<Label> _shopSkinNameLabels = new();
@@ -115,6 +125,12 @@ public class LobbyUI : MonoBehaviour
     private const string ShopCardResourcePath = "UI/ShopCard";
     private const string OfflineCardResourcePath = "UI/Offline mode";
     private const string InventoryCardResourcePath = "UI/InventoryCard";
+    private const string ClassicMapSceneName = "SampleScene";
+    private const string ClassicMapId = "SampleScene";
+    private const string BackroomMapSceneName = "backroom";
+    private const string BackroomMapId = "backroom";
+    private const string ParkourMapSceneName = "parkour";
+    private const string ParkourMapId = "parkour";
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
@@ -126,6 +142,10 @@ public class LobbyUI : MonoBehaviour
     private string _pendingHoverLabelText = DefaultMenuHoverText;
     private float _currentHoverLabelOpacity;
     private float _targetHoverLabelOpacity;
+    private static bool s_pendingJoinAfterMapLoad;
+    private static string s_pendingJoinSceneName = string.Empty;
+    private static string s_pendingJoinMapId = string.Empty;
+    private static int s_pendingJoinSkinIndex;
     private const int DefaultOwnedSkinIndex = 0;
     private const string AuthTokenPlayerPrefsKey = "AuthToken";
     private RenderTexture _shopPreviewRenderTexture;
@@ -156,6 +176,10 @@ public class LobbyUI : MonoBehaviour
         RefreshMenuUiBindings();
 
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.RoomLeftEvent += HandleRoomLeft;
+        }
 
         currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
         _shopSelectedSkinIndex = currentSkinIndex;
@@ -165,6 +189,8 @@ public class LobbyUI : MonoBehaviour
         _ = TryRestoreAccountSessionAsync();
 
         if (notificationText != null) notificationText.text = "";
+
+        ContinuePendingMapJoinIfNeeded();
     }
 
     private void Update()
@@ -208,8 +234,18 @@ public class LobbyUI : MonoBehaviour
         {
              NetworkManager.Instance.Room.OnStateChange -= OnLobbyStateChange;
         }
+
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.RoomLeftEvent -= HandleRoomLeft;
+        }
     }
     #endregion
+
+    private void HandleRoomLeft()
+    {
+        SwitchToMenu();
+    }
 
     public async void LeaveRoom()
     {
@@ -239,6 +275,7 @@ public class LobbyUI : MonoBehaviour
         menuPanel.SetActive(true);
         RefreshMenuUiBindings();
         hasAutoReadiedCurrentRoom = false;
+        SetMapSelectionVisible(false);
         SetLocalPlayerInput(false);
         SetLocalPlayerSpectating(false);
         SetStartButtonEnabled(true);
@@ -314,6 +351,11 @@ public class LobbyUI : MonoBehaviour
 
         if (createButton != null) createButton.interactable = false;
         if (joinButton != null) joinButton.interactable = false;
+
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SetSelectedMapId(GetActiveSceneMapId());
+        }
 
         string error = await NetworkManager.Instance.JoinOrCreateGame();
 
@@ -407,6 +449,7 @@ public class LobbyUI : MonoBehaviour
     {
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = false;
+        SetMapSelectionVisible(false);
         SetShopVisible(false);
         if (menuPanel != null) menuPanel.SetActive(false);
         hasAutoReadiedCurrentRoom = true;
@@ -463,6 +506,10 @@ public class LobbyUI : MonoBehaviour
         _inventoryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("inventory-button");
         _spectateButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("spectate-button");
         _comingSoonCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("coming-soon-close-button");
+        _mapClassicButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-classic-button");
+        _mapBackroomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-backroom-button");
+        _mapParkourButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-parkour-button");
+        _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
         _menuHoverLabel = _menuDocument.rootVisualElement?.Q<Label>("menu-hover-label");
@@ -484,6 +531,8 @@ public class LobbyUI : MonoBehaviour
         _loginCard = _menuDocument.rootVisualElement?.Q<VisualElement>("login-card");
         _comingSoonOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("coming-soon-overlay");
         _shopOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-overlay");
+        _mapSelectionOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("map-selection-overlay");
+        _mapSelectionCard = _menuDocument.rootVisualElement?.Q<VisualElement>("map-selection-card");
         _shopHomeView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-home-view");
         _shopSkinsView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-skins-view");
         _shopPreviewPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-preview-panel");
@@ -499,10 +548,12 @@ public class LobbyUI : MonoBehaviour
         _settingsPopupVisible = false;
         _loginPopupVisible = false;
         _shopVisible = false;
+        _mapSelectionVisible = false;
         _shopPage = ShopPage.Home;
         SetSettingsPopupVisible(false);
         SetLoginPopupVisible(false);
         SetShopVisible(false);
+        SetMapSelectionVisible(false);
         BindShopPreviewEvents();
 
         if (_loginPasswordField != null)
@@ -619,6 +670,30 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked += HandleComingSoonCloseButtonClicked;
         }
+        if (_mapClassicButton != null)
+        {
+            _mapClassicButton.clicked += HandleClassicMapButtonClicked;
+        }
+        if (_mapBackroomButton != null)
+        {
+            _mapBackroomButton.clicked += HandleBackroomMapButtonClicked;
+        }
+        if (_mapParkourButton != null)
+        {
+            _mapParkourButton.clicked += HandleParkourMapButtonClicked;
+        }
+        if (_mapSelectionCloseButton != null)
+        {
+            _mapSelectionCloseButton.clicked += HandleMapSelectionCloseButtonClicked;
+        }
+        if (_mapSelectionOverlay != null)
+        {
+            _mapSelectionOverlay.RegisterCallback<ClickEvent>(HandleMapSelectionOverlayClicked);
+        }
+        if (_mapSelectionCard != null)
+        {
+            _mapSelectionCard.RegisterCallback<ClickEvent>(HandleMapSelectionCardClicked);
+        }
         BindHoverEffects();
         BindPlaceholderActions();
         _menuEventsBound = true;
@@ -712,6 +787,30 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked -= HandleComingSoonCloseButtonClicked;
         }
+        if (_mapClassicButton != null)
+        {
+            _mapClassicButton.clicked -= HandleClassicMapButtonClicked;
+        }
+        if (_mapBackroomButton != null)
+        {
+            _mapBackroomButton.clicked -= HandleBackroomMapButtonClicked;
+        }
+        if (_mapParkourButton != null)
+        {
+            _mapParkourButton.clicked -= HandleParkourMapButtonClicked;
+        }
+        if (_mapSelectionCloseButton != null)
+        {
+            _mapSelectionCloseButton.clicked -= HandleMapSelectionCloseButtonClicked;
+        }
+        if (_mapSelectionOverlay != null)
+        {
+            _mapSelectionOverlay.UnregisterCallback<ClickEvent>(HandleMapSelectionOverlayClicked);
+        }
+        if (_mapSelectionCard != null)
+        {
+            _mapSelectionCard.UnregisterCallback<ClickEvent>(HandleMapSelectionCardClicked);
+        }
         UnbindShopPreviewEvents();
         UnbindPlaceholderActions();
         UnbindHoverEffects();
@@ -726,7 +825,152 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
+        SetMapSelectionVisible(true);
+    }
+
+    private void HandleClassicMapButtonClicked()
+    {
+        BeginJoinForMap(ClassicMapSceneName, ClassicMapId);
+    }
+
+    private void HandleBackroomMapButtonClicked()
+    {
+        BeginJoinForMap(BackroomMapSceneName, BackroomMapId);
+    }
+
+    private void HandleParkourMapButtonClicked()
+    {
+        BeginJoinForMap(ParkourMapSceneName, ParkourMapId);
+    }
+
+    private void HandleMapSelectionCloseButtonClicked()
+    {
+        SetMapSelectionVisible(false);
+    }
+
+    private void HandleMapSelectionOverlayClicked(ClickEvent evt)
+    {
+        if (evt.target == _mapSelectionOverlay)
+        {
+            SetMapSelectionVisible(false);
+        }
+    }
+
+    private void HandleMapSelectionCardClicked(ClickEvent evt)
+    {
+        evt.StopPropagation();
+    }
+
+    private void BeginJoinForMap(string sceneName, string mapId)
+    {
+        if (string.IsNullOrWhiteSpace(sceneName))
+        {
+            ShowNotification("Map scene is missing.");
+            return;
+        }
+
+        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
+        {
+            OnGameStarted();
+            return;
+        }
+
+        SetMapSelectionVisible(false);
+        currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
+        s_pendingJoinSceneName = sceneName;
+        s_pendingJoinMapId = string.IsNullOrWhiteSpace(mapId) ? sceneName : mapId.Trim();
+        s_pendingJoinSkinIndex = currentSkinIndex;
+
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SetSelectedMapId(s_pendingJoinMapId);
+        }
+
+        if (string.Equals(SceneManager.GetActiveScene().name, sceneName, StringComparison.Ordinal))
+        {
+            s_pendingJoinAfterMapLoad = false;
+            OnStartClicked();
+            return;
+        }
+
+        s_pendingJoinAfterMapLoad = true;
+        SetStartButtonEnabled(false);
+        if (_mapLoadCoroutine != null)
+        {
+            StopCoroutine(_mapLoadCoroutine);
+        }
+
+        _mapLoadCoroutine = StartCoroutine(LoadSelectedMapScene(sceneName));
+    }
+
+    private IEnumerator LoadSelectedMapScene(string sceneName)
+    {
+        AsyncOperation loadOperation = null;
+        Exception loadException = null;
+
+        try
+        {
+            loadOperation = SceneManager.LoadSceneAsync(sceneName);
+        }
+        catch (Exception exception)
+        {
+            loadException = exception;
+        }
+
+        if (loadException != null || loadOperation == null)
+        {
+            s_pendingJoinAfterMapLoad = false;
+            SetStartButtonEnabled(true);
+            ShowNotification(loadException != null
+                ? $"Map load failed: {loadException.Message}"
+                : $"Map scene '{sceneName}' is not in Build Settings.");
+            yield break;
+        }
+
+        while (!loadOperation.isDone)
+        {
+            yield return null;
+        }
+    }
+
+    private void ContinuePendingMapJoinIfNeeded()
+    {
+        if (!s_pendingJoinAfterMapLoad)
+        {
+            return;
+        }
+
+        if (!string.Equals(SceneManager.GetActiveScene().name, s_pendingJoinSceneName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        s_pendingJoinAfterMapLoad = false;
+        currentSkinIndex = GetValidOwnedSkinIndex(s_pendingJoinSkinIndex);
+        _shopSelectedSkinIndex = currentSkinIndex;
+
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SetSelectedMapId(s_pendingJoinMapId);
+        }
+
         OnStartClicked();
+    }
+
+    private static string GetActiveSceneMapId()
+    {
+        string sceneName = SceneManager.GetActiveScene().name;
+        if (string.Equals(sceneName, BackroomMapSceneName, StringComparison.Ordinal))
+        {
+            return BackroomMapId;
+        }
+        
+        if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.Ordinal))
+        {
+            return ParkourMapId;
+        }
+
+        return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
     }
 
     private void HandleOfflineButtonClicked()
@@ -1124,7 +1368,7 @@ public class LobbyUI : MonoBehaviour
 
     private void ConfigureMenuButtonDescriptions()
     {
-        SetMenuButtonDescription(_startButton, "Join the current game");
+        SetMenuButtonDescription(_startButton, "Pick a map and join a game");
         SetMenuButtonDescription(_shopButton, "Browse the shop");
         SetMenuButtonDescription(_offlineButton, "Start a local offline match with bots");
         SetMenuButtonDescription(_loginButton, "Login and save your cash");
@@ -1136,6 +1380,9 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_inventoryButton, "Open your inventory");
         SetMenuButtonDescription(_spectateButton, "Watch the current match");
         SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
+        SetMenuButtonDescription(_mapClassicButton, "Join the classic map");
+        SetMenuButtonDescription(_mapBackroomButton, "Join the Backroom map");
+        SetMenuButtonDescription(_mapParkourButton, "Join the Parkour map");
 
         _pendingHoverLabelText = DefaultMenuHoverText;
     }
@@ -1167,6 +1414,9 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_shopRobuxButton);
         RegisterHoverButton(_inventoryButton);
         RegisterHoverButton(_spectateButton);
+        RegisterHoverButton(_mapClassicButton);
+        RegisterHoverButton(_mapBackroomButton);
+        RegisterHoverButton(_mapParkourButton);
     }
 
     private void UnbindHoverEffects()
@@ -1548,6 +1798,29 @@ public class LobbyUI : MonoBehaviour
         if (visible)
         {
             RefreshGraphicsSettingsUi();
+        }
+    }
+
+    private void SetMapSelectionVisible(bool visible)
+    {
+        _mapSelectionVisible = visible;
+
+        if (visible)
+        {
+            SetShopVisible(false);
+            SetSettingsPopupVisible(false);
+            SetLoginPopupVisible(false);
+            HideComingSoonPopup();
+        }
+
+        if (_mapSelectionOverlay != null)
+        {
+            _mapSelectionOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            _mapSelectionOverlay.pickingMode = visible ? PickingMode.Position : PickingMode.Ignore;
+            if (visible)
+            {
+                _mapSelectionOverlay.BringToFront();
+            }
         }
     }
 
