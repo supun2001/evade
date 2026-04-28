@@ -564,6 +564,62 @@ public class OfflineModeManager : MonoBehaviour
         return playerTransform != null;
     }
 
+    public Vector3 GetActivePlayerSeparationVector(string requesterSessionId, Vector3 origin, float radius)
+    {
+        if (radius <= 0f)
+        {
+            return Vector3.zero;
+        }
+
+        Vector3 separation = Vector3.zero;
+        float radiusSqr = radius * radius;
+
+        foreach (KeyValuePair<string, GameObject> pair in _offlinePlayers)
+        {
+            if (string.Equals(pair.Key, requesterSessionId, System.StringComparison.Ordinal)
+                || pair.Value == null
+                || IsOfflinePlayerEliminated(pair.Key))
+            {
+                continue;
+            }
+
+            PlayerController candidateController = pair.Value.GetComponent<PlayerController>();
+            if (candidateController == null
+                || candidateController.IsInjuredOrHitReacting()
+                || candidateController.IsBeingCarried())
+            {
+                continue;
+            }
+
+            Vector3 away = origin - candidateController.transform.position;
+            away.y = 0f;
+            float distanceSqr = away.sqrMagnitude;
+            if (distanceSqr > radiusSqr)
+            {
+                continue;
+            }
+
+            if (distanceSqr <= 0.0001f)
+            {
+                away = GetDeterministicSeparationDirection(requesterSessionId);
+                distanceSqr = away.sqrMagnitude;
+            }
+
+            float candidateDistance = Mathf.Sqrt(distanceSqr);
+            float closeness = 1f - Mathf.Clamp01(candidateDistance / radius);
+            separation += away.normalized * closeness;
+        }
+
+        return Vector3.ClampMagnitude(separation, 1f);
+    }
+
+    private static Vector3 GetDeterministicSeparationDirection(string requesterSessionId)
+    {
+        int hash = string.IsNullOrEmpty(requesterSessionId) ? 0 : requesterSessionId.GetHashCode();
+        float angle = Mathf.Abs(hash % 360);
+        return Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
+    }
+
     public bool TryGetNearestThreat(Vector3 origin, out Transform threatTransform, out float distance)
     {
         threatTransform = null;

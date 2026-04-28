@@ -23,14 +23,17 @@ public class SpeedBoostPickup : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        if (!TryGetLocalPlayerController(other, out PlayerController playerController))
+        if (!TryGetEligiblePlayerController(other, out PlayerController playerController, out bool playLocalFeedback))
         {
             return;
         }
 
         playerController.ApplyTemporarySpeedBoost(_speedMultiplier, _durationSeconds);
-        playerController.PlayPickupFade();
-        playerController.PlayLocalAbilitySound(_pickupSound, _pickupSoundVolume, _pickupSoundMaxDuration);
+        if (playLocalFeedback)
+        {
+            playerController.PlayPickupFade();
+            playerController.PlayLocalAbilitySound(_pickupSound, _pickupSoundVolume, _pickupSoundMaxDuration);
+        }
 
         if (_destroyOnPickup)
         {
@@ -38,23 +41,48 @@ public class SpeedBoostPickup : MonoBehaviour
         }
     }
 
-    private static bool TryGetLocalPlayerController(Collider other, out PlayerController playerController)
+    private static bool TryGetEligiblePlayerController(Collider other, out PlayerController playerController, out bool playLocalFeedback)
     {
         playerController = null;
+        playLocalFeedback = false;
 
         if (other == null)
         {
             return false;
         }
 
-        NetworkPlayer networkPlayer = other.GetComponentInParent<NetworkPlayer>();
-        if (networkPlayer == null || !networkPlayer.IsLocalPlayer)
+        playerController = other.GetComponentInParent<PlayerController>();
+        if (playerController == null
+            || playerController.IsInjuredOrHitReacting()
+            || playerController.IsBeingCarried())
         {
+            playerController = null;
             return false;
         }
 
-        playerController = other.GetComponentInParent<PlayerController>();
-        return playerController != null;
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive)
+        {
+            OfflinePlayerIdentity offlineIdentity = other.GetComponentInParent<OfflinePlayerIdentity>();
+            if (offlineIdentity == null)
+            {
+                playerController = null;
+                return false;
+            }
+
+            playLocalFeedback = offlineIdentity.IsLocalPlayer;
+            return true;
+        }
+
+        NetworkPlayer networkPlayer = other.GetComponentInParent<NetworkPlayer>();
+        if (networkPlayer == null || !networkPlayer.IsLocalPlayer)
+        {
+            playerController = null;
+            return false;
+        }
+
+        playLocalFeedback = true;
+        return true;
     }
 
     private void EnsureTriggerCollider()

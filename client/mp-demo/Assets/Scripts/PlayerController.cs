@@ -100,6 +100,9 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private bool _enableBunnyHop = true;
     [SerializeField] private float _groundFriction = 10f;
     [SerializeField] private float _groundControl = 8f;
+    [SerializeField, Min(0.05f)] private float _groundProbeDistance = 0.85f;
+    [SerializeField, Range(0.2f, 1f)] private float _groundProbeRadiusScale = 0.82f;
+    [SerializeField, Min(0f)] private float _groundStickVelocity = 2.5f;
     [SerializeField] private float _airAcceleration = 42f;
     [SerializeField] private float _airStrafeAccelerationMultiplier = 1.35f;
     [SerializeField] private float _airMaxSpeed = 42f;
@@ -406,10 +409,13 @@ public class PlayerController : MonoBehaviour
     private float _lastAppliedRemoteHitReactionSeed = float.NaN;
     private int _rampLayer = -1;
     private float _lastRampTouchTime = float.NegativeInfinity;
+    private bool _groundProbeGrounded;
+    private RaycastHit _groundProbeHit;
     private bool _isSpectating;
     private string _spectateTargetKey;
     private float _nextSpectateRefreshTime;
     private readonly System.Collections.Generic.List<SpectateTarget> _spectateTargets = new();
+    private static readonly System.Collections.Generic.List<PlayerController> RegisteredPlayerCollisionControllers = new();
     private bool _spectateCharacterControllerWasEnabled;
     private bool _spectateVisualRootWasActive = true;
     private static readonly Vector3 SpectatorHiddenPosition = new Vector3(0f, -500f, 0f);
@@ -450,6 +456,7 @@ public class PlayerController : MonoBehaviour
             _defaultCharacterControllerHeight = _characterController.height;
             _defaultCharacterControllerRadius = _characterController.radius;
             _defaultCharacterControllerCenter = _characterController.center;
+            RegisterPlayerCollisionIgnore();
         }
 
         _footstepAudioSource = GetComponent<AudioSource>();
@@ -495,6 +502,7 @@ public class PlayerController : MonoBehaviour
 
     private void OnDestroy()
     {
+        UnregisterPlayerCollisionIgnore();
         RestoreCarryCollisionIgnore();
     }
     #endregion
@@ -539,6 +547,7 @@ public class PlayerController : MonoBehaviour
             UpdateZoom();
         }
 
+        RefreshGroundProbeState();
         UpdateRampState();
 
         if (_isBeingCarried)
@@ -560,6 +569,7 @@ public class PlayerController : MonoBehaviour
         finalVelocity.y = _verticalVelocity;
 
         _characterController.Move(finalVelocity * Time.deltaTime);
+        RefreshGroundProbeState();
         UpdateFootstepAudio();
     }
     
@@ -1861,6 +1871,7 @@ public class PlayerController : MonoBehaviour
 
     private void RestoreCarryCollisionIgnore()
     {
+        bool restoredAnyCollision = false;
         if (_characterController != null)
         {
             for (int i = 0; i < _ignoredCarryCollisionColliders.Count; i++)
@@ -1872,11 +1883,101 @@ public class PlayerController : MonoBehaviour
                 }
 
                 Physics.IgnoreCollision(_characterController, linkedCollider, false);
+                restoredAnyCollision = true;
             }
         }
 
         _ignoredCarryCollisionColliders.Clear();
         _ignoredCarryCollisionObject = null;
+
+        if (restoredAnyCollision)
+        {
+            RefreshRegisteredPlayerCollisionIgnores();
+        }
+    }
+
+    private void RegisterPlayerCollisionIgnore()
+    {
+        PruneRegisteredPlayerCollisionControllers();
+        if (RegisteredPlayerCollisionControllers.Contains(this))
+        {
+            return;
+        }
+
+        for (int i = 0; i < RegisteredPlayerCollisionControllers.Count; i++)
+        {
+            SetPlayerPairCollisionIgnored(this, RegisteredPlayerCollisionControllers[i], true);
+        }
+
+        RegisteredPlayerCollisionControllers.Add(this);
+    }
+
+    private void UnregisterPlayerCollisionIgnore()
+    {
+        RegisteredPlayerCollisionControllers.Remove(this);
+    }
+
+    private static void RefreshRegisteredPlayerCollisionIgnores()
+    {
+        PruneRegisteredPlayerCollisionControllers();
+        for (int i = 0; i < RegisteredPlayerCollisionControllers.Count; i++)
+        {
+            for (int j = i + 1; j < RegisteredPlayerCollisionControllers.Count; j++)
+            {
+                SetPlayerPairCollisionIgnored(
+                    RegisteredPlayerCollisionControllers[i],
+                    RegisteredPlayerCollisionControllers[j],
+                    true);
+            }
+        }
+    }
+
+    private static void PruneRegisteredPlayerCollisionControllers()
+    {
+        for (int i = RegisteredPlayerCollisionControllers.Count - 1; i >= 0; i--)
+        {
+            if (RegisteredPlayerCollisionControllers[i] == null)
+            {
+                RegisteredPlayerCollisionControllers.RemoveAt(i);
+            }
+        }
+    }
+
+    private static void SetPlayerPairCollisionIgnored(PlayerController left, PlayerController right, bool ignored)
+    {
+        if (left == null || right == null || left == right)
+        {
+            return;
+        }
+
+        Collider[] leftColliders = left.GetComponentsInChildren<Collider>(true);
+        Collider[] rightColliders = right.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < leftColliders.Length; i++)
+        {
+            Collider leftCollider = leftColliders[i];
+            if (!CanIgnorePlayerCollider(leftCollider))
+            {
+                continue;
+            }
+
+            for (int j = 0; j < rightColliders.Length; j++)
+            {
+                Collider rightCollider = rightColliders[j];
+                if (!CanIgnorePlayerCollider(rightCollider) || leftCollider == rightCollider)
+                {
+                    continue;
+                }
+
+                Physics.IgnoreCollision(leftCollider, rightCollider, ignored);
+            }
+        }
+    }
+
+    private static bool CanIgnorePlayerCollider(Collider playerCollider)
+    {
+        return playerCollider != null
+            && playerCollider.enabled
+            && playerCollider.gameObject.activeInHierarchy;
     }
 
     private GameObject ResolveCarryLinkedPlayerObject()
@@ -4065,7 +4166,7 @@ public class PlayerController : MonoBehaviour
         float deltaTime = Time.deltaTime;
         
         if (isGrounded && _verticalVelocity < 0f){
-            _verticalVelocity = 0f;
+            _verticalVelocity = -Mathf.Max(0f, _groundStickVelocity);
         }
         
         float gravityMultiplier = _isWallRunning ? _wallRunGravityMultiplier : 1f;
@@ -4121,7 +4222,75 @@ public class PlayerController : MonoBehaviour
     }
 
     public bool IsGrounded() {
-        return _characterController.isGrounded;   
+        if (_characterController != null && _characterController.isGrounded)
+        {
+            return true;
+        }
+
+        return _groundProbeGrounded && _verticalVelocity <= 0.1f && !_jumpedThisFrame;
+    }
+
+    private void RefreshGroundProbeState()
+    {
+        _groundProbeGrounded = false;
+        _groundProbeHit = default;
+
+        if (_characterController == null || !_characterController.enabled || _transform == null)
+        {
+            return;
+        }
+
+        Vector3 origin = _transform.position + Vector3.up * Mathf.Max(0.05f, _characterController.skinWidth + 0.15f);
+        float radius = Mathf.Max(0.05f, _characterController.radius * _groundProbeRadiusScale);
+        float distance = Mathf.Max(_groundProbeDistance, _characterController.skinWidth + 0.2f);
+        RaycastHit[] hits = Physics.SphereCastAll(
+            origin,
+            radius,
+            Vector3.down,
+            distance,
+            ~0,
+            QueryTriggerInteraction.Ignore);
+
+        if (hits == null || hits.Length == 0)
+        {
+            return;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+            if (!IsValidGroundProbeHit(hit))
+            {
+                continue;
+            }
+
+            _groundProbeHit = hit;
+            _groundProbeGrounded = true;
+            return;
+        }
+    }
+
+    private bool IsValidGroundProbeHit(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return false;
+        }
+
+        Transform hitTransform = hit.collider.transform;
+        if (hitTransform == null || hitTransform.IsChildOf(_transform) || IsCarryLinkedTransform(hitTransform))
+        {
+            return false;
+        }
+
+        if (_rampLayer >= 0 && hit.collider.gameObject.layer == _rampLayer)
+        {
+            return true;
+        }
+
+        float maxSlope = _characterController != null ? _characterController.slopeLimit + 5f : 65f;
+        return Vector3.Angle(hit.normal, Vector3.up) <= maxSlope;
     }
 
     private void UpdateRampState()
@@ -4157,6 +4326,11 @@ public class PlayerController : MonoBehaviour
         if (_playerLocomotionInput.MovementInput.sqrMagnitude <= 0.01f)
         {
             return false;
+        }
+
+        if (_groundProbeGrounded && _groundProbeHit.collider != null && _groundProbeHit.collider.gameObject.layer == _rampLayer)
+        {
+            return true;
         }
 
         Vector3 origin = _transform.position + Vector3.up * 0.2f;

@@ -15,6 +15,8 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     [SerializeField] private float _rescueEvadeDistance = 10f;
     [SerializeField] private float _rescueTargetThreatDistance = 9f;
     [SerializeField] private float _reviveHoldDuration = 2.5f;
+    [SerializeField] private float _playerAvoidanceRadius = 2.25f;
+    [SerializeField] private float _playerAvoidanceStrength = 3.5f;
 
     private PlayerController _controller;
     private PlayerLocomotionInput _locomotionInput;
@@ -112,15 +114,26 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         Vector3 toDestination = steeringTarget - origin;
         toDestination.y = 0f;
 
+        bool isHoldingRevive = !string.IsNullOrWhiteSpace(_reviveHoldTargetSessionId);
+        if (!isHoldingRevive)
+        {
+            toDestination = ApplyPlayerAvoidance(origin, toDestination);
+        }
+
         Vector2 movementInput = BuildMovementInput(toDestination);
         Vector2 lookInput = BuildLookInput(toDestination);
-        if (hasDownedTarget
+        if (isHoldingRevive
+            && hasDownedTarget
             && downedController != null
             && downedDistance <= _rescueDistance
-            && !string.IsNullOrWhiteSpace(_reviveHoldTargetSessionId))
+            && string.Equals(_reviveHoldTargetSessionId, downedIdentity != null ? downedIdentity.SessionId : null, System.StringComparison.Ordinal))
         {
             movementInput = Vector2.zero;
             lookInput = BuildLookInput(downedController.transform.position - origin);
+        }
+        else if (isHoldingRevive)
+        {
+            movementInput = Vector2.zero;
         }
 
         bool crouchHeld = Time.time < _crouchHeldUntil;
@@ -343,6 +356,27 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         return _path.corners[Mathf.Clamp(cornerIndex, 1, _path.corners.Length - 1)];
+    }
+
+    private Vector3 ApplyPlayerAvoidance(Vector3 origin, Vector3 desiredOffset)
+    {
+        Vector3 separation = OfflineModeManager.Instance.GetActivePlayerSeparationVector(
+            _identity.SessionId,
+            origin,
+            _playerAvoidanceRadius);
+        if (separation.sqrMagnitude <= 0.0001f)
+        {
+            return desiredOffset;
+        }
+
+        desiredOffset.y = 0f;
+        Vector3 adjustedOffset = desiredOffset + separation * _playerAvoidanceStrength;
+        if (adjustedOffset.sqrMagnitude <= 0.04f)
+        {
+            return separation.normalized * Mathf.Max(1f, _playerAvoidanceRadius);
+        }
+
+        return adjustedOffset;
     }
 
     private Vector2 BuildMovementInput(Vector3 toDestination)
