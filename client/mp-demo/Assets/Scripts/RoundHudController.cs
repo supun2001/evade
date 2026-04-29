@@ -33,6 +33,7 @@ public class RoundHudController : MonoBehaviour
     private VisualElement _roundPhaseContainer;
     private Label _roundPhaseTitleLabel;
     private Label _roundPhaseTimerLabel;
+    private VisualElement _pauseMenuElement;
     private VisualElement _roundAnnouncementContainer;
     private Label _roundAnnouncementTitleLabel;
     private Label _roundAnnouncementSubtitleLabel;
@@ -44,7 +45,8 @@ public class RoundHudController : MonoBehaviour
     private Label _roundResultsBestTimeValue;
     private Label _roundResultsRevivesValue;
     private Label _roundResultsDownedValue;
-    private VisualElement _roundResultsLeaderboardList;
+    private ScrollView _roundResultsLeaderboardList;
+    private Button _roundResultsExitButton;
     private VisualElement _tabScoreboardOverlay;
     private ScrollView _tabScoreboardList;
     private Label _tabScoreboardMapLabel;
@@ -188,6 +190,7 @@ public class RoundHudController : MonoBehaviour
         _roundPhaseContainer = _hudRoot?.Q<VisualElement>("round-phase-container");
         _roundPhaseTitleLabel = _hudRoot?.Q<Label>("round-phase-title-label");
         _roundPhaseTimerLabel = _hudRoot?.Q<Label>("round-phase-timer-label");
+        _pauseMenuElement = _hudRoot?.Q<VisualElement>("pause-menu");
         _roundAnnouncementContainer = _hudRoot?.Q<VisualElement>("round-announcement-container");
         _roundAnnouncementTitleLabel = _hudRoot?.Q<Label>("round-announcement-title-label");
         _roundAnnouncementSubtitleLabel = _hudRoot?.Q<Label>("round-announcement-subtitle-label");
@@ -199,7 +202,21 @@ public class RoundHudController : MonoBehaviour
         _roundResultsBestTimeValue = _hudRoot?.Q<Label>("round-results-best-time-value");
         _roundResultsRevivesValue = _hudRoot?.Q<Label>("round-results-revives-value");
         _roundResultsDownedValue = _hudRoot?.Q<Label>("round-results-downed-value");
-        _roundResultsLeaderboardList = _hudRoot?.Q<VisualElement>("round-results-leaderboard-list");
+        _roundResultsLeaderboardList = _hudRoot?.Q<ScrollView>("round-results-leaderboard-list");
+        Button roundResultsExitButton = _hudRoot?.Q<Button>("round-results-exit-button");
+        if (_roundResultsExitButton != roundResultsExitButton)
+        {
+            if (_roundResultsExitButton != null)
+            {
+                _roundResultsExitButton.clicked -= HandleRoundResultsExitButtonClicked;
+            }
+
+            _roundResultsExitButton = roundResultsExitButton;
+            if (_roundResultsExitButton != null)
+            {
+                _roundResultsExitButton.clicked += HandleRoundResultsExitButtonClicked;
+            }
+        }
         _tabScoreboardOverlay = _hudRoot?.Q<VisualElement>("tab-scoreboard-overlay");
         _tabScoreboardList = _hudRoot?.Q<ScrollView>("tab-scoreboard-list");
         _tabScoreboardMapLabel = _hudRoot?.Q<Label>("tab-scoreboard-map-label");
@@ -439,8 +456,20 @@ public class RoundHudController : MonoBehaviour
             || Keyboard.current.escapeKey.wasPressedThisFrame
             || Keyboard.current.enterKey.wasPressedThisFrame)
         {
-            _showResults = false;
+            CloseRoundResults();
         }
+    }
+
+    private void HandleRoundResultsExitButtonClicked()
+    {
+        CloseRoundResults();
+    }
+
+    private void CloseRoundResults()
+    {
+        _showResults = false;
+        RefreshResultsDisplay();
+        RefreshMapVoteDisplay();
     }
 
     private void RefreshTabScoreboardDisplay()
@@ -1117,9 +1146,20 @@ public class RoundHudController : MonoBehaviour
             return;
         }
 
+        bool isPauseMenuVisible = _pauseMenuElement != null && _pauseMenuElement.resolvedStyle.display != DisplayStyle.None;
+        bool isVoteSelectionVisible = (_currentMapVote != null && _currentMapVote.isOpen && !_showMapVoteResultsView)
+            || (_currentPhase != null && _currentPhase.isMapVoteOpen && !_showMapVoteResultsView);
+        if (isPauseMenuVisible || _showResults || isVoteSelectionVisible)
+        {
+            UnityEngine.Cursor.lockState = CursorLockMode.None;
+            UnityEngine.Cursor.visible = true;
+            return;
+        }
+
         bool shouldLock = _currentPhase != null && (
             string.Equals(_currentPhase.phase, "round", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(_currentPhase.phase, "intermission", StringComparison.OrdinalIgnoreCase)
+            string.Equals(_currentPhase.phase, "intermission", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_currentPhase.phase, "map_vote", StringComparison.OrdinalIgnoreCase)
         );
 
         if (shouldLock)

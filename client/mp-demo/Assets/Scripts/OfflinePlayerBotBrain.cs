@@ -24,6 +24,15 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     [SerializeField] private float _stuckJumpDelay = 0.45f;
     [SerializeField] private float _stuckJumpMaxSpeed = 0.45f;
     [SerializeField] private float _stuckJumpInputThreshold = 0.3f;
+    [SerializeField] private float _stuckRecoveryTriggerDelay = 0.9f;
+    [SerializeField] private float _stuckRecoveryMinTravelDistance = 0.45f;
+    [SerializeField] private float _stuckRecoveryDurationMin = 0.55f;
+    [SerializeField] private float _stuckRecoveryDurationMax = 1.1f;
+    [SerializeField] private float _stuckRecoveryProbeDistance = 1.4f;
+    [SerializeField] private float _movementInputSharpness = 6.5f;
+    [SerializeField] private float _lookInputSharpness = 9f;
+    [SerializeField] private float _destinationArrivalRadius = 1.15f;
+    [SerializeField] private float _destinationSlowRadius = 4.5f;
 
     private PlayerController _controller;
     private PlayerLocomotionInput _locomotionInput;
@@ -38,11 +47,34 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     private float _reviveHoldStartedAt = -1f;
     private bool _hasInitialWanderTarget;
     private float _movementBlockedSince = -1f;
+    private float _stuckProgressSampleStartedAt = -1f;
+    private Vector3 _stuckProgressSamplePosition;
+    private float _stuckRecoveryUntil = -1f;
+    private Vector3 _stuckRecoveryDirection = Vector3.zero;
+    private Vector2 _smoothedMovementInput = Vector2.zero;
+    private Vector2 _smoothedLookInput = Vector2.zero;
+    private float _personalityAggression;
+    private float _personalityCaution;
+    private float _personalitySociability;
+    private float _personalityWanderRadiusScale;
+    private float _idlePauseUntil;
+    private float _nextSocialRetargetAt;
+    private Vector3 _socialTarget;
+    private bool _hasSocialTarget;
 
     public void Initialize(int botIndex)
     {
         _botIndex = botIndex;
         _hasInitialWanderTarget = false;
+        float seed = Mathf.Repeat((botIndex + 1) * 0.173f, 1f);
+        _personalityAggression = Mathf.Lerp(0.85f, 1.25f, seed);
+        _personalityCaution = Mathf.Lerp(0.8f, 1.3f, Mathf.Repeat(seed * 1.73f, 1f));
+        _personalitySociability = Mathf.Lerp(0.75f, 1.35f, Mathf.Repeat(seed * 2.31f, 1f));
+        _personalityWanderRadiusScale = Mathf.Lerp(0.8f, 1.25f, Mathf.Repeat(seed * 2.87f, 1f));
+        _idlePauseUntil = 0f;
+        _nextSocialRetargetAt = 0f;
+        _socialTarget = Vector3.zero;
+        _hasSocialTarget = false;
     }
 
     public void ResetOpeningRoute()
@@ -51,6 +83,14 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         _wanderTarget = transform.position;
         _nextWanderRetargetAt = 0f;
         _movementBlockedSince = -1f;
+        _stuckProgressSampleStartedAt = -1f;
+        _stuckRecoveryUntil = -1f;
+        _stuckRecoveryDirection = Vector3.zero;
+        _smoothedMovementInput = Vector2.zero;
+        _smoothedLookInput = Vector2.zero;
+        _idlePauseUntil = 0f;
+        _nextSocialRetargetAt = 0f;
+        _hasSocialTarget = false;
         ResetReviveHold();
         ReleaseCurrentPatrolAssignment();
     }
@@ -91,6 +131,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             _movementBlockedSince = -1f;
             ReleaseCurrentPatrolAssignment();
             OfflineModeManager.Instance.ReleaseRescueAssignment(_identity.SessionId);
+            ClearStuckRecovery();
             _locomotionInput.ApplySimulatedInput(Vector2.zero, Vector2.zero, false, false, false, false);
             return;
         }
@@ -104,6 +145,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             _movementBlockedSince = -1f;
             ReleaseCurrentPatrolAssignment();
             OfflineModeManager.Instance.ReleaseRescueAssignment(_identity.SessionId);
+            ClearStuckRecovery();
             Vector2 injuredLookInput = Vector2.zero;
             if (OfflineModeManager.Instance.TryGetNearestActivePlayer(
                 _identity.SessionId,
@@ -156,6 +198,12 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             toDestination = ApplyPlayerAvoidance(origin, toDestination);
         }
 
+        UpdateStuckRecovery(origin, toDestination);
+        if (IsInStuckRecovery())
+        {
+            toDestination = _stuckRecoveryDirection;
+        }
+
         Vector2 movementInput = BuildMovementInput(toDestination);
         Vector2 lookInput = BuildLookInput(toDestination);
         if (isHoldingRevive
@@ -171,6 +219,11 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         {
             movementInput = Vector2.zero;
         }
+
+        ApplyIdlePauseVariation(origin, ref movementInput, ref lookInput, isHoldingRevive, hasThreat, hasDownedTarget);
+
+        movementInput = SmoothMovementInput(movementInput);
+        lookInput = SmoothLookInput(lookInput);
 
         bool crouchHeld = Time.time < _crouchHeldUntil;
         bool crouchPressedThisFrame = false;
@@ -260,10 +313,16 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
         ResetReviveHold();
         OfflineModeManager.Instance.ReleaseRescueAssignment(_identity.SessionId);
-        if (hasThreat && threatTransform != null && threatDistance <= _evadeDistance)
+        if (hasThreat && threatTransform != null && threatDistance <= _evadeDistance * _personalityCaution)
         {
             ReleaseCurrentPatrolAssignment();
             return BuildEvadeDestination(origin, threatTransform);
+        }
+
+        if (TryGetSocialDestination(origin, out Vector3 socialDestination))
+        {
+            ReleaseCurrentPatrolAssignment();
+            return socialDestination;
         }
 
         if (Time.time >= _nextWanderRetargetAt || Vector3.Distance(origin, _wanderTarget) <= 1.6f)
@@ -272,7 +331,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             _nextWanderRetargetAt = Time.time + Random.Range(_wanderRetargetInterval * 0.75f, _wanderRetargetInterval * 1.35f);
         }
 
-        return _wanderTarget;
+        return origin + (_wanderTarget - origin) * _personalityWanderRadiusScale;
     }
 
     private Vector3 DetermineCarryingDestination(Vector3 origin, bool hasThreat, Transform threatTransform, float threatDistance)
@@ -287,8 +346,8 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         Vector3 retreatPosition = OfflineModeManager.Instance.GetRetreatPosition(origin);
         bool reachedRetreat = GetPlanarDistance(origin, retreatPosition) <= _carryReviveRetreatArrivalDistance;
         bool safeEnoughToRevive =
-            (!hasThreat || threatDistance >= _carryReviveThreatDistance || reachedRetreat)
-            && (!hasThreat || threatDistance > _rescueEvadeDistance);
+            (!hasThreat || threatDistance >= _carryReviveThreatDistance * _personalityCaution || reachedRetreat)
+            && (!hasThreat || threatDistance > _rescueEvadeDistance * _personalityCaution);
         if (!safeEnoughToRevive)
         {
             ResetReviveHold();
@@ -315,7 +374,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         Vector3 evadeDirection = ApplyBotFan(away.normalized, _evadeFanAngle);
-        return origin + evadeDirection * 8f;
+        return origin + evadeDirection * Mathf.Lerp(6.5f, 10.5f, Mathf.Clamp01(_personalityCaution - 0.75f));
     }
 
     private Vector3 BuildRescueStagingDestination(Vector3 origin, Vector3 downedPosition, Vector3 threatPosition)
@@ -361,6 +420,41 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         float fanAngle = Mathf.Lerp(-maxAngle, maxAngle, normalizedSlot);
         Vector3 fannedDirection = Quaternion.Euler(0f, fanAngle, 0f) * direction.normalized;
         return fannedDirection.normalized;
+    }
+
+    private bool TryGetSocialDestination(Vector3 origin, out Vector3 socialDestination)
+    {
+        socialDestination = Vector3.zero;
+        if (OfflineModeManager.Instance == null || _personalitySociability <= 0.85f)
+        {
+            _hasSocialTarget = false;
+            return false;
+        }
+
+        if (Time.time >= _nextSocialRetargetAt || !_hasSocialTarget || GetPlanarDistance(origin, _socialTarget) <= 2.2f)
+        {
+            _hasSocialTarget = false;
+            if (OfflineModeManager.Instance.TryGetNearestActivePlayer(_identity.SessionId, origin, out Transform teammateTransform, out float teammateDistance)
+                && teammateTransform != null
+                && teammateDistance >= Mathf.Lerp(6f, 13f, Mathf.Clamp01(_personalitySociability - 0.85f)))
+            {
+                Vector3 teammatePosition = teammateTransform.position;
+                Vector3 offsetDirection = ApplyBotFan((origin - teammatePosition).sqrMagnitude > 0.001f ? (origin - teammatePosition).normalized : transform.right, 85f);
+                float offsetDistance = Random.Range(2.5f, 6.5f);
+                _socialTarget = teammatePosition + offsetDirection * offsetDistance;
+                _hasSocialTarget = true;
+            }
+
+            _nextSocialRetargetAt = Time.time + Random.Range(2.4f, 5.8f);
+        }
+
+        if (!_hasSocialTarget)
+        {
+            return false;
+        }
+
+        socialDestination = _socialTarget;
+        return true;
     }
 
     private void UpdateReviveHold(string targetSessionId)
@@ -448,15 +542,20 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
     private Vector2 BuildMovementInput(Vector3 toDestination)
     {
-        if (toDestination.sqrMagnitude <= 0.04f)
+        float planarDistance = toDestination.magnitude;
+        if (planarDistance <= _destinationArrivalRadius)
         {
             return Vector2.zero;
         }
 
         Vector3 localDirection = transform.InverseTransformDirection(toDestination.normalized);
+        float speedScale = planarDistance >= _destinationSlowRadius
+            ? 1f
+            : Mathf.Clamp01(planarDistance / Mathf.Max(_destinationArrivalRadius + 0.01f, _destinationSlowRadius));
+        speedScale = Mathf.Lerp(0.35f, 1f, speedScale);
         return new Vector2(
-            Mathf.Clamp(localDirection.x, -1f, 1f),
-            Mathf.Clamp(localDirection.z, -1f, 1f));
+            Mathf.Clamp(localDirection.x, -1f, 1f) * speedScale,
+            Mathf.Clamp(localDirection.z, -1f, 1f) * speedScale);
     }
 
     private Vector2 BuildLookInput(Vector3 toDestination)
@@ -607,6 +706,196 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         return Time.time - _movementBlockedSince >= _stuckJumpDelay;
+    }
+
+    private void UpdateStuckRecovery(Vector3 origin, Vector3 toDestination)
+    {
+        if (toDestination.sqrMagnitude <= _destinationArrivalRadius * _destinationArrivalRadius
+            || _controller.IsCarrying()
+            || _controller.IsInjuredOrHitReacting()
+            || _controller.IsBeingCarried())
+        {
+            ClearStuckRecovery();
+            return;
+        }
+
+        if (IsInStuckRecovery())
+        {
+            return;
+        }
+
+        float inputMagnitude = _smoothedMovementInput.magnitude;
+        if (inputMagnitude < 0.35f)
+        {
+            _stuckProgressSampleStartedAt = -1f;
+            return;
+        }
+
+        if (_stuckProgressSampleStartedAt < 0f)
+        {
+            _stuckProgressSampleStartedAt = Time.time;
+            _stuckProgressSamplePosition = origin;
+            return;
+        }
+
+        if (Time.time - _stuckProgressSampleStartedAt < _stuckRecoveryTriggerDelay)
+        {
+            return;
+        }
+
+        float traveledDistance = GetPlanarDistance(origin, _stuckProgressSamplePosition);
+        bool movingTooSlow = _controller.GetHorizontalSpeed() <= _stuckJumpMaxSpeed * 1.5f;
+        if (traveledDistance >= _stuckRecoveryMinTravelDistance || !movingTooSlow)
+        {
+            _stuckProgressSampleStartedAt = Time.time;
+            _stuckProgressSamplePosition = origin;
+            return;
+        }
+
+        StartStuckRecovery(origin, toDestination);
+    }
+
+    private void ApplyIdlePauseVariation(
+        Vector3 origin,
+        ref Vector2 movementInput,
+        ref Vector2 lookInput,
+        bool isHoldingRevive,
+        bool hasThreat,
+        bool hasDownedTarget)
+    {
+        if (isHoldingRevive || hasThreat || hasDownedTarget || IsInStuckRecovery())
+        {
+            _idlePauseUntil = 0f;
+            return;
+        }
+
+        if (movementInput.magnitude <= 0.22f && Time.time >= _idlePauseUntil && Random.value < 0.0055f * _personalitySociability)
+        {
+            _idlePauseUntil = Time.time + Random.Range(0.2f, 0.65f);
+        }
+
+        if (Time.time < _idlePauseUntil)
+        {
+            movementInput = Vector2.zero;
+            Vector3 lookOffset = ApplyBotFan(transform.forward, 120f) * Random.Range(2f, 4f);
+            lookInput = BuildLookInput(lookOffset);
+        }
+    }
+
+    private void StartStuckRecovery(Vector3 origin, Vector3 toDestination)
+    {
+        _stuckRecoveryDirection = ChooseRecoveryDirection(origin, toDestination);
+        _stuckRecoveryUntil = Time.time + Random.Range(_stuckRecoveryDurationMin, _stuckRecoveryDurationMax);
+        _stuckProgressSampleStartedAt = -1f;
+        _movementBlockedSince = -1f;
+        _nextJumpAllowedAt = Mathf.Max(_nextJumpAllowedAt, Time.time + 0.2f);
+    }
+
+    private Vector3 ChooseRecoveryDirection(Vector3 origin, Vector3 toDestination)
+    {
+        Vector3 preferredDirection = toDestination.sqrMagnitude > 0.001f ? toDestination.normalized : transform.forward;
+        preferredDirection.y = 0f;
+        if (preferredDirection.sqrMagnitude <= 0.001f)
+        {
+            preferredDirection = transform.forward;
+        }
+
+        Vector3 left = Quaternion.Euler(0f, -75f, 0f) * preferredDirection;
+        Vector3 right = Quaternion.Euler(0f, 75f, 0f) * preferredDirection;
+        Vector3 back = -preferredDirection;
+
+        Vector3[] candidates =
+        {
+            left.normalized,
+            right.normalized,
+            back.normalized,
+            transform.right.normalized,
+            (-transform.right).normalized
+        };
+
+        float bestScore = float.NegativeInfinity;
+        Vector3 bestDirection = back.normalized;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            Vector3 candidate = candidates[i];
+            float clearance = MeasureDirectionClearance(origin, candidate);
+            float forwardBias = Vector3.Dot(candidate, preferredDirection) * 0.35f;
+            float score = clearance + forwardBias + Random.Range(-0.08f, 0.08f);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestDirection = candidate;
+            }
+        }
+
+        return bestDirection;
+    }
+
+    private float MeasureDirectionClearance(Vector3 origin, Vector3 direction)
+    {
+        Vector3 probeOrigin = origin + Vector3.up * Mathf.Max(_lowObstacleJumpProbeHeight, 0.25f);
+        if (Physics.SphereCast(
+            probeOrigin,
+            Mathf.Max(0.08f, _edgeJumpProbeRadius * 0.7f),
+            direction,
+            out RaycastHit hit,
+            _stuckRecoveryProbeDistance,
+            _movementProbeLayers,
+            QueryTriggerInteraction.Ignore)
+            && IsMovementBlockingHit(hit))
+        {
+            return Mathf.Max(0f, hit.distance);
+        }
+
+        return _stuckRecoveryProbeDistance;
+    }
+
+    private bool IsMovementBlockingHit(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return false;
+        }
+
+        Transform hitTransform = hit.collider.transform;
+        if (hitTransform == null || hitTransform.IsChildOf(transform))
+        {
+            return false;
+        }
+
+        if (hit.collider.GetComponentInParent<PlayerController>() != null
+            || hit.collider.GetComponentInParent<NextbotFollowPlayer>() != null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool IsInStuckRecovery()
+    {
+        return _stuckRecoveryUntil > Time.time && _stuckRecoveryDirection.sqrMagnitude > 0.001f;
+    }
+
+    private void ClearStuckRecovery()
+    {
+        _stuckRecoveryUntil = -1f;
+        _stuckRecoveryDirection = Vector3.zero;
+        _stuckProgressSampleStartedAt = -1f;
+    }
+
+    private Vector2 SmoothMovementInput(Vector2 targetInput)
+    {
+        float blend = 1f - Mathf.Exp(-_movementInputSharpness * Time.deltaTime);
+        _smoothedMovementInput = Vector2.Lerp(_smoothedMovementInput, targetInput, blend);
+        return _smoothedMovementInput;
+    }
+
+    private Vector2 SmoothLookInput(Vector2 targetInput)
+    {
+        float blend = 1f - Mathf.Exp(-_lookInputSharpness * Time.deltaTime);
+        _smoothedLookInput = Vector2.Lerp(_smoothedLookInput, targetInput, blend);
+        return _smoothedLookInput;
     }
 
     private static float GetPlanarDistance(Vector3 a, Vector3 b)

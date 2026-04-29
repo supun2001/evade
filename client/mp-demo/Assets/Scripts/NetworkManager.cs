@@ -1639,8 +1639,9 @@ public class NetworkManager : MonoBehaviour
     {
         for (int attempt = 0; attempt < 30; attempt++)
         {
-            if (room != null
-                && players.TryGetValue(room.SessionId, out GameObject localPlayer)
+            string localSessionId = LocalSessionId;
+            if (!string.IsNullOrWhiteSpace(localSessionId)
+                && TryGetPlayerObject(localSessionId, out GameObject localPlayer)
                 && localPlayer != null)
             {
                 NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
@@ -1666,8 +1667,10 @@ public class NetworkManager : MonoBehaviour
             yield return null;
         }
 
-        if (TryGetLocalPlayerSpawnPoint(out Vector3 fallbackSpawnPosition)
-            && players.TryGetValue(room.SessionId, out GameObject fallbackLocalPlayer)
+        string fallbackLocalSessionId = LocalSessionId;
+        if (!string.IsNullOrWhiteSpace(fallbackLocalSessionId)
+            && TryGetLocalPlayerSpawnPoint(out Vector3 fallbackSpawnPosition)
+            && TryGetPlayerObject(fallbackLocalSessionId, out GameObject fallbackLocalPlayer)
             && fallbackLocalPlayer != null)
         {
             NetworkPlayer networkPlayer = fallbackLocalPlayer.GetComponent<NetworkPlayer>();
