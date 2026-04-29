@@ -164,8 +164,10 @@ public class LobbyUI : MonoBehaviour
     #region Class Methods
     private void Start()
     {
-        bool shouldShowMenu = NetworkManager.Instance == null
-            || string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId);
+        bool isOfflineModeActive = IsOfflineModeRunning();
+        bool shouldShowMenu = !isOfflineModeActive
+            && (NetworkManager.Instance == null
+                || string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId));
 
         if (menuPanel != null)
         {
@@ -195,7 +197,11 @@ public class LobbyUI : MonoBehaviour
 
         ContinuePendingMapJoinIfNeeded();
 
-        if (!shouldShowMenu && NetworkManager.Instance != null && !NetworkManager.Instance.IsPreparingServerSelectedMap)
+        if (isOfflineModeActive)
+        {
+            OnGameStarted();
+        }
+        else if (!shouldShowMenu && NetworkManager.Instance != null && !NetworkManager.Instance.IsPreparingServerSelectedMap)
         {
             OnGameStarted();
         }
@@ -216,7 +222,14 @@ public class LobbyUI : MonoBehaviour
             SetLocalPlayerSpectating(true);
         }
 
-        if (NetworkManager.Instance != null
+        if (IsOfflineModeRunning())
+        {
+            if (menuPanel != null && menuPanel.activeSelf)
+            {
+                OnGameStarted();
+            }
+        }
+        else if (NetworkManager.Instance != null
             && !string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId)
             && !NetworkManager.Instance.IsPreparingServerSelectedMap)
         {
@@ -233,6 +246,12 @@ public class LobbyUI : MonoBehaviour
         UpdateHoverLabelFade();
         UpdateMenuButtonScaleAnimation();
         UpdateShopPreviewAnimation();
+    }
+
+    private static bool IsOfflineModeRunning()
+    {
+        return OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive;
     }
     
     private void OnDestroy()

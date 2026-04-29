@@ -12,12 +12,20 @@ public class OfflineModeManager : MonoBehaviour
     private const float PlayerSpawnRotationY = 180f;
     private const string WaitingPhase = "waiting";
     private const string IntermissionPhase = "intermission";
+    private const string MapVotePhase = "map_vote";
     private const string RoundPhase = "round";
     private static OfflineModeManager _instance;
+    private const float MapVoteDurationSeconds = 12f;
+    private const int MapVoteCandidateCount = 3;
+
+    private MapVoteStateMessageData _currentMapVoteState;
+    private string _localVotedMapId = string.Empty;
 
     [SerializeField, Min(1)] private int _offlineTotalPlayerCount = 15;
     [SerializeField] private float _spawnRingRadius = 1.8f;
     [SerializeField, Min(1f)] private float _patrolReservationRadius = 8f;
+    private string _localDisplayName = "Offline Player";
+    private int _localSkinIndex = 0;
 
     private readonly Dictionary<string, GameObject> _offlinePlayers = new Dictionary<string, GameObject>();
     private readonly Dictionary<string, OfflinePlayerRoundState> _offlinePlayerStates = new Dictionary<string, OfflinePlayerRoundState>();
@@ -103,6 +111,25 @@ public class OfflineModeManager : MonoBehaviour
 
         StopOfflineMode();
 
+        _localDisplayName = string.IsNullOrWhiteSpace(localDisplayName) ? "Offline Player" : localDisplayName;
+        _localSkinIndex = localSkinIndex;
+        IsOfflineModeActive = true;
+
+        RespawnAllPlayers();
+
+        networkManager.SetSimulatedLocalSessionId("offline_local");
+        StartOfflineRoundFlow();
+        return IsOfflineModeActive;
+    }
+
+    private void RespawnAllPlayers()
+    {
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null) return;
+
+        ClearExistingOfflinePlayers();
+        networkManager.SetSimulatedLocalSessionId("offline_local");
+
         _spawnPositions.Clear();
         _spawnPositions.AddRange(networkManager.GetConfiguredPlayerSpawnPositions());
         if (_spawnPositions.Count == 0)
@@ -116,8 +143,8 @@ public class OfflineModeManager : MonoBehaviour
 
         SpawnOfflinePlayer(
             sessionId: "offline_local",
-            displayName: string.IsNullOrWhiteSpace(localDisplayName) ? "Offline Player" : localDisplayName,
-            skinIndex: localSkinIndex,
+            displayName: _localDisplayName,
+            skinIndex: _localSkinIndex,
             spawnIndex: 0,
             isLocalPlayer: true,
             botIndex: -1);
@@ -126,7 +153,7 @@ public class OfflineModeManager : MonoBehaviour
         for (int botIndex = 0; botIndex < botCount; botIndex++)
         {
             int spawnIndex = botIndex + 1;
-            int botSkinIndex = ResolveBotSkinIndex(localSkinIndex, botIndex);
+            int botSkinIndex = ResolveBotSkinIndex(_localSkinIndex, botIndex);
             SpawnOfflinePlayer(
                 sessionId: $"offline_bot_{botIndex + 1}",
                 displayName: $"Runner {botIndex + 1}",
@@ -136,11 +163,55 @@ public class OfflineModeManager : MonoBehaviour
                 botIndex: botIndex);
         }
 
-        IsOfflineModeActive = _offlinePlayers.Count > 0;
-        networkManager.SetSimulatedLocalSessionId("offline_local");
         EnsureOfflineNextbots();
-        StartOfflineRoundFlow();
-        return IsOfflineModeActive;
+    }
+
+    private void ClearExistingOfflinePlayers()
+    {
+        NetworkManager networkManager = NetworkManager.Instance;
+        foreach (KeyValuePair<string, GameObject> pair in _offlinePlayers)
+        {
+            if (networkManager != null)
+            {
+                networkManager.UnregisterSimulatedPlayerObject(pair.Key);
+            }
+
+            if (pair.Value != null)
+            {
+                Destroy(pair.Value);
+            }
+        }
+
+        _offlinePlayers.Clear();
+        _offlinePlayerStates.Clear();
+        _rescueAssignments.Clear();
+        _patrolAssignments.Clear();
+    }
+
+    private void OnEnable()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDisable()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        if (IsOfflineModeActive)
+        {
+            HandleOfflineSceneChange();
+        }
+    }
+
+    private void HandleOfflineSceneChange()
+    {
+        RespawnAllPlayers();
+
+        // Reset player states for the current phase if we are in one
+        ResetOfflinePlayersForPhase(string.Equals(_currentPhase, RoundPhase, System.StringComparison.OrdinalIgnoreCase));
     }
 
     public void StopOfflineMode()
@@ -905,15 +976,10 @@ public class OfflineModeManager : MonoBehaviour
     private IEnumerator RunOfflineRoundFlow()
     {
         BeginOfflineIntermission(null);
+        yield return WaitForCurrentPhaseToEnd();
 
         while (IsOfflineModeActive)
         {
-            yield return WaitForCurrentPhaseToEnd();
-            if (!IsOfflineModeActive)
-            {
-                break;
-            }
-
             BeginOfflineRound();
             yield return WaitForCurrentPhaseToEnd();
             if (!IsOfflineModeActive)
@@ -922,7 +988,17 @@ public class OfflineModeManager : MonoBehaviour
             }
 
             RoundResultsMessageData results = BuildRoundResults();
-            BeginOfflineIntermission(results);
+            NetworkManager.Instance?.PublishSimulatedRoundResults(results);
+
+            BeginOfflineMapVote();
+            yield return WaitForCurrentPhaseToEnd();
+            if (!IsOfflineModeActive)
+            {
+                break;
+            }
+
+            FinalizeOfflineMapVote();
+            yield return WaitForCurrentPhaseToEnd();
         }
 
         _roundFlowCoroutine = null;
@@ -979,7 +1055,156 @@ public class OfflineModeManager : MonoBehaviour
             timeRemainingMs = Mathf.Max(0, Mathf.RoundToInt((_phaseEndsAtUnscaledTime - Time.unscaledTime) * 1000f)),
             roundDurationMs = GetRoundDurationMs(),
             intermissionDurationMs = GetIntermissionDurationMs(),
+            isMapVoteOpen = string.Equals(phase, MapVotePhase, System.StringComparison.OrdinalIgnoreCase),
         });
+    }
+
+    private void BeginOfflineMapVote()
+    {
+        _currentPhase = MapVotePhase;
+        _phaseEndsAtUnscaledTime = Time.unscaledTime + MapVoteDurationSeconds;
+        _nextbotDamageEnabledAtUnscaledTime = float.PositiveInfinity;
+        _localVotedMapId = string.Empty;
+        ResetOfflinePlayersForPhase(roundStarted: false);
+        ResetOfflineNextbots(active: false);
+
+        // Generate candidates
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "parkour" };
+        List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
+
+        // Shuffle and pick 3
+        for (int i = 0; i < allMaps.Count && i < MapVoteCandidateCount; i++)
+        {
+            int randomIndex = Random.Range(i, allMaps.Count);
+            string mapId = allMaps[randomIndex];
+            allMaps[randomIndex] = allMaps[i];
+
+            candidates.Add(new MapVoteCandidateMessageData
+            {
+                mapId = mapId,
+                sceneName = GetSceneNameForMapId(mapId),
+                displayName = GetDisplayNameForMapId(mapId),
+                difficulty = GetDifficultyForMapId(mapId),
+            });
+        }
+
+        _currentMapVoteState = new MapVoteStateMessageData
+        {
+            isOpen = true,
+            timeRemainingMs = Mathf.RoundToInt(MapVoteDurationSeconds * 1000f),
+            candidates = candidates.ToArray(),
+            votes = new MapVoteCountMessageData[candidates.Count]
+        };
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            _currentMapVoteState.votes[i] = new MapVoteCountMessageData { mapId = candidates[i].mapId, count = 0 };
+        }
+
+        PublishRoundPhase(MapVotePhase, _roundIndex);
+        SyncMapVoteState();
+    }
+
+    public void SubmitOfflineMapVote(string mapId)
+    {
+        if (!string.Equals(_currentPhase, MapVotePhase) || _currentMapVoteState == null)
+        {
+            return;
+        }
+
+        _localVotedMapId = mapId;
+        _currentMapVoteState.selectedMapId = mapId;
+
+        // Update vote counts (Simulate some random bot votes too?)
+        for (int i = 0; i < _currentMapVoteState.votes.Length; i++)
+        {
+            string mId = _currentMapVoteState.votes[i].mapId;
+            int count = (string.Equals(mId, mapId)) ? 1 : 0;
+
+            // Add some random bot votes
+            count += Random.Range(0, 3);
+
+            _currentMapVoteState.votes[i].count = count;
+        }
+
+        SyncMapVoteState();
+    }
+
+    private void FinalizeOfflineMapVote()
+    {
+        if (_currentMapVoteState == null)
+        {
+            return;
+        }
+
+        _currentMapVoteState.isOpen = false;
+        SyncMapVoteState();
+
+        // Pick winner
+        string winningMapId = "SampleScene";
+        int maxVotes = -1;
+        foreach (var voteEntry in _currentMapVoteState.votes)
+        {
+            if (voteEntry.count > maxVotes)
+            {
+                maxVotes = voteEntry.count;
+                winningMapId = voteEntry.mapId;
+            }
+        }
+
+        BeginOfflineIntermission(null);
+
+        // Publish map selected
+        NetworkManager.Instance?.PublishSimulatedMapSelected(new MapSelectedMessageData
+        {
+            mapId = winningMapId,
+            sceneName = GetSceneNameForMapId(winningMapId),
+            displayName = GetDisplayNameForMapId(winningMapId),
+            difficulty = GetDifficultyForMapId(winningMapId),
+            isInitial = false
+        });
+    }
+
+    private void SyncMapVoteState()
+    {
+        if (_currentMapVoteState != null)
+        {
+            _currentMapVoteState.timeRemainingMs = Mathf.Max(0, Mathf.RoundToInt((_phaseEndsAtUnscaledTime - Time.unscaledTime) * 1000f));
+            NetworkManager.Instance?.PublishSimulatedMapVoteState(_currentMapVoteState);
+        }
+    }
+
+    private string GetDisplayNameForMapId(string mapId)
+    {
+        switch (mapId)
+        {
+            case "SampleScene": return "Classic";
+            case "backroom": return "Backroom";
+            case "parkour": return "Parkour";
+            default: return mapId;
+        }
+    }
+
+    private string GetDifficultyForMapId(string mapId)
+    {
+        switch (mapId)
+        {
+            case "SampleScene": return "NORMAL";
+            case "backroom": return "HARD";
+            case "parkour": return "HARD";
+            default: return "NORMAL";
+        }
+    }
+
+    private string GetSceneNameForMapId(string mapId)
+    {
+        switch (mapId)
+        {
+            case "SampleScene": return "Classic";
+            case "backroom": return "backroom";
+            case "parkour": return "parkour";
+            default: return mapId;
+        }
     }
 
     private void ResetOfflinePlayersForPhase(bool roundStarted)

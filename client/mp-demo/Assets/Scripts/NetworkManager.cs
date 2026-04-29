@@ -671,6 +671,17 @@ public class NetworkManager : MonoBehaviour
         RoomLeftEvent?.Invoke();
     }
 
+    public void PublishSimulatedMapVoteState(MapVoteStateMessageData payload)
+    {
+        MapVoteStateReceived?.Invoke(payload);
+    }
+
+    public void PublishSimulatedMapSelected(MapSelectedMessageData payload)
+    {
+        HandleServerMapSelected(payload);
+        MapSelectedReceived?.Invoke(payload);
+    }
+
     public List<Vector3> GetConfiguredPlayerSpawnPositions()
     {
         List<Vector3> spawnPositions = new List<Vector3>(playerSpawnPoints.Count);
@@ -1450,12 +1461,21 @@ public class NetworkManager : MonoBehaviour
 
     public void SendMapVote(string mapId)
     {
-        if (room == null || string.IsNullOrWhiteSpace(mapId))
+        if (string.IsNullOrWhiteSpace(mapId))
         {
             return;
         }
 
-        room.Send("voteMap", mapId.Trim());
+        if (room != null)
+        {
+            room.Send("voteMap", mapId.Trim());
+            return;
+        }
+
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager manager) && manager.IsOfflineModeActive)
+        {
+            manager.SubmitOfflineMapVote(mapId.Trim());
+        }
     }
 
     public void RequestMapVoteState()

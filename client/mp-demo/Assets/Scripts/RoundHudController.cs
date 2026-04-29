@@ -287,8 +287,7 @@ public class RoundHudController : MonoBehaviour
         _results = message;
         _showResults = message != null
             && message.entries != null
-            && message.entries.Length > 0
-            && !ShouldShowMapVote();
+            && message.entries.Length > 0;
         RefreshResultsDisplay();
     }
 
@@ -303,7 +302,6 @@ public class RoundHudController : MonoBehaviour
         if (message != null && message.isOpen)
         {
             _mapVoteEndsAtUnscaledTime = Time.unscaledTime + Mathf.Max(0f, message.timeRemainingMs / 1000f);
-            _showResults = false;
         }
         else
         {
@@ -319,7 +317,6 @@ public class RoundHudController : MonoBehaviour
     private void EnsureFallbackMapVoteState(RoundPhaseMessageData phaseMessage)
     {
         _mapVoteEndsAtUnscaledTime = Time.unscaledTime + Mathf.Max(0f, phaseMessage.timeRemainingMs / 1000f);
-        _showResults = false;
 
         if (_currentMapVote != null && _currentMapVote.isOpen)
         {
@@ -338,10 +335,12 @@ public class RoundHudController : MonoBehaviour
 
     private void HandleMapSelectedReceived(MapSelectedMessageData message)
     {
+        _showResults = false;
         _localVotedMapId = string.Empty;
         _currentMapVote = null;
         _mapVoteEndsAtUnscaledTime = 0f;
         _showMapVoteResultsView = false;
+        RefreshResultsDisplay();
         RefreshMapVoteDisplay();
     }
 
@@ -796,7 +795,9 @@ public class RoundHudController : MonoBehaviour
         float timeRemaining = Mathf.Max(0f, _phaseEndsAtUnscaledTime - Time.unscaledTime);
         _roundPhaseTitleLabel.text = string.Equals(_currentPhase.phase, "intermission", StringComparison.OrdinalIgnoreCase)
             ? "INTERMISSION"
-            : "ROUND";
+            : (string.Equals(_currentPhase.phase, "map_vote", StringComparison.OrdinalIgnoreCase)
+                ? "VOTING"
+                : "ROUND");
         _roundPhaseTimerLabel.text = FormatTime(timeRemaining);
     }
 
@@ -955,7 +956,7 @@ public class RoundHudController : MonoBehaviour
         _mapVoteContent.style.maxWidth = new StyleLength(Length.Percent(94));
         _mapVoteContent.style.alignItems = Align.Center;
 
-        _mapVoteTitleLabel = new Label("VOTE A MAP");
+        _mapVoteTitleLabel = new Label("VOTING");
         _mapVoteTitleLabel.style.color = Color.white;
         _mapVoteTitleLabel.style.fontSize = 34f;
         _mapVoteTitleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -1072,7 +1073,7 @@ public class RoundHudController : MonoBehaviour
         float timeRemaining = Mathf.Max(0f, _mapVoteEndsAtUnscaledTime - Time.unscaledTime);
         if (_mapVoteTitleLabel != null)
         {
-            _mapVoteTitleLabel.text = _showMapVoteResultsView ? "VOTING ACTIVE" : "VOTE A MAP";
+            _mapVoteTitleLabel.text = "VOTING";
         }
 
         if (_mapVoteTimerLabel != null)
@@ -1089,6 +1090,11 @@ public class RoundHudController : MonoBehaviour
 
     private bool ShouldShowMapVote()
     {
+        if (_showResults)
+        {
+            return false;
+        }
+
         if (_currentMapVote == null || !_currentMapVote.isOpen)
         {
             return false;
@@ -1665,7 +1671,6 @@ public class RoundHudController : MonoBehaviour
         }
 
         bool visible = _showResults
-            && !ShouldShowMapVote()
             && _results != null
             && _results.entries != null
             && _results.entries.Length > 0;
