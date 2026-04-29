@@ -150,6 +150,7 @@ public class NetworkManager : MonoBehaviour
     private string selectedMapId = string.Empty;
     private string activeServerMapId = string.Empty;
     private bool _isLoadingServerMap;
+    private bool _awaitingInitialMapSelection;
     private Coroutine _serverMapLoadCoroutine;
     public GameObject PlayerPrefab => playerPrefab;
 
@@ -203,6 +204,7 @@ public class NetworkManager : MonoBehaviour
     public string CurrentMapId => ResolveCurrentMapId();
     public Dictionary<string, Player> SimulatedPlayerStates => simulatedPlayerStates;
     public bool HasSimulatedPlayerStates => simulatedPlayerStates.Count > 0;
+    public bool IsPreparingServerSelectedMap => _awaitingInitialMapSelection || _isLoadingServerMap;
     public int IntermissionDurationMilliseconds => IntermissionDurationMs;
     public int RoundDurationMilliseconds => RoundDurationMs;
     private bool _hasReceivedRoundPhaseFromServer;
@@ -325,7 +327,7 @@ public class NetworkManager : MonoBehaviour
 
     private void OnPlayerAdded(string id, Player player)
     {
-        if (_isLoadingServerMap)
+        if (IsPreparingServerSelectedMap)
         {
             return;
         }
@@ -342,7 +344,16 @@ public class NetworkManager : MonoBehaviour
         }
 
         Debug.Log($"Player added: {id}");
-        Vector3 pos = ResolveGroundedSpawnPosition(new Vector3(player.x, player.y, player.z));
+        Vector3 pos = new Vector3(player.x, player.y, player.z);
+        if (isLocal && TryGetLocalPlayerGroundedSpawnPoint(out Vector3 groundedLocalSpawn))
+        {
+            pos = groundedLocalSpawn;
+        }
+        else
+        {
+            pos = ResolveGroundedSpawnPosition(pos);
+        }
+
         GameObject obj = Instantiate(playerPrefab, pos, Quaternion.identity);
 
         NetworkPlayer np = obj.GetComponent<NetworkPlayer>();
@@ -1135,14 +1146,38 @@ public class NetworkManager : MonoBehaviour
         return true;
     }
 
+    public bool TryGetLocalPlayerGroundedSpawnPoint(out Vector3 spawnPosition)
+    {
+        spawnPosition = Vector3.zero;
+        if (playerSpawnPoints == null || playerSpawnPoints.Count == 0 || string.IsNullOrEmpty(LocalSessionId))
+        {
+            return false;
+        }
+
+        int spawnIndex = GetStableSpawnIndex(LocalSessionId, playerSpawnPoints.Count);
+        return TryResolveGroundedSpawnPosition(playerSpawnPoints[spawnIndex].GetWorldPosition(), out spawnPosition);
+    }
+
     private Vector3 ResolveGroundedSpawnPosition(Vector3 desiredPosition)
     {
+        if (TryResolveGroundedSpawnPosition(desiredPosition, out Vector3 resolvedPosition))
+        {
+            return resolvedPosition;
+        }
+
+        return desiredPosition;
+    }
+
+    private bool TryResolveGroundedSpawnPosition(Vector3 desiredPosition, out Vector3 resolvedPosition)
+    {
+        resolvedPosition = desiredPosition;
         Vector3 rayOrigin = desiredPosition + Vector3.up * Mathf.Max(1f, spawnGroundProbeHeight);
         float rayDistance = Mathf.Max(10f, spawnGroundProbeDistance);
         int layerMask = GetSpawnGroundLayerMask();
         if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, layerMask, QueryTriggerInteraction.Ignore))
         {
-            return hit.point + Vector3.up * spawnGroundOffset;
+            resolvedPosition = hit.point + Vector3.up * spawnGroundOffset;
+            return true;
         }
 
         int walkableLayer = LayerMask.NameToLayer("Walkable");
@@ -1151,11 +1186,12 @@ public class NetworkManager : MonoBehaviour
             int walkableMask = 1 << walkableLayer;
             if (Physics.SphereCast(rayOrigin, 0.35f, Vector3.down, out hit, rayDistance, walkableMask, QueryTriggerInteraction.Ignore))
             {
-                return hit.point + Vector3.up * spawnGroundOffset;
+                resolvedPosition = hit.point + Vector3.up * spawnGroundOffset;
+                return true;
             }
         }
 
-        return desiredPosition;
+        return false;
     }
 
     private int GetSpawnGroundLayerMask()
@@ -1269,6 +1305,8 @@ public class NetworkManager : MonoBehaviour
     private void OnRoomJoined()
     {
         currentRoomId = room.RoomId;
+        _awaitingInitialMapSelection = true;
+        _hasReceivedRoundPhaseFromServer = false;
         Debug.Log($"Connected! Room ID: {currentRoomId}");
 
         // Setup Handlers 
@@ -1396,6 +1434,15 @@ public class NetworkManager : MonoBehaviour
             }
         });
 
+        RequestCurrentMapSelection();
+        RequestRoundPhaseState();
+        RequestMapVoteState();
+
+        // Safety timeout: if the server's mapSelected response never arrives (e.g. network hiccup),
+        // clear the flag after 5 seconds so the player is not permanently blocked from entering.
+        StartCoroutine(ClearMapSelectionTimeoutSafety());
+
+
         var events = Colyseus.Schema.Callbacks.Get(room);
         events.OnAdd(state => state.players, (key, player) => OnPlayerAdded(key, player));
         events.OnRemove(state => state.players, (key, player) => OnPlayerRemoved(key, player));
@@ -1421,6 +1468,26 @@ public class NetworkManager : MonoBehaviour
         room.Send("requestMapVoteState");
     }
 
+    public void RequestCurrentMapSelection()
+    {
+        if (room == null)
+        {
+            return;
+        }
+
+        room.Send("requestMapSelected");
+    }
+
+    public void RequestRoundPhaseState()
+    {
+        if (room == null)
+        {
+            return;
+        }
+
+        room.Send("requestRoundPhase");
+    }
+
     public void SyncCurrentMapConfiguration()
     {
         if (room == null)
@@ -1429,6 +1496,19 @@ public class NetworkManager : MonoBehaviour
         }
 
         room.Send("syncMapConfig", BuildMapSyncPayload());
+    }
+
+    private IEnumerator ClearMapSelectionTimeoutSafety()
+    {
+        yield return new WaitForSeconds(5f);
+
+        if (_awaitingInitialMapSelection)
+        {
+            Debug.LogWarning("NetworkManager: mapSelected response timed out — clearing flag and proceeding.");
+            _awaitingInitialMapSelection = false;
+            SyncCurrentMapConfiguration();
+            ReconcilePlayerRepresentations(room?.State);
+        }
     }
 
     private void HandleServerMapSelected(MapSelectedMessageData message)
@@ -1441,9 +1521,12 @@ public class NetworkManager : MonoBehaviour
         string mapId = SanitizeMapId(message.mapId);
         if (!IsKnownMapId(mapId))
         {
+            _awaitingInitialMapSelection = false;
+            ReconcilePlayerRepresentations(room?.State);
             return;
         }
 
+        _awaitingInitialMapSelection = false;
         activeServerMapId = mapId;
         selectedMapId = mapId;
 
@@ -1452,6 +1535,7 @@ public class NetworkManager : MonoBehaviour
             : message.sceneName.Trim();
         if (string.IsNullOrWhiteSpace(sceneName))
         {
+            ReconcilePlayerRepresentations(room?.State);
             return;
         }
 
@@ -1494,6 +1578,7 @@ public class NetworkManager : MonoBehaviour
                 : $"NetworkManager: server-selected map '{sceneName}' is not in Build Settings.");
             _isLoadingServerMap = false;
             _serverMapLoadCoroutine = null;
+            ReconcilePlayerRepresentations(room?.State);
             yield break;
         }
 
@@ -1501,6 +1586,12 @@ public class NetworkManager : MonoBehaviour
         {
             yield return null;
         }
+
+        // Let the newly loaded scene finish bringing colliders and spawn anchors online
+        // before we probe for ground and rebuild the local player objects.
+        yield return null;
+        yield return new WaitForEndOfFrame();
+        yield return new WaitForFixedUpdate();
 
         activeServerMapId = mapId;
         selectedMapId = mapId;
@@ -1526,17 +1617,29 @@ public class NetworkManager : MonoBehaviour
 
     private IEnumerator ApplyLocalRoundResetFromState()
     {
-        for (int attempt = 0; attempt < 10; attempt++)
+        for (int attempt = 0; attempt < 30; attempt++)
         {
             if (room != null
                 && players.TryGetValue(room.SessionId, out GameObject localPlayer)
                 && localPlayer != null)
             {
                 NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
-                if (networkPlayer != null && networkPlayer.ApplyAuthoritativeRoundReset())
+                if (networkPlayer != null)
                 {
-                    _localRoundResetCoroutine = null;
-                    yield break;
+                    if (TryGetLocalPlayerGroundedSpawnPoint(out Vector3 groundedSpawnPosition))
+                    {
+                        networkPlayer.ApplyImmediateRoundReset(
+                            groundedSpawnPosition,
+                            localPlayer.transform.eulerAngles.y);
+                        _localRoundResetCoroutine = null;
+                        yield break;
+                    }
+
+                    if (networkPlayer.ApplyAuthoritativeRoundReset())
+                    {
+                        _localRoundResetCoroutine = null;
+                        yield break;
+                    }
                 }
             }
 
@@ -1665,6 +1768,7 @@ public class NetworkManager : MonoBehaviour
         currentRoomId = "";
         activeServerMapId = "";
         _isLoadingServerMap = false;
+        _awaitingInitialMapSelection = false;
         if (_serverMapLoadCoroutine != null)
         {
             StopCoroutine(_serverMapLoadCoroutine);

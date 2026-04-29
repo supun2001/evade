@@ -164,9 +164,12 @@ public class LobbyUI : MonoBehaviour
     #region Class Methods
     private void Start()
     {
+        bool shouldShowMenu = NetworkManager.Instance == null
+            || string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId);
+
         if (menuPanel != null)
         {
-            menuPanel.SetActive(true);
+            menuPanel.SetActive(shouldShowMenu);
         }
         else
         {
@@ -175,7 +178,7 @@ public class LobbyUI : MonoBehaviour
 
         RefreshMenuUiBindings();
 
-        if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(true);
+        if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(shouldShowMenu);
         if (NetworkManager.Instance != null)
         {
             NetworkManager.Instance.RoomLeftEvent += HandleRoomLeft;
@@ -191,6 +194,11 @@ public class LobbyUI : MonoBehaviour
         if (notificationText != null) notificationText.text = "";
 
         ContinuePendingMapJoinIfNeeded();
+
+        if (!shouldShowMenu && NetworkManager.Instance != null && !NetworkManager.Instance.IsPreparingServerSelectedMap)
+        {
+            OnGameStarted();
+        }
     }
 
     private void Update()
@@ -208,7 +216,9 @@ public class LobbyUI : MonoBehaviour
             SetLocalPlayerSpectating(true);
         }
 
-        if (NetworkManager.Instance != null && !string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId))
+        if (NetworkManager.Instance != null
+            && !string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId)
+            && !NetworkManager.Instance.IsPreparingServerSelectedMap)
         {
             if (_pendingSpectateJoin)
             {
@@ -291,6 +301,11 @@ public class LobbyUI : MonoBehaviour
 
     private void AutoStartJoinedRoom()
     {
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsPreparingServerSelectedMap)
+        {
+            return;
+        }
+
         if (_pendingSpectateJoin || _isSpectatingFromMenu)
         {
             ActivateSpectateMode();
@@ -314,6 +329,11 @@ public class LobbyUI : MonoBehaviour
     #region Button Clicks
     private void OnLobbyStateChange(MyRoomState state, bool isFirstState)
     {
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsPreparingServerSelectedMap)
+        {
+            return;
+        }
+
         if (state.isGameStarted && menuPanel.activeSelf && !_pendingSpectateJoin && !_isSpectatingFromMenu)
         {
             Debug.Log("LobbyUI: Room is already in-game. Starting for late joiner...");
@@ -1963,6 +1983,11 @@ public class LobbyUI : MonoBehaviour
 
     public void HandleStartGameSignal()
     {
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsPreparingServerSelectedMap)
+        {
+            return;
+        }
+
         if (_pendingSpectateJoin || _isSpectatingFromMenu)
         {
             ActivateSpectateMode();

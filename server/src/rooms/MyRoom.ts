@@ -407,7 +407,10 @@ export class MyRoom extends Room<MyRoomState> {
     this.nextbotIds = this.resolveNextbotIds(initialMapOptions);
     this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(initialMapOptions, this.nextbotIds);
     this.playerSpawnPoints = this.resolvePlayerSpawnPoints(initialMapOptions);
-    this.intermissionDurationMs = MAP_VOTE_DURATION_MS;
+    // Use a short initial intermission for the first round (no map vote needed).
+    // Subsequent rounds use the full MAP_VOTE_DURATION_MS for voting.
+    const INITIAL_INTERMISSION_MS = 5_000;
+    this.intermissionDurationMs = INITIAL_INTERMISSION_MS;
     this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
     this.initializeNextbots();
     this.setPatchRate(1000 / 60);
@@ -687,6 +690,14 @@ export class MyRoom extends Room<MyRoomState> {
 
     this.onMessage("requestMapVoteState", (client) => {
       this.sendMapVoteStateToClient(client);
+    });
+
+    this.onMessage("requestMapSelected", (client) => {
+      this.sendMapSelectedToClient(client, this.roundIndex === 0);
+    });
+
+    this.onMessage("requestRoundPhase", (client) => {
+      this.sendRoundPhaseToClient(client);
     });
 
     this.onMessage("nextbotHit", (client, message) => {

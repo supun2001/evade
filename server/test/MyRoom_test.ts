@@ -32,6 +32,28 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(room.state.nextbots.size, 5);
   });
 
+  it("answers map and phase requests after client handlers are registered", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", { mapId: "parkour" });
+    const client1 = await colyseus.connectTo(room);
+
+    const mapSelected = new Promise<any>((resolve) => {
+      client1.onMessage("mapSelected", (message) => resolve(JSON.parse(message)));
+    });
+    const roundPhase = new Promise<any>((resolve) => {
+      client1.onMessage("roundPhase", (message) => resolve(JSON.parse(message)));
+    });
+
+    client1.send("requestMapSelected");
+    client1.send("requestRoundPhase");
+
+    const mapPayload = await mapSelected;
+    const phasePayload = await roundPhase;
+
+    assert.strictEqual(mapPayload.mapId, "parkour");
+    assert.strictEqual(mapPayload.sceneName, "parkour");
+    assert.strictEqual(phasePayload.phase, "waiting");
+  });
+
   it("keeps hit-reacting players revivable while the injured pose latches", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {});
     const reviver = await colyseus.connectTo(room);
