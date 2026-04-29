@@ -268,6 +268,10 @@ describe("testing your Colyseus app", () => {
     await room.waitForNextPatch();
 
     const roomAny = room as any;
+    roomAny.currentPhase = "round";
+    roomAny.phaseEndsAt = Date.now() + 30_000;
+    room.state.isGameStarted = true;
+
     const nextbot = room.state.nextbots.get("nextbot_0");
     assert.ok(nextbot);
     const controller = roomAny.nextbotControllers[0];
@@ -285,9 +289,20 @@ describe("testing your Colyseus app", () => {
     target.isInjured = false;
     target.isHitReacting = false;
     target.isEliminated = false;
+    target.isReady = true;
+    target.isSpectator = false;
+    roomAny.playerSafeUntil.set(client.sessionId, 0);
+    nextbot!.isActive = true;
     controller.nextInjuryAt = 0;
 
-    roomAny.tryInjurePlayer(controller, nextbot, target, Date.now());
+    client.send("nextbotHit", {
+      id: "nextbot_0",
+      x: nextbot!.x,
+      y: nextbot!.y,
+      z: nextbot!.z,
+    });
+
+    await room.waitForNextPatch();
 
     assert.strictEqual(target.isInjured, false);
   });
@@ -325,6 +340,47 @@ describe("testing your Colyseus app", () => {
     nextbot!.z = player!.z + 20;
     controller.currentTargetSessionId = client.sessionId;
     controller.nextInjuryAt = 0;
+
+    client.send("nextbotHit", {
+      id: "nextbot_0",
+      x: player!.x + 0.2,
+      y: player!.y,
+      z: player!.z,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(player!.isInjured, true);
+    assert.strictEqual(player!.hitTriggerId > 0, true);
+  });
+
+  it("applies client-reported nextbot hits on default maps", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+    const client = await colyseus.connectTo(room);
+
+    await room.waitForNextPatch();
+
+    const roomAny = room as any;
+    roomAny.currentPhase = "round";
+    roomAny.phaseEndsAt = Date.now() + 30_000;
+    room.state.isGameStarted = true;
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    player!.isReady = true;
+    player!.isSpectator = false;
+    player!.isInjured = false;
+    player!.isHitReacting = false;
+    roomAny.playerSafeUntil.set(client.sessionId, 0);
+
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+
+    nextbot!.isActive = true;
+    nextbot!.x = player!.x + 20;
+    nextbot!.y = player!.y;
+    nextbot!.z = player!.z + 20;
 
     client.send("nextbotHit", {
       id: "nextbot_0",

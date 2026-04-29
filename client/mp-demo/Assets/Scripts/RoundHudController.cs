@@ -51,6 +51,23 @@ public class RoundHudController : MonoBehaviour
     private Label _tabScoreboardPhaseLabel;
     private Label _tabScoreboardModeLabel;
     private Label _tabScoreboardPlayerCountLabel;
+    private VisualElement _mapVoteOverlay;
+    private VisualElement _mapVoteContent;
+    private Label _mapVoteTitleLabel;
+    private Label _mapVoteTimerLabel;
+    private VisualElement _mapVoteCardView;
+    private VisualElement _mapVoteGrid;
+    private VisualElement _mapVoteResultsView;
+    private Label _mapVoteWinningLabel;
+    private VisualElement _mapVoteResultsList;
+    private Label _mapVoteStatusLabel;
+    private readonly Dictionary<string, Button> _mapVoteButtons = new Dictionary<string, Button>();
+    private readonly Dictionary<string, Label> _mapVoteCountLabels = new Dictionary<string, Label>();
+    private readonly Dictionary<string, Label> _mapVoteVotedLabels = new Dictionary<string, Label>();
+    private readonly Dictionary<string, Label> _mapVoteResultNameLabels = new Dictionary<string, Label>();
+    private readonly Dictionary<string, Label> _mapVoteResultPercentLabels = new Dictionary<string, Label>();
+    private readonly Dictionary<string, VisualElement> _mapVoteResultFillBars = new Dictionary<string, VisualElement>();
+    private readonly Dictionary<string, Label> _mapVoteResultCountLabels = new Dictionary<string, Label>();
 
     private RoundPhaseMessageData _currentPhase;
     private float _phaseEndsAtUnscaledTime;
@@ -59,6 +76,11 @@ public class RoundHudController : MonoBehaviour
     private float _announcementHideAt;
     private RoundResultsMessageData _results;
     private bool _showResults;
+    private MapVoteStateMessageData _currentMapVote;
+    private MapVoteCandidateMessageData[] _lastMapVoteCandidates = Array.Empty<MapVoteCandidateMessageData>();
+    private float _mapVoteEndsAtUnscaledTime;
+    private string _localVotedMapId = string.Empty;
+    private bool _showMapVoteResultsView;
 
     private void Awake()
     {
@@ -114,10 +136,12 @@ public class RoundHudController : MonoBehaviour
         HandleResultsCloseInput();
         RefreshTabScoreboardDisplay();
         RefreshBackgroundMusic();
+        HandleMapVoteInput();
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
         RefreshNextbotThreatDisplay();
         RefreshResultsDisplay();
+        RefreshMapVoteDisplay();
     }
 
     private void OnDestroy()
@@ -132,6 +156,8 @@ public class RoundHudController : MonoBehaviour
             _networkManager.RoundPhaseChanged -= HandleRoundPhaseChanged;
             _networkManager.RoundAnnouncementReceived -= HandleRoundAnnouncementReceived;
             _networkManager.RoundResultsReceived -= HandleRoundResultsReceived;
+            _networkManager.MapVoteStateReceived -= HandleMapVoteStateReceived;
+            _networkManager.MapSelectedReceived -= HandleMapSelectedReceived;
             _networkManager.RoomLeftEvent -= HandleRoomLeft;
         }
 
@@ -142,6 +168,8 @@ public class RoundHudController : MonoBehaviour
             _networkManager.RoundPhaseChanged += HandleRoundPhaseChanged;
             _networkManager.RoundAnnouncementReceived += HandleRoundAnnouncementReceived;
             _networkManager.RoundResultsReceived += HandleRoundResultsReceived;
+            _networkManager.MapVoteStateReceived += HandleMapVoteStateReceived;
+            _networkManager.MapSelectedReceived += HandleMapSelectedReceived;
             _networkManager.RoomLeftEvent += HandleRoomLeft;
         }
     }
@@ -178,12 +206,14 @@ public class RoundHudController : MonoBehaviour
         _tabScoreboardPhaseLabel = _hudRoot?.Q<Label>("tab-scoreboard-phase-label");
         _tabScoreboardModeLabel = _hudRoot?.Q<Label>("tab-scoreboard-mode-label");
         _tabScoreboardPlayerCountLabel = _hudRoot?.Q<Label>("tab-scoreboard-player-count-label");
+        EnsureMapVoteOverlay();
 
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
         RefreshNextbotThreatDisplay();
         RefreshResultsDisplay();
         RefreshTabScoreboardDisplay();
+        RefreshMapVoteDisplay();
     }
 
     private UIDocument GetLocalHudDocument()
@@ -207,6 +237,21 @@ public class RoundHudController : MonoBehaviour
     {
         _currentPhase = message;
         _phaseEndsAtUnscaledTime = Time.unscaledTime + Mathf.Max(0f, message.timeRemainingMs / 1000f);
+
+        if (string.Equals(message.phase, "intermission", StringComparison.OrdinalIgnoreCase)
+            && message.roundIndex > 0)
+        {
+            _showMapVoteResultsView = false;
+            if (message.isMapVoteOpen)
+            {
+                EnsureFallbackMapVoteState(message);
+                _networkManager?.RequestMapVoteState();
+            }
+            else if (_currentMapVote != null)
+            {
+                _currentMapVote.isOpen = false;
+            }
+        }
 
         if (string.Equals(message.phase, "round", StringComparison.OrdinalIgnoreCase))
         {
@@ -240,8 +285,64 @@ public class RoundHudController : MonoBehaviour
     private void HandleRoundResultsReceived(RoundResultsMessageData message)
     {
         _results = message;
-        _showResults = message != null && message.entries != null && message.entries.Length > 0;
+        _showResults = message != null
+            && message.entries != null
+            && message.entries.Length > 0
+            && !ShouldShowMapVote();
         RefreshResultsDisplay();
+    }
+
+    private void HandleMapVoteStateReceived(MapVoteStateMessageData message)
+    {
+        _currentMapVote = message;
+        if (message?.candidates != null && message.candidates.Length > 0)
+        {
+            _lastMapVoteCandidates = message.candidates;
+        }
+
+        if (message != null && message.isOpen)
+        {
+            _mapVoteEndsAtUnscaledTime = Time.unscaledTime + Mathf.Max(0f, message.timeRemainingMs / 1000f);
+            _showResults = false;
+        }
+        else
+        {
+            _mapVoteEndsAtUnscaledTime = 0f;
+            _localVotedMapId = string.Empty;
+            _showMapVoteResultsView = false;
+        }
+
+        RefreshResultsDisplay();
+        RefreshMapVoteDisplay();
+    }
+
+    private void EnsureFallbackMapVoteState(RoundPhaseMessageData phaseMessage)
+    {
+        _mapVoteEndsAtUnscaledTime = Time.unscaledTime + Mathf.Max(0f, phaseMessage.timeRemainingMs / 1000f);
+        _showResults = false;
+
+        if (_currentMapVote != null && _currentMapVote.isOpen)
+        {
+            return;
+        }
+
+        _currentMapVote = new MapVoteStateMessageData
+        {
+            isOpen = true,
+            timeRemainingMs = phaseMessage.timeRemainingMs,
+            selectedMapId = _currentMapVote?.selectedMapId ?? string.Empty,
+            candidates = _lastMapVoteCandidates ?? Array.Empty<MapVoteCandidateMessageData>(),
+            votes = Array.Empty<MapVoteCountMessageData>(),
+        };
+    }
+
+    private void HandleMapSelectedReceived(MapSelectedMessageData message)
+    {
+        _localVotedMapId = string.Empty;
+        _currentMapVote = null;
+        _mapVoteEndsAtUnscaledTime = 0f;
+        _showMapVoteResultsView = false;
+        RefreshMapVoteDisplay();
     }
 
     private void HandleRoomLeft()
@@ -253,10 +354,15 @@ public class RoundHudController : MonoBehaviour
         _announcementHideAt = 0f;
         _results = null;
         _showResults = false;
+        _currentMapVote = null;
+        _mapVoteEndsAtUnscaledTime = 0f;
+        _localVotedMapId = string.Empty;
+        _showMapVoteResultsView = false;
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
         RefreshNextbotThreatDisplay();
         RefreshResultsDisplay();
+        RefreshMapVoteDisplay();
     }
 
     private void UpdateAnnouncementLifetime()
@@ -797,6 +903,720 @@ public class RoundHudController : MonoBehaviour
         return string.Join(" ", parts);
     }
 
+    private void EnsureMapVoteOverlay()
+    {
+        if (_hudRoot == null)
+        {
+            _mapVoteOverlay = null;
+            _mapVoteCardView = null;
+            _mapVoteGrid = null;
+            _mapVoteResultsView = null;
+            _mapVoteWinningLabel = null;
+            _mapVoteResultsList = null;
+            _mapVoteButtons.Clear();
+            _mapVoteCountLabels.Clear();
+            _mapVoteVotedLabels.Clear();
+            _mapVoteResultNameLabels.Clear();
+            _mapVoteResultPercentLabels.Clear();
+            _mapVoteResultFillBars.Clear();
+            _mapVoteResultCountLabels.Clear();
+            return;
+        }
+
+        _mapVoteOverlay = _hudRoot.Q<VisualElement>("map-vote-overlay");
+        if (_mapVoteOverlay != null)
+        {
+            return;
+        }
+
+        _mapVoteButtons.Clear();
+        _mapVoteCountLabels.Clear();
+        _mapVoteVotedLabels.Clear();
+        _mapVoteResultNameLabels.Clear();
+        _mapVoteResultPercentLabels.Clear();
+        _mapVoteResultFillBars.Clear();
+        _mapVoteResultCountLabels.Clear();
+
+        _mapVoteOverlay = new VisualElement { name = "map-vote-overlay" };
+        _mapVoteOverlay.style.position = Position.Absolute;
+        _mapVoteOverlay.style.left = 0f;
+        _mapVoteOverlay.style.right = 0f;
+        _mapVoteOverlay.style.top = 0f;
+        _mapVoteOverlay.style.bottom = 0f;
+        _mapVoteOverlay.style.display = DisplayStyle.None;
+        _mapVoteOverlay.style.justifyContent = Justify.Center;
+        _mapVoteOverlay.style.alignItems = Align.Center;
+        _mapVoteOverlay.style.paddingLeft = 20f;
+        _mapVoteOverlay.style.paddingRight = 20f;
+        _mapVoteOverlay.pickingMode = PickingMode.Position;
+
+        _mapVoteContent = new VisualElement();
+        _mapVoteContent.style.width = 820f;
+        _mapVoteContent.style.maxWidth = new StyleLength(Length.Percent(94));
+        _mapVoteContent.style.alignItems = Align.Center;
+
+        _mapVoteTitleLabel = new Label("VOTE A MAP");
+        _mapVoteTitleLabel.style.color = Color.white;
+        _mapVoteTitleLabel.style.fontSize = 34f;
+        _mapVoteTitleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteTitleLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+
+        _mapVoteTimerLabel = new Label("20s");
+        _mapVoteTimerLabel.style.color = Color.white;
+        _mapVoteTimerLabel.style.fontSize = 26f;
+        _mapVoteTimerLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteTimerLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        _mapVoteTimerLabel.style.marginBottom = 24f;
+
+        _mapVoteCardView = new VisualElement { name = "map-vote-card-view" };
+        _mapVoteCardView.style.alignItems = Align.Center;
+
+        _mapVoteGrid = new VisualElement { name = "map-vote-grid" };
+        _mapVoteGrid.style.flexDirection = FlexDirection.Row;
+        _mapVoteGrid.style.flexWrap = Wrap.Wrap;
+        _mapVoteGrid.style.justifyContent = Justify.Center;
+        _mapVoteGrid.style.alignItems = Align.Center;
+        _mapVoteCardView.Add(_mapVoteGrid);
+
+        _mapVoteResultsView = new VisualElement { name = "map-vote-results-view" };
+        _mapVoteResultsView.style.display = DisplayStyle.None;
+        _mapVoteResultsView.style.width = 540f;
+        _mapVoteResultsView.style.maxWidth = new StyleLength(Length.Percent(96));
+        _mapVoteResultsView.style.paddingLeft = 20f;
+        _mapVoteResultsView.style.paddingRight = 20f;
+        _mapVoteResultsView.style.paddingTop = 18f;
+        _mapVoteResultsView.style.paddingBottom = 18f;
+        _mapVoteResultsView.style.backgroundColor = new Color(0.04f, 0.04f, 0.05f, 0.84f);
+        _mapVoteResultsView.style.borderTopLeftRadius = 10f;
+        _mapVoteResultsView.style.borderTopRightRadius = 10f;
+        _mapVoteResultsView.style.borderBottomLeftRadius = 10f;
+        _mapVoteResultsView.style.borderBottomRightRadius = 10f;
+        _mapVoteResultsView.style.borderTopWidth = 1f;
+        _mapVoteResultsView.style.borderRightWidth = 1f;
+        _mapVoteResultsView.style.borderBottomWidth = 1f;
+        _mapVoteResultsView.style.borderLeftWidth = 1f;
+        _mapVoteResultsView.style.borderTopColor = new Color(1f, 1f, 1f, 0.12f);
+        _mapVoteResultsView.style.borderRightColor = new Color(1f, 1f, 1f, 0.12f);
+        _mapVoteResultsView.style.borderBottomColor = new Color(1f, 1f, 1f, 0.12f);
+        _mapVoteResultsView.style.borderLeftColor = new Color(1f, 1f, 1f, 0.12f);
+
+        _mapVoteWinningLabel = new Label(string.Empty);
+        _mapVoteWinningLabel.style.color = Color.white;
+        _mapVoteWinningLabel.style.fontSize = 28f;
+        _mapVoteWinningLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteWinningLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        _mapVoteWinningLabel.style.marginBottom = 14f;
+
+        _mapVoteResultsList = new VisualElement { name = "map-vote-results-list" };
+        _mapVoteResultsList.style.flexDirection = FlexDirection.Column;
+
+        _mapVoteResultsView.Add(_mapVoteWinningLabel);
+        _mapVoteResultsView.Add(_mapVoteResultsList);
+
+        _mapVoteStatusLabel = new Label(string.Empty);
+        _mapVoteStatusLabel.style.color = new Color(1f, 0.9f, 0.35f);
+        _mapVoteStatusLabel.style.fontSize = 18f;
+        _mapVoteStatusLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteStatusLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        _mapVoteStatusLabel.style.marginTop = 14f;
+
+        _mapVoteContent.Add(_mapVoteTitleLabel);
+        _mapVoteContent.Add(_mapVoteTimerLabel);
+        _mapVoteContent.Add(_mapVoteCardView);
+        _mapVoteContent.Add(_mapVoteResultsView);
+        _mapVoteContent.Add(_mapVoteStatusLabel);
+        _mapVoteOverlay.Add(_mapVoteContent);
+        _hudRoot.Add(_mapVoteOverlay);
+    }
+
+    private void RefreshMapVoteDisplay()
+    {
+        EnsureMapVoteOverlay();
+        if (_mapVoteOverlay == null)
+        {
+            return;
+        }
+
+        bool visible = ShouldShowMapVote();
+        _mapVoteOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+
+        if (!visible)
+        {
+            RestoreGameplayCursorIfNeeded();
+            return;
+        }
+
+        _mapVoteOverlay.BringToFront();
+        bool showResultsHud = _showMapVoteResultsView;
+        _mapVoteOverlay.style.justifyContent = showResultsHud ? Justify.FlexStart : Justify.Center;
+        _mapVoteOverlay.style.paddingTop = showResultsHud ? 78f : 0f;
+        _mapVoteOverlay.pickingMode = showResultsHud ? PickingMode.Ignore : PickingMode.Position;
+
+        if (_mapVoteContent != null)
+        {
+            _mapVoteContent.style.width = showResultsHud ? 560f : 820f;
+            _mapVoteContent.style.maxWidth = new StyleLength(Length.Percent(showResultsHud ? 96f : 94f));
+        }
+
+        if (showResultsHud)
+        {
+            RestoreGameplayCursorIfNeeded();
+        }
+        else
+        {
+            UnityEngine.Cursor.lockState = CursorLockMode.None;
+            UnityEngine.Cursor.visible = true;
+        }
+
+        float timeRemaining = Mathf.Max(0f, _mapVoteEndsAtUnscaledTime - Time.unscaledTime);
+        if (_mapVoteTitleLabel != null)
+        {
+            _mapVoteTitleLabel.text = _showMapVoteResultsView ? "VOTING ACTIVE" : "VOTE A MAP";
+        }
+
+        if (_mapVoteTimerLabel != null)
+        {
+            _mapVoteTimerLabel.text = $"{Mathf.CeilToInt(timeRemaining)}s";
+        }
+
+        RebuildMapVoteCardsIfNeeded();
+        RebuildMapVoteResultsIfNeeded();
+        RefreshMapVoteCards();
+        RefreshMapVoteResults();
+    }
+
+    private bool ShouldShowMapVote()
+    {
+        if (_currentMapVote == null || !_currentMapVote.isOpen)
+        {
+            return false;
+        }
+
+        bool isMenuVisible = _lobbyUi != null && _lobbyUi.menuPanel != null && _lobbyUi.menuPanel.activeInHierarchy;
+        if (isMenuVisible)
+        {
+            return false;
+        }
+
+        return _currentMapVote.candidates != null && _currentMapVote.candidates.Length > 0;
+    }
+
+    private void RestoreGameplayCursorIfNeeded()
+    {
+        bool isMenuVisible = _lobbyUi != null && _lobbyUi.menuPanel != null && _lobbyUi.menuPanel.activeInHierarchy;
+        if (isMenuVisible)
+        {
+            return;
+        }
+
+        if (_currentPhase != null && string.Equals(_currentPhase.phase, "round", StringComparison.OrdinalIgnoreCase))
+        {
+            UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+            UnityEngine.Cursor.visible = false;
+        }
+    }
+
+    private void RebuildMapVoteCardsIfNeeded()
+    {
+        if (_mapVoteGrid == null || _currentMapVote?.candidates == null)
+        {
+            return;
+        }
+
+        bool needsRebuild = _mapVoteButtons.Count != _currentMapVote.candidates.Length
+            || _mapVoteGrid.childCount != _currentMapVote.candidates.Length;
+        if (!needsRebuild)
+        {
+            foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+            {
+                if (candidate == null || string.IsNullOrWhiteSpace(candidate.mapId) || !_mapVoteButtons.ContainsKey(candidate.mapId))
+                {
+                    needsRebuild = true;
+                    break;
+                }
+            }
+        }
+
+        if (!needsRebuild)
+        {
+            return;
+        }
+
+        _mapVoteGrid.Clear();
+        _mapVoteButtons.Clear();
+        _mapVoteCountLabels.Clear();
+        _mapVoteVotedLabels.Clear();
+
+        foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+        {
+            if (candidate == null || string.IsNullOrWhiteSpace(candidate.mapId))
+            {
+                continue;
+            }
+
+            Button card = CreateMapVoteCard(candidate);
+            _mapVoteButtons[candidate.mapId] = card;
+            _mapVoteGrid.Add(card);
+        }
+    }
+
+    private Button CreateMapVoteCard(MapVoteCandidateMessageData candidate)
+    {
+        string mapId = candidate.mapId;
+        Button card = new Button(() => HandleMapVoteClicked(mapId));
+        card.text = string.Empty;
+        card.style.width = 360f;
+        card.style.height = 150f;
+        card.style.marginLeft = 10f;
+        card.style.marginRight = 10f;
+        card.style.marginTop = 10f;
+        card.style.marginBottom = 10f;
+        card.style.paddingLeft = 12f;
+        card.style.paddingRight = 12f;
+        card.style.paddingTop = 10f;
+        card.style.paddingBottom = 10f;
+        card.style.borderTopLeftRadius = 8f;
+        card.style.borderTopRightRadius = 8f;
+        card.style.borderBottomLeftRadius = 8f;
+        card.style.borderBottomRightRadius = 8f;
+        card.style.borderTopWidth = 2f;
+        card.style.borderRightWidth = 2f;
+        card.style.borderBottomWidth = 2f;
+        card.style.borderLeftWidth = 2f;
+        card.style.backgroundColor = GetMapCardBackground(candidate.mapId);
+        card.style.flexDirection = FlexDirection.Column;
+        card.style.justifyContent = Justify.SpaceBetween;
+
+        VisualElement topRow = new VisualElement();
+        topRow.style.flexDirection = FlexDirection.Row;
+        topRow.style.justifyContent = Justify.SpaceBetween;
+
+        Label difficultyLabel = new Label(string.IsNullOrWhiteSpace(candidate.difficulty) ? "NORMAL" : candidate.difficulty.ToUpperInvariant());
+        difficultyLabel.style.color = GetDifficultyColor(candidate.difficulty);
+        difficultyLabel.style.fontSize = 20f;
+        difficultyLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+
+        Label voteCountLabel = new Label("0");
+        voteCountLabel.style.color = Color.white;
+        voteCountLabel.style.fontSize = 20f;
+        voteCountLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        voteCountLabel.style.unityTextAlign = TextAnchor.MiddleRight;
+        _mapVoteCountLabels[mapId] = voteCountLabel;
+
+        topRow.Add(difficultyLabel);
+        topRow.Add(voteCountLabel);
+
+        Label votedLabel = new Label("VOTED");
+        votedLabel.style.display = DisplayStyle.None;
+        votedLabel.style.alignSelf = Align.FlexEnd;
+        votedLabel.style.color = new Color(1f, 0.92f, 0.35f);
+        votedLabel.style.fontSize = 16f;
+        votedLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteVotedLabels[mapId] = votedLabel;
+
+        Label nameLabel = new Label(string.IsNullOrWhiteSpace(candidate.displayName) ? candidate.mapId : candidate.displayName);
+        nameLabel.style.color = Color.white;
+        nameLabel.style.fontSize = 26f;
+        nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        nameLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+
+        card.Add(topRow);
+        card.Add(votedLabel);
+        card.Add(nameLabel);
+        return card;
+    }
+
+    private void HandleMapVoteClicked(string mapId)
+    {
+        if (string.IsNullOrWhiteSpace(mapId) || _networkManager == null)
+        {
+            return;
+        }
+
+        _localVotedMapId = mapId;
+        _showMapVoteResultsView = true;
+        _networkManager.SendMapVote(mapId);
+        RefreshMapVoteDisplay();
+    }
+
+    private void RebuildMapVoteResultsIfNeeded()
+    {
+        if (_mapVoteResultsList == null || _currentMapVote?.candidates == null)
+        {
+            return;
+        }
+
+        bool needsRebuild = _mapVoteResultNameLabels.Count != _currentMapVote.candidates.Length
+            || _mapVoteResultsList.childCount != _currentMapVote.candidates.Length;
+        if (!needsRebuild)
+        {
+            foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+            {
+                if (candidate == null
+                    || string.IsNullOrWhiteSpace(candidate.mapId)
+                    || !_mapVoteResultNameLabels.ContainsKey(candidate.mapId))
+                {
+                    needsRebuild = true;
+                    break;
+                }
+            }
+        }
+
+        if (!needsRebuild)
+        {
+            return;
+        }
+
+        _mapVoteResultsList.Clear();
+        _mapVoteResultNameLabels.Clear();
+        _mapVoteResultPercentLabels.Clear();
+        _mapVoteResultFillBars.Clear();
+        _mapVoteResultCountLabels.Clear();
+
+        foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+        {
+            if (candidate == null || string.IsNullOrWhiteSpace(candidate.mapId))
+            {
+                continue;
+            }
+
+            VisualElement row = CreateMapVoteResultRow(candidate);
+            _mapVoteResultsList.Add(row);
+        }
+    }
+
+    private void RefreshMapVoteCards()
+    {
+        if (_currentMapVote?.candidates == null)
+        {
+            return;
+        }
+
+        foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+        {
+            if (candidate == null || string.IsNullOrWhiteSpace(candidate.mapId))
+            {
+                continue;
+            }
+
+            bool voted = string.Equals(_localVotedMapId, candidate.mapId, StringComparison.Ordinal);
+            int voteCount = GetVoteCount(candidate.mapId);
+            Color borderColor = voted
+                ? new Color(1f, 0.88f, 0.25f)
+                : GetDifficultyColor(candidate.difficulty);
+
+            if (_mapVoteButtons.TryGetValue(candidate.mapId, out Button button) && button != null)
+            {
+                button.style.borderTopColor = borderColor;
+                button.style.borderRightColor = borderColor;
+                button.style.borderBottomColor = borderColor;
+                button.style.borderLeftColor = borderColor;
+                button.style.scale = voted ? new Scale(new Vector3(1.04f, 1.04f, 1f)) : new Scale(Vector3.one);
+            }
+
+            if (_mapVoteCountLabels.TryGetValue(candidate.mapId, out Label countLabel) && countLabel != null)
+            {
+                countLabel.text = voteCount == 1 ? "1 vote" : $"{voteCount} votes";
+            }
+
+            if (_mapVoteVotedLabels.TryGetValue(candidate.mapId, out Label votedLabel) && votedLabel != null)
+            {
+                votedLabel.style.display = voted ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        if (_mapVoteStatusLabel != null)
+        {
+            _mapVoteStatusLabel.text = _showMapVoteResultsView
+                ? "Press [B] to change vote"
+                : (string.IsNullOrWhiteSpace(_localVotedMapId)
+                    ? string.Empty
+                    : $"Voted for {GetMapDisplayName(_localVotedMapId)}");
+        }
+    }
+
+    private VisualElement CreateMapVoteResultRow(MapVoteCandidateMessageData candidate)
+    {
+        string mapId = candidate.mapId;
+
+        VisualElement row = new VisualElement();
+        row.style.marginBottom = 10f;
+        row.style.paddingLeft = 8f;
+        row.style.paddingRight = 8f;
+        row.style.paddingTop = 6f;
+        row.style.paddingBottom = 6f;
+        row.style.backgroundColor = new Color(1f, 1f, 1f, 0.02f);
+        row.style.borderTopLeftRadius = 8f;
+        row.style.borderTopRightRadius = 8f;
+        row.style.borderBottomLeftRadius = 8f;
+        row.style.borderBottomRightRadius = 8f;
+
+        VisualElement header = new VisualElement();
+        header.style.flexDirection = FlexDirection.Row;
+        header.style.justifyContent = Justify.SpaceBetween;
+        header.style.alignItems = Align.Center;
+
+        Label nameLabel = new Label(string.IsNullOrWhiteSpace(candidate.displayName) ? mapId : candidate.displayName);
+        nameLabel.style.color = Color.white;
+        nameLabel.style.fontSize = 20f;
+        nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteResultNameLabels[mapId] = nameLabel;
+
+        Label percentLabel = new Label("0%");
+        percentLabel.style.color = new Color(1f, 0.92f, 0.74f);
+        percentLabel.style.fontSize = 19f;
+        percentLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+        _mapVoteResultPercentLabels[mapId] = percentLabel;
+
+        header.Add(nameLabel);
+        header.Add(percentLabel);
+
+        VisualElement track = new VisualElement();
+        track.style.height = 12f;
+        track.style.marginTop = 4f;
+        track.style.backgroundColor = new Color(0f, 0f, 0f, 0.62f);
+        track.style.borderTopLeftRadius = 999f;
+        track.style.borderTopRightRadius = 999f;
+        track.style.borderBottomLeftRadius = 999f;
+        track.style.borderBottomRightRadius = 999f;
+
+        VisualElement fill = new VisualElement();
+        fill.style.height = 12f;
+        fill.style.width = new StyleLength(Length.Percent(0f));
+        fill.style.backgroundColor = GetMapResultBarColor(mapId);
+        fill.style.borderTopLeftRadius = 999f;
+        fill.style.borderTopRightRadius = 999f;
+        fill.style.borderBottomLeftRadius = 999f;
+        fill.style.borderBottomRightRadius = 999f;
+        _mapVoteResultFillBars[mapId] = fill;
+        track.Add(fill);
+
+        Label countLabel = new Label("0 votes");
+        countLabel.style.color = new Color(0.8f, 0.82f, 0.86f);
+        countLabel.style.fontSize = 15f;
+        countLabel.style.marginTop = 3f;
+        _mapVoteResultCountLabels[mapId] = countLabel;
+
+        row.Add(header);
+        row.Add(track);
+        row.Add(countLabel);
+        return row;
+    }
+
+    private void RefreshMapVoteResults()
+    {
+        bool showResultsView = _showMapVoteResultsView && _currentMapVote?.candidates != null;
+        if (_mapVoteCardView != null)
+        {
+            _mapVoteCardView.style.display = showResultsView ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        if (_mapVoteResultsView != null)
+        {
+            _mapVoteResultsView.style.display = showResultsView ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        if (!showResultsView || _currentMapVote?.candidates == null)
+        {
+            return;
+        }
+
+        int totalVotes = GetTotalVoteCount();
+        string winningMapId = GetWinningMapId();
+        if (_mapVoteWinningLabel != null)
+        {
+            string winningName = GetMapDisplayName(winningMapId);
+            int winningPercent = GetVotePercent(winningMapId, totalVotes);
+            _mapVoteWinningLabel.text = string.IsNullOrWhiteSpace(winningMapId)
+                ? "Voting Active"
+                : $"Winning Map\n{winningName} ({winningPercent}%)";
+        }
+
+        foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+        {
+            if (candidate == null || string.IsNullOrWhiteSpace(candidate.mapId))
+            {
+                continue;
+            }
+
+            string mapId = candidate.mapId;
+            int voteCount = GetVoteCount(mapId);
+            int votePercent = GetVotePercent(mapId, totalVotes);
+            bool isWinningMap = string.Equals(winningMapId, mapId, StringComparison.Ordinal);
+            bool isLocalVote = string.Equals(_localVotedMapId, mapId, StringComparison.Ordinal);
+
+            if (_mapVoteResultNameLabels.TryGetValue(mapId, out Label nameLabel) && nameLabel != null)
+            {
+                nameLabel.style.color = isWinningMap ? new Color(1f, 0.93f, 0.72f) : Color.white;
+            }
+
+            if (_mapVoteResultPercentLabels.TryGetValue(mapId, out Label percentLabel) && percentLabel != null)
+            {
+                percentLabel.text = $"{votePercent}%";
+                percentLabel.style.color = isWinningMap ? new Color(1f, 0.93f, 0.72f) : new Color(0.88f, 0.9f, 0.94f);
+            }
+
+            if (_mapVoteResultFillBars.TryGetValue(mapId, out VisualElement fillBar) && fillBar != null)
+            {
+                fillBar.style.width = new StyleLength(Length.Percent(votePercent));
+                fillBar.style.backgroundColor = isLocalVote
+                    ? new Color(1f, 0.82f, 0.34f)
+                    : GetMapResultBarColor(mapId);
+            }
+
+            if (_mapVoteResultCountLabels.TryGetValue(mapId, out Label countLabel) && countLabel != null)
+            {
+                countLabel.text = voteCount == 1 ? "1 vote" : $"{voteCount} votes";
+                countLabel.style.color = isLocalVote ? new Color(1f, 0.9f, 0.62f) : new Color(0.8f, 0.82f, 0.86f);
+            }
+        }
+    }
+
+    private int GetVoteCount(string mapId)
+    {
+        if (_currentMapVote?.votes == null)
+        {
+            return 0;
+        }
+
+        foreach (MapVoteCountMessageData vote in _currentMapVote.votes)
+        {
+            if (vote != null && string.Equals(vote.mapId, mapId, StringComparison.Ordinal))
+            {
+                return vote.count;
+            }
+        }
+
+        return 0;
+    }
+
+    private int GetTotalVoteCount()
+    {
+        if (_currentMapVote?.votes == null)
+        {
+            return 0;
+        }
+
+        int totalVotes = 0;
+        foreach (MapVoteCountMessageData vote in _currentMapVote.votes)
+        {
+            if (vote != null)
+            {
+                totalVotes += Mathf.Max(0, vote.count);
+            }
+        }
+
+        return totalVotes;
+    }
+
+    private int GetVotePercent(string mapId, int totalVotes)
+    {
+        int voteCount = GetVoteCount(mapId);
+        if (totalVotes <= 0 || voteCount <= 0)
+        {
+            return 0;
+        }
+
+        return Mathf.RoundToInt((voteCount / (float)totalVotes) * 100f);
+    }
+
+    private string GetWinningMapId()
+    {
+        if (_currentMapVote?.candidates == null)
+        {
+            return string.Empty;
+        }
+
+        string winningMapId = string.Empty;
+        int highestVoteCount = -1;
+        foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+        {
+            if (candidate == null || string.IsNullOrWhiteSpace(candidate.mapId))
+            {
+                continue;
+            }
+
+            int voteCount = GetVoteCount(candidate.mapId);
+            if (voteCount > highestVoteCount)
+            {
+                highestVoteCount = voteCount;
+                winningMapId = candidate.mapId;
+            }
+        }
+
+        return winningMapId;
+    }
+
+    private string GetMapDisplayName(string mapId)
+    {
+        if (_currentMapVote?.candidates != null)
+        {
+            foreach (MapVoteCandidateMessageData candidate in _currentMapVote.candidates)
+            {
+                if (candidate != null && string.Equals(candidate.mapId, mapId, StringComparison.Ordinal))
+                {
+                    return string.IsNullOrWhiteSpace(candidate.displayName) ? candidate.mapId : candidate.displayName;
+                }
+            }
+        }
+
+        return mapId;
+    }
+
+    private static Color GetDifficultyColor(string difficulty)
+    {
+        if (string.Equals(difficulty, "HARD", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(1f, 0.28f, 0.24f);
+        }
+
+        return new Color(0.24f, 1f, 0.35f);
+    }
+
+    private static Color GetMapCardBackground(string mapId)
+    {
+        if (string.Equals(mapId, "backroom", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.38f, 0.28f, 0.08f, 0.92f);
+        }
+
+        if (string.Equals(mapId, "parkour", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.09f, 0.22f, 0.35f, 0.92f);
+        }
+
+        return new Color(0.16f, 0.27f, 0.19f, 0.92f);
+    }
+
+    private static Color GetMapResultBarColor(string mapId)
+    {
+        if (string.Equals(mapId, "backroom", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.95f, 0.73f, 0.4f);
+        }
+
+        if (string.Equals(mapId, "parkour", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.41f, 0.83f, 1f);
+        }
+
+        return new Color(0.47f, 0.93f, 0.54f);
+    }
+
+    private void HandleMapVoteInput()
+    {
+        if (!_showMapVoteResultsView || Keyboard.current == null)
+        {
+            return;
+        }
+
+        if (Keyboard.current.bKey.wasPressedThisFrame)
+        {
+            _showMapVoteResultsView = false;
+            RefreshMapVoteDisplay();
+        }
+    }
+
     private void RefreshResultsDisplay()
     {
         if (_roundResultsOverlay == null
@@ -809,7 +1629,11 @@ public class RoundHudController : MonoBehaviour
             return;
         }
 
-        bool visible = _showResults && _results != null && _results.entries != null && _results.entries.Length > 0;
+        bool visible = _showResults
+            && !ShouldShowMapVote()
+            && _results != null
+            && _results.entries != null
+            && _results.entries.Length > 0;
         _roundResultsOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
 
         if (!visible)

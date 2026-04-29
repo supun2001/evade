@@ -512,7 +512,7 @@ MonoBehaviour:
   - anchor: {fileID: 1845726629}
     position: {x: -48.47, y: 1.01, z: 7.07}
   intermissionDurationSeconds: 5
-  roundDurationSeconds: 180
+  roundDurationSeconds: 10
   roomName: my_room
   playerPrefab: {fileID: 4842325826247379024, guid: fa064ee4d0a6048a298a22181dab671b, type: 3}
 --- !u!1 &776678569 stripped

@@ -326,6 +326,11 @@ public class LobbyUI : MonoBehaviour
         SetStartButtonEnabled(false);
 
         if (createButton != null) createButton.interactable = false;
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.UseServerRandomMap();
+        }
+
         string error = await NetworkManager.Instance.CreateGame();
         
         if (string.IsNullOrEmpty(error))
@@ -352,10 +357,7 @@ public class LobbyUI : MonoBehaviour
         if (createButton != null) createButton.interactable = false;
         if (joinButton != null) joinButton.interactable = false;
 
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.SetSelectedMapId(GetActiveSceneMapId());
-        }
+        NetworkManager.Instance?.UseServerRandomMap();
 
         string error = await NetworkManager.Instance.JoinOrCreateGame();
 
@@ -825,7 +827,7 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        SetMapSelectionVisible(true);
+        OnStartClicked();
     }
 
     private void HandleClassicMapButtonClicked()

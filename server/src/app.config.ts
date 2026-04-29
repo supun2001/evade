@@ -1,6 +1,7 @@
 import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
 import { playground } from "@colyseus/playground";
+import { WebSocketTransport } from "@colyseus/ws-transport";
 import express from "express";
 
 /**
@@ -17,12 +18,19 @@ import {
 } from "./accountStore";
 
 export default config({
+    initializeTransport: ({ server }) => {
+        return new WebSocketTransport({
+            server,
+            // The default transport cap is only 4 KB, which is too small for our map sync payloads.
+            maxPayload: 8 * 1024 * 1024,
+        });
+    },
 
     initializeGameServer: (gameServer) => {
         /**
          * Define your room handlers:
          */
-        gameServer.define('my_room', MyRoom).filterBy(["mapId"]);
+        gameServer.define('my_room', MyRoom);
 
     },
 

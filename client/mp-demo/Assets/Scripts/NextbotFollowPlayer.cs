@@ -9,9 +9,9 @@ public class NextbotFollowPlayer : MonoBehaviour
     private class MapNextbotSettings
     {
         public string mapId = string.Empty;
-        public bool useLocalRoomStateNavMesh = false;
-        public float targetHoldSeconds = 0f;
-        public float maxChaseRange = 70f;
+        public bool useLocalRoomStateNavMesh = true;
+        public float targetHoldSeconds = 1f;
+        public float maxChaseRange = 1000f;
         public float navMeshRejoinWarpDistance = 0.3f;
     }
 
@@ -28,6 +28,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private const float OfflinePatrolRetargetMinSeconds = 1f;
     private const float OfflinePatrolRetargetMaxSeconds = 2f;
     private const float ParkourFallbackPatrolRadius = 8f;
+    private static readonly MapNextbotSettings DefaultMapNextbotSettings = new MapNextbotSettings();
 
     [Header("Networking")]
     [SerializeField] private bool _useRoomStateAuthority = true;
@@ -59,14 +60,6 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _stoppingDistance = 1.4f;
     [SerializeField] private float _targetRefreshInterval = 0.2f;
     [SerializeField] private bool _followNearestPlayer = true;
-    [SerializeField] private MapNextbotSettings _defaultMapNextbotSettings = new MapNextbotSettings
-    {
-        mapId = "",
-        useLocalRoomStateNavMesh = false,
-        targetHoldSeconds = 0f,
-        maxChaseRange = 70f,
-        navMeshRejoinWarpDistance = 0.3f,
-    };
     [SerializeField] private MapNextbotSettings[] _mapSpecificNextbotSettings =
     {
         new MapNextbotSettings
@@ -791,7 +784,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             }
         }
 
-        return _defaultMapNextbotSettings ?? new MapNextbotSettings();
+        return DefaultMapNextbotSettings;
     }
 
     private bool CurrentMapUsesLocalRoomStateNavMesh()

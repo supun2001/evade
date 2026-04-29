@@ -68,8 +68,16 @@ public class NetworkManager : MonoBehaviour
     private const int PlayerUpdateFieldCount = 29;
     private const string WalkableLayerName = "Walkable";
     private const string RampLayerName = "Ramp";
+    private const string RandomMapId = "random";
+    private const string ClassicMapId = "SampleScene";
+    private const string ClassicMapSceneName = "SampleScene";
+    private const string BackroomMapId = "backroom";
+    private const string BackroomMapSceneName = "backroom";
+    private const string ParkourMapId = "parkour";
+    private const string ParkourMapSceneName = "parkour";
     private const float MinServerObstacleThickness = 0.25f;
-    private const int MaxServerFloorSamples = 2048;
+    private const int MaxServerFloorSamples = 384;
+    private const int MaxServerObstacles = 384;
     private const float MaxServerObstacleEnclosingSpan = 45f;
 
     public static NetworkManager Instance;
@@ -111,7 +119,7 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private List<NextbotPatrolPointConfig> nextbotPatrolPoints = new();
     [Header("Round Timing")]
     [Tooltip("How long the intermission lasts before the round starts.")]
-    [SerializeField, Min(1f)] private float intermissionDurationSeconds = 30f;
+    [SerializeField, Min(1f)] private float intermissionDurationSeconds = 20f;
     [Tooltip("How long the active survive round lasts.")]
     [SerializeField, Min(5f)] private float roundDurationSeconds = 180f;
 
@@ -140,6 +148,9 @@ public class NetworkManager : MonoBehaviour
     private readonly float[] playerUpdatePayload = new float[PlayerUpdateFieldCount];
     private string simulatedLocalSessionId = string.Empty;
     private string selectedMapId = string.Empty;
+    private string activeServerMapId = string.Empty;
+    private bool _isLoadingServerMap;
+    private Coroutine _serverMapLoadCoroutine;
     public GameObject PlayerPrefab => playerPrefab;
 
     private bool ShouldUseCompactPlayerUpdatePayload
@@ -185,6 +196,8 @@ public class NetworkManager : MonoBehaviour
     public event Action<RoundPhaseMessageData> RoundPhaseChanged;
     public event Action<RoundAnnouncementMessageData> RoundAnnouncementReceived;
     public event Action<RoundResultsMessageData> RoundResultsReceived;
+    public event Action<MapVoteStateMessageData> MapVoteStateReceived;
+    public event Action<MapSelectedMessageData> MapSelectedReceived;
     public event Action RoomLeftEvent;
     public string LocalSessionId => room != null ? room.SessionId : simulatedLocalSessionId;
     public string CurrentMapId => ResolveCurrentMapId();
@@ -201,8 +214,18 @@ public class NetworkManager : MonoBehaviour
         selectedMapId = SanitizeMapId(mapId);
     }
 
+    public void UseServerRandomMap()
+    {
+        selectedMapId = RandomMapId;
+    }
+
     private string ResolveCurrentMapId()
     {
+        if (!string.IsNullOrWhiteSpace(activeServerMapId))
+        {
+            return activeServerMapId;
+        }
+
         if (!string.IsNullOrWhiteSpace(selectedMapId))
         {
             return selectedMapId;
@@ -219,12 +242,49 @@ public class NetworkManager : MonoBehaviour
         }
 
         string sceneName = SceneManager.GetActiveScene().name;
-        return string.IsNullOrWhiteSpace(sceneName) ? "SampleScene" : sceneName;
+        return GetMapIdForSceneName(sceneName);
     }
 
     private static string SanitizeMapId(string mapId)
     {
         return string.IsNullOrWhiteSpace(mapId) ? string.Empty : mapId.Trim();
+    }
+
+    private static bool IsKnownMapId(string mapId)
+    {
+        return string.Equals(mapId, ClassicMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, BackroomMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSceneNameForMapId(string mapId)
+    {
+        if (string.Equals(mapId, BackroomMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return BackroomMapSceneName;
+        }
+
+        if (string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return ParkourMapSceneName;
+        }
+
+        return ClassicMapSceneName;
+    }
+
+    private static string GetMapIdForSceneName(string sceneName)
+    {
+        if (string.Equals(sceneName, BackroomMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return BackroomMapId;
+        }
+
+        if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return ParkourMapId;
+        }
+
+        return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
     }
 
     private void ApplySceneConfigurationFrom(NetworkManager sceneManager)
@@ -265,6 +325,11 @@ public class NetworkManager : MonoBehaviour
 
     private void OnPlayerAdded(string id, Player player)
     {
+        if (_isLoadingServerMap)
+        {
+            return;
+        }
+
         if (players.ContainsKey(id))
         {
             return;
@@ -365,6 +430,11 @@ public class NetworkManager : MonoBehaviour
             if (syncedPlayer.isSpectator && !isLocal)
             {
                 continue;
+            }
+
+            if (players.TryGetValue(sessionId, out GameObject existingPlayerObject) && existingPlayerObject == null)
+            {
+                players.Remove(sessionId);
             }
 
             if (!players.ContainsKey(sessionId))
@@ -657,7 +727,7 @@ public class NetworkManager : MonoBehaviour
     public async Task<string> CreateGame(){
         InitializeClient();
         try{
-            room = await client.Create<MyRoomState>(roomName, BuildRoomOptions());
+            room = await client.Create<MyRoomState>(roomName, BuildJoinRoomOptions());
             OnRoomJoined();
             return null; // Success
 
@@ -672,7 +742,7 @@ public class NetworkManager : MonoBehaviour
         InitializeClient();
         try
         {
-            room = await client.JoinOrCreate<MyRoomState>(roomName, BuildRoomOptions());
+            room = await client.JoinOrCreate<MyRoomState>(roomName, BuildJoinRoomOptions());
             OnRoomJoined();
             return null;
         }
@@ -688,7 +758,7 @@ public class NetworkManager : MonoBehaviour
         InitializeClient();
         try
         {
-            room = await client.JoinById<MyRoomState>(targetRoomId, BuildRoomOptions());
+            room = await client.JoinById<MyRoomState>(targetRoomId, BuildJoinRoomOptions());
             OnRoomJoined();
             return null; // Success
         }
@@ -704,7 +774,18 @@ public class NetworkManager : MonoBehaviour
         if (client == null) client = CreateClient();
     }
 
-    private Dictionary<string, object> BuildRoomOptions()
+    private Dictionary<string, object> BuildJoinRoomOptions()
+    {
+        return new Dictionary<string, object>
+        {
+            ["intermissionDurationMs"] = IntermissionDurationMs,
+            ["roundDurationMs"] = RoundDurationMs,
+            ["mapId"] = ResolveCurrentMapId(),
+            ["username"] = string.IsNullOrWhiteSpace(AuthenticatedUsername) ? "Player" : AuthenticatedUsername,
+        };
+    }
+
+    private Dictionary<string, object> BuildMapSyncPayload()
     {
         AutoDiscoverSpawnPoints();
         List<object> serializedSpawnPoints = new List<object>();
@@ -756,7 +837,7 @@ public class NetworkManager : MonoBehaviour
         List<object> serializedNextbotConfigs = BuildSerializedNextbotConfigs();
         List<object> serializedObstacles = BuildSerializedObstacleBounds();
         List<object> serializedFloorSamples = BuildSerializedFloorSamples(nextbotSpawnPoints, playerSpawnPoints, nextbotPatrolPoints);
-        Debug.Log($"NetworkManager: joining map {ResolveCurrentMapId()} with {serializedSpawnPoints.Count} spawn points, {serializedNextbotIds.Count} bots, {serializedObstacles.Count} obstacles and {serializedFloorSamples.Count} floor samples.");
+        Debug.Log($"NetworkManager: syncing map {ResolveCurrentMapId()} with {serializedSpawnPoints.Count} spawn points, {serializedNextbotIds.Count} bots, {serializedObstacles.Count} obstacles and {serializedFloorSamples.Count} floor samples.");
 
         return new Dictionary<string, object>
         {
@@ -770,7 +851,6 @@ public class NetworkManager : MonoBehaviour
             ["intermissionDurationMs"] = IntermissionDurationMs,
             ["roundDurationMs"] = RoundDurationMs,
             ["mapId"] = ResolveCurrentMapId(),
-            ["username"] = string.IsNullOrWhiteSpace(AuthenticatedUsername) ? "Player" : AuthenticatedUsername,
         };
     }
 
@@ -783,6 +863,11 @@ public class NetworkManager : MonoBehaviour
 
         for (int i = 0; i < colliders.Length; i++)
         {
+            if (serializedObstacles.Count >= MaxServerObstacles)
+            {
+                break;
+            }
+
             Collider collider = colliders[i];
             if (!ShouldIncludeServerObstacle(collider, walkableLayer, rampLayer))
             {
@@ -1186,11 +1271,6 @@ public class NetworkManager : MonoBehaviour
         currentRoomId = room.RoomId;
         Debug.Log($"Connected! Room ID: {currentRoomId}");
 
-        room.Send("syncNextbotConfigs", new Dictionary<string, object>
-        {
-            ["nextbotConfigs"] = BuildSerializedNextbotConfigs(),
-        });
-        
         // Setup Handlers 
         room.OnStateChange += OnStateChange;
         room.OnLeave += (code) =>
@@ -1224,6 +1304,7 @@ public class NetworkManager : MonoBehaviour
                     timeRemainingMs = IntermissionDurationMs,
                     roundDurationMs = RoundDurationMs,
                     intermissionDurationMs = IntermissionDurationMs,
+                    isMapVoteOpen = false,
                 });
             }
         });
@@ -1268,6 +1349,10 @@ public class NetworkManager : MonoBehaviour
                 if (string.Equals(payload.phase, "intermission", StringComparison.Ordinal))
                 {
                     RestartLocalRoundResetCoroutine();
+                    if (payload.roundIndex > 0)
+                    {
+                        RequestMapVoteState();
+                    }
                 }
                 RoundPhaseChanged?.Invoke(payload);
             }
@@ -1292,9 +1377,151 @@ public class NetworkManager : MonoBehaviour
             }
         });
 
+        room.OnMessage<string>("mapVoteState", (json) =>
+        {
+            MapVoteStateMessageData payload = ParseJsonMessage<MapVoteStateMessageData>(json);
+            if (payload != null)
+            {
+                MapVoteStateReceived?.Invoke(payload);
+            }
+        });
+
+        room.OnMessage<string>("mapSelected", (json) =>
+        {
+            MapSelectedMessageData payload = ParseJsonMessage<MapSelectedMessageData>(json);
+            if (payload != null)
+            {
+                HandleServerMapSelected(payload);
+                MapSelectedReceived?.Invoke(payload);
+            }
+        });
+
         var events = Colyseus.Schema.Callbacks.Get(room);
         events.OnAdd(state => state.players, (key, player) => OnPlayerAdded(key, player));
         events.OnRemove(state => state.players, (key, player) => OnPlayerRemoved(key, player));
+    }
+
+    public void SendMapVote(string mapId)
+    {
+        if (room == null || string.IsNullOrWhiteSpace(mapId))
+        {
+            return;
+        }
+
+        room.Send("voteMap", mapId.Trim());
+    }
+
+    public void RequestMapVoteState()
+    {
+        if (room == null)
+        {
+            return;
+        }
+
+        room.Send("requestMapVoteState");
+    }
+
+    public void SyncCurrentMapConfiguration()
+    {
+        if (room == null)
+        {
+            return;
+        }
+
+        room.Send("syncMapConfig", BuildMapSyncPayload());
+    }
+
+    private void HandleServerMapSelected(MapSelectedMessageData message)
+    {
+        if (message == null)
+        {
+            return;
+        }
+
+        string mapId = SanitizeMapId(message.mapId);
+        if (!IsKnownMapId(mapId))
+        {
+            return;
+        }
+
+        activeServerMapId = mapId;
+        selectedMapId = mapId;
+
+        string sceneName = string.IsNullOrWhiteSpace(message.sceneName)
+            ? GetSceneNameForMapId(mapId)
+            : message.sceneName.Trim();
+        if (string.IsNullOrWhiteSpace(sceneName))
+        {
+            return;
+        }
+
+        if (string.Equals(SceneManager.GetActiveScene().name, sceneName, StringComparison.Ordinal))
+        {
+            SyncCurrentMapConfiguration();
+            ReconcilePlayerRepresentations(room?.State);
+            RestartLocalRoundResetCoroutine();
+            return;
+        }
+
+        if (_serverMapLoadCoroutine != null)
+        {
+            StopCoroutine(_serverMapLoadCoroutine);
+        }
+
+        _serverMapLoadCoroutine = StartCoroutine(LoadServerSelectedMap(sceneName, mapId));
+    }
+
+    private IEnumerator LoadServerSelectedMap(string sceneName, string mapId)
+    {
+        _isLoadingServerMap = true;
+        ClearSpawnedPlayerObjects();
+
+        AsyncOperation loadOperation = null;
+        Exception loadException = null;
+        try
+        {
+            loadOperation = SceneManager.LoadSceneAsync(sceneName);
+        }
+        catch (Exception exception)
+        {
+            loadException = exception;
+        }
+
+        if (loadException != null || loadOperation == null)
+        {
+            Debug.LogError(loadException != null
+                ? $"NetworkManager: failed to load server-selected map '{sceneName}': {loadException.Message}"
+                : $"NetworkManager: server-selected map '{sceneName}' is not in Build Settings.");
+            _isLoadingServerMap = false;
+            _serverMapLoadCoroutine = null;
+            yield break;
+        }
+
+        while (!loadOperation.isDone)
+        {
+            yield return null;
+        }
+
+        activeServerMapId = mapId;
+        selectedMapId = mapId;
+        SyncCurrentMapConfiguration();
+        ReconcilePlayerRepresentations(room?.State);
+        RestartLocalRoundResetCoroutine();
+        _isLoadingServerMap = false;
+        _serverMapLoadCoroutine = null;
+    }
+
+    private void ClearSpawnedPlayerObjects()
+    {
+        foreach (GameObject playerObject in players.Values)
+        {
+            if (playerObject != null)
+            {
+                Destroy(playerObject);
+            }
+        }
+
+        players.Clear();
     }
 
     private IEnumerator ApplyLocalRoundResetFromState()
@@ -1394,6 +1621,7 @@ public class NetworkManager : MonoBehaviour
             timeRemainingMs = RoundDurationMs,
             roundDurationMs = RoundDurationMs,
             intermissionDurationMs = IntermissionDurationMs,
+            isMapVoteOpen = false,
         });
 
         RoundAnnouncementReceived?.Invoke(new RoundAnnouncementMessageData
@@ -1435,18 +1663,17 @@ public class NetworkManager : MonoBehaviour
         bool hadRoomState = room != null || !string.IsNullOrEmpty(currentRoomId) || players.Count > 0;
         room = null;
         currentRoomId = "";
+        activeServerMapId = "";
+        _isLoadingServerMap = false;
+        if (_serverMapLoadCoroutine != null)
+        {
+            StopCoroutine(_serverMapLoadCoroutine);
+            _serverMapLoadCoroutine = null;
+        }
         _hasReceivedRoundPhaseFromServer = false;
         StopFallbackRoundFlow();
 
-        foreach (GameObject playerObject in players.Values)
-        {
-            if (playerObject != null)
-            {
-                Destroy(playerObject);
-            }
-        }
-
-        players.Clear();
+        ClearSpawnedPlayerObjects();
 
         if (hadRoomState)
         {
@@ -1459,15 +1686,6 @@ public class NetworkManager : MonoBehaviour
     public void OnWindowFocus() { /* Regain focus */ }
     private void AutoDiscoverSpawnPoints()
     {
-        // If we already have points assigned and we are NOT on the parkour map, don't override.
-        // But for the parkour map, we want to make sure we have valid points from the scene.
-        bool isParkour = string.Equals(ResolveCurrentMapId(), "parkour", StringComparison.OrdinalIgnoreCase);
-        
-        if (!isParkour && (nextbotSpawnPoints.Count > 2 || playerSpawnPoints.Count > 2))
-        {
-            return;
-        }
-
         List<NextbotSpawnPointConfig> discoveredNextbotSpawns = new List<NextbotSpawnPointConfig>();
         List<PlayerSpawnPointConfig> discoveredPlayerSpawns = new List<PlayerSpawnPointConfig>();
         List<NextbotPatrolPointConfig> discoveredPatrolSpawns = new List<NextbotPatrolPointConfig>();
@@ -1492,8 +1710,7 @@ public class NetworkManager : MonoBehaviour
             {
                 discoveredPatrolSpawns.Add(new NextbotPatrolPointConfig { anchor = t, position = t.position });
             }
-            else if (isParkour
-                && patrolRoot != null
+            else if (patrolRoot != null
                 && t != patrolRoot
                 && t.IsChildOf(patrolRoot)
                 && t.name.StartsWith("Point", StringComparison.OrdinalIgnoreCase))

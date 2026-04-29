@@ -31,7 +31,6 @@ const NEXTBOT_BLOCKED_RETARGET_MS = 650;
 const NEXTBOT_BLOCKED_MOVE_EPSILON = 0.05;
 const NEXTBOT_PREDICTION_TIME = 0.28;
 const NEXTBOT_MAX_CHASE_RANGE = 70;
-const NEXTBOT_ACQUIRE_RANGE = 80;
 const NEXTBOT_PARKOUR_ACQUIRE_RANGE = 1000;
 const NEXTBOT_MAX_VERTICAL_DELTA = 12;
 const NEXTBOT_STALE_TARGET_TIMEOUT_MS = 1500;
@@ -88,10 +87,17 @@ const PLAYER_REVIVE_DISTANCE = 6;
 const PLAYER_REVIVE_SYNC_GRACE_MS = 1000;
 const PLAYER_INJURY_SYNC_GRACE_MS = 600;
 const PLAYER_MAX_DOWNS_BEFORE_ELIMINATION = 3;
-const DEFAULT_INTERMISSION_DURATION_MS = 30_000;
+const DEFAULT_INTERMISSION_DURATION_MS = 20_000;
+const MAP_VOTE_DURATION_MS = 20_000;
+const MAP_LOAD_GRACE_MS = 5_000;
 const DEFAULT_ROUND_DURATION_MS = 180_000;
 const PLAYER_SPAWN_ROTATION_Y = 180;
 const DEFAULT_MAP_ID = "SampleScene";
+const AVAILABLE_MAPS = [
+  { mapId: "SampleScene", sceneName: "SampleScene", displayName: "Classic", difficulty: "NORMAL" },
+  { mapId: "backroom", sceneName: "backroom", displayName: "Backroom", difficulty: "HARD" },
+  { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
+] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;
 const PLAYER_UPDATE_Z = 2;
@@ -172,6 +178,7 @@ type RoundPhaseMessage = {
   timeRemainingMs: number;
   roundDurationMs: number;
   intermissionDurationMs: number;
+  isMapVoteOpen: boolean;
 };
 type RoundAnnouncementMessage = {
   title: string;
@@ -192,19 +199,46 @@ type RoundResultsMessage = {
   roundDurationMs: number;
   entries: RoundResultEntry[];
 };
+type AvailableMapInfo = typeof AVAILABLE_MAPS[number];
+type MapVoteCandidateMessage = {
+  mapId: string;
+  sceneName: string;
+  displayName: string;
+  difficulty: string;
+};
+type MapVoteCountMessage = {
+  mapId: string;
+  count: number;
+};
+type MapVoteStateMessage = {
+  isOpen: boolean;
+  timeRemainingMs: number;
+  selectedMapId: string;
+  candidates: MapVoteCandidateMessage[];
+  votes: MapVoteCountMessage[];
+};
+type MapSelectedMessage = {
+  mapId: string;
+  sceneName: string;
+  displayName: string;
+  difficulty: string;
+  isInitial: boolean;
+};
 type MapNextbotConfig = {
   acquireRange: number;
   speedMultiplier: number;
   useSharedSpawnPoint: boolean;
   useClientReportedHits: boolean;
+  useServerReachabilityCheck: boolean;
   preferredSingleNextbotId: string;
 };
 
 const DEFAULT_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
-  acquireRange: NEXTBOT_ACQUIRE_RANGE,
+  acquireRange: NEXTBOT_PARKOUR_ACQUIRE_RANGE,
   speedMultiplier: 1,
   useSharedSpawnPoint: false,
-  useClientReportedHits: false,
+  useClientReportedHits: true,
+  useServerReachabilityCheck: false,
   preferredSingleNextbotId: "",
 };
 
@@ -213,6 +247,7 @@ const PARKOUR_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
   speedMultiplier: 1.5,
   useSharedSpawnPoint: true,
   useClientReportedHits: true,
+  useServerReachabilityCheck: false,
   preferredSingleNextbotId: "obunga",
 };
 
@@ -248,13 +283,41 @@ function sanitizeDisplayName(value: unknown, fallback: string): string {
   return trimmed.slice(0, 24);
 }
 
-function sanitizeMapId(value: unknown): string {
+function getAvailableMap(value: unknown): AvailableMapInfo | undefined {
   if (typeof value !== "string") {
-    return DEFAULT_MAP_ID;
+    return undefined;
   }
 
   const trimmed = value.trim();
-  return trimmed ? trimmed.slice(0, 64) : DEFAULT_MAP_ID;
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const lowerValue = trimmed.toLowerCase();
+  return AVAILABLE_MAPS.find((map) =>
+    map.mapId.toLowerCase() === lowerValue || map.sceneName.toLowerCase() === lowerValue);
+}
+
+function getDefaultAvailableMap(): AvailableMapInfo {
+  return getAvailableMap(DEFAULT_MAP_ID) ?? AVAILABLE_MAPS[0];
+}
+
+function getRandomAvailableMap(): AvailableMapInfo {
+  const index = Math.floor(Math.random() * AVAILABLE_MAPS.length);
+  return AVAILABLE_MAPS[index] ?? getDefaultAvailableMap();
+}
+
+function sanitizeMapId(value: unknown): string {
+  return getAvailableMap(value)?.mapId ?? DEFAULT_MAP_ID;
+}
+
+function resolveRoomMapId(value: unknown): string {
+  const map = getAvailableMap(value);
+  if (map != null) {
+    return map.mapId;
+  }
+
+  return getRandomAvailableMap().mapId;
 }
 
 function quantizeNumber(value: number, step: number): number {
@@ -296,6 +359,11 @@ export class MyRoom extends Room<MyRoomState> {
   private latestRoundResultsJson = "";
   private intermissionDurationMs = DEFAULT_INTERMISSION_DURATION_MS;
   private roundDurationMs = DEFAULT_ROUND_DURATION_MS;
+  private mapVotes = new Map<string, string>();
+  private isMapVoteOpen = false;
+  private isMapLoadPending = false;
+  private mapVoteEndsAt = 0;
+  private nextMapVoteBroadcastAt = 0;
   private nextbotDiagnosticWindowStartedAt = 0;
   private nextbotDiagnosticTickCount = 0;
   private nextbotDiagnosticDeltaSum = 0;
@@ -323,20 +391,23 @@ export class MyRoom extends Room<MyRoomState> {
   onCreate(options: any) {
     this.roomCreatedAt = Date.now();
     this.nextbotDiagnosticWindowStartedAt = this.roomCreatedAt;
-    this.mapId = sanitizeMapId(options?.mapId);
+    this.mapId = resolveRoomMapId(options?.mapId);
     this.setMetadata({ mapId: this.mapId });
-    this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(options);
-    this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(options);
+    const requestedMapId = typeof options?.mapId === "string" ? options.mapId.trim() : "";
+    const requestedMap = getAvailableMap(requestedMapId);
+    const initialMapOptions = !requestedMapId || requestedMap?.mapId === this.mapId ? options : {};
+    this.nextbotSpawnPoints = this.resolveNextbotSpawnPoints(initialMapOptions);
+    this.nextbotPatrolPoints = this.resolveNextbotPatrolPoints(initialMapOptions);
     this.nextbotSpawnPoints = this.ensureSufficientNextbotSpawnPoints(
       this.nextbotSpawnPoints,
       this.nextbotPatrolPoints,
       MAX_ACTIVE_NEXTBOTS);
-    this.nextbotObstacles = this.resolveNextbotObstacles(options);
-    this.nextbotFloorSamples = this.resolveNextbotFloorSamples(options);
-    this.nextbotIds = this.resolveNextbotIds(options);
-    this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
-    this.playerSpawnPoints = this.resolvePlayerSpawnPoints(options);
-    this.intermissionDurationMs = this.resolvePositiveDurationMs(options?.intermissionDurationMs, DEFAULT_INTERMISSION_DURATION_MS);
+    this.nextbotObstacles = this.resolveNextbotObstacles(initialMapOptions);
+    this.nextbotFloorSamples = this.resolveNextbotFloorSamples(initialMapOptions);
+    this.nextbotIds = this.resolveNextbotIds(initialMapOptions);
+    this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(initialMapOptions, this.nextbotIds);
+    this.playerSpawnPoints = this.resolvePlayerSpawnPoints(initialMapOptions);
+    this.intermissionDurationMs = MAP_VOTE_DURATION_MS;
     this.roundDurationMs = this.resolvePositiveDurationMs(options?.roundDurationMs, DEFAULT_ROUND_DURATION_MS);
     this.initializeNextbots();
     this.setPatchRate(1000 / 60);
@@ -606,6 +677,18 @@ export class MyRoom extends Room<MyRoomState> {
       this.applyNextbotConfigOverrides(payload);
     });
 
+    this.onMessage("syncMapConfig", (_client, payload) => {
+      this.applyNextbotConfigOverrides(payload);
+    });
+
+    this.onMessage("voteMap", (client, message) => {
+      this.handleMapVote(client, message);
+    });
+
+    this.onMessage("requestMapVoteState", (client) => {
+      this.sendMapVoteStateToClient(client);
+    });
+
     this.onMessage("nextbotHit", (client, message) => {
       const mapConfig = this.getMapNextbotConfig();
       if (!mapConfig.useClientReportedHits || this.currentPhase !== "round" || !this.state.isGameStarted) {
@@ -629,10 +712,6 @@ export class MyRoom extends Room<MyRoomState> {
       const controller = this.nextbotControllers[nextbotIndex];
       const nextbot = rawNextbotId ? this.state.nextbots.get(rawNextbotId) : this.getNextbotState(nextbotIndex);
       if (controller == null || nextbot == null || !nextbot.isActive) {
-        return;
-      }
-
-      if (controller.currentTargetSessionId !== client.sessionId && nextbot.targetSessionId !== client.sessionId) {
         return;
       }
 
@@ -709,7 +788,9 @@ export class MyRoom extends Room<MyRoomState> {
     });
     this.nextJoinOrder += 1;
 
+    this.sendMapSelectedToClient(client, true);
     this.sendRoundPhaseToClient(client);
+    this.sendMapVoteStateToClient(client);
     if (this.latestRoundResultsJson.length > 0 && this.currentPhase === "intermission") {
       client.send("roundResults", this.latestRoundResultsJson);
     }
@@ -731,6 +812,9 @@ export class MyRoom extends Room<MyRoomState> {
     this.playerRevivedUntil.delete(client.sessionId);
     this.playerForcedInjuredUntil.delete(client.sessionId);
     this.roundStats.delete(client.sessionId);
+    if (this.mapVotes.delete(client.sessionId)) {
+      this.broadcastMapVoteState();
+    }
 
     // If no players left, reset game state
     if (this.state.players.size === 0) {
@@ -740,6 +824,7 @@ export class MyRoom extends Room<MyRoomState> {
       this.roundIndex = 0;
       this.hasStartedMatchFlow = false;
       this.latestRoundResultsJson = "";
+      this.closeMapVote();
       this.clearAllNextbotTargetingState();
     }
 
@@ -1565,7 +1650,8 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     const predicted = this.getPredictedTargetPosition(player, nextbot);
-    if (!this.canNextbotReachPosition(nextbot.x, nextbot.z, predicted.x, predicted.z, nextbot.y, player.y)) {
+    if (this.getMapNextbotConfig().useServerReachabilityCheck
+      && !this.canNextbotReachPosition(nextbot.x, nextbot.z, predicted.x, predicted.z, nextbot.y, player.y)) {
       return undefined;
     }
 
@@ -2822,6 +2908,51 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private applyNextbotConfigOverrides(options: any) {
+    if (options == null || typeof options !== "object") {
+      return;
+    }
+
+    const optionMap = getAvailableMap(options?.mapId);
+    const hasExplicitUnknownMapId = typeof options?.mapId === "string"
+      && options.mapId.trim().length > 0
+      && optionMap == null;
+    if (hasExplicitUnknownMapId) {
+      return;
+    }
+
+    if (optionMap != null && optionMap.mapId !== this.mapId) {
+      return;
+    }
+
+    const refreshedSpawnPoints = this.resolveNextbotSpawnPoints(options);
+    const hasNextbotSpawnPoints = Array.isArray(options?.nextbotSpawnPoints) && refreshedSpawnPoints.length > 0;
+    const refreshedPatrolPoints = this.resolveNextbotPatrolPoints(options);
+    const hasNextbotPatrolPoints = Array.isArray(options?.nextbotPatrolPoints) && refreshedPatrolPoints.length > 0;
+    const refreshedPlayerSpawnPoints = this.resolvePlayerSpawnPoints(options);
+    const hasPlayerSpawnPoints = Array.isArray(options?.playerSpawnPoints) && refreshedPlayerSpawnPoints.length > 0;
+    let shouldResetNextbots = false;
+
+    if (hasNextbotSpawnPoints || hasNextbotPatrolPoints) {
+      this.nextbotSpawnPoints = this.ensureSufficientNextbotSpawnPoints(
+        hasNextbotSpawnPoints ? refreshedSpawnPoints : this.nextbotSpawnPoints,
+        hasNextbotPatrolPoints ? refreshedPatrolPoints : this.nextbotPatrolPoints,
+        MAX_ACTIVE_NEXTBOTS);
+      this.nextbotPatrolPoints = hasNextbotPatrolPoints ? refreshedPatrolPoints : this.nextbotPatrolPoints;
+      shouldResetNextbots = true;
+    }
+
+    if (hasPlayerSpawnPoints) {
+      this.playerSpawnPoints = refreshedPlayerSpawnPoints;
+    }
+
+    const refreshedIds = this.resolveNextbotIds(options);
+    if (Array.isArray(options?.nextbotIds) && refreshedIds.length > 0 && !this.areStringArraysEqual(refreshedIds, this.nextbotIds)) {
+      this.nextbotIds = refreshedIds;
+      this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
+      this.initializeNextbots();
+      return;
+    }
+
     const refreshedMoveSpeeds = this.resolveNextbotMoveSpeeds(options, this.nextbotIds);
     this.nextbotMoveSpeeds = refreshedMoveSpeeds;
 
@@ -2843,6 +2974,25 @@ export class MyRoom extends Room<MyRoomState> {
 
       controller.moveSpeed = this.getConfiguredNextbotMoveSpeed(controller.id);
     }
+
+    if (shouldResetNextbots && this.currentPhase !== "round") {
+      this.resetNextbotsToSpawnPoints();
+      this.resetPlayersForIntermission(Date.now());
+    }
+  }
+
+  private areStringArraysEqual(left: string[], right: string[]) {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    for (let index = 0; index < left.length; index++) {
+      if (left[index] !== right[index]) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private getConfiguredNextbotMoveSpeed(nextbotId: string): number {
@@ -2905,7 +3055,7 @@ export class MyRoom extends Room<MyRoomState> {
       this.broadcast("startGame");
     }
 
-    this.beginIntermission(Date.now());
+    this.beginIntermission(Date.now(), false);
   }
 
   private getReadyPlayerCount() {
@@ -2924,7 +3074,18 @@ export class MyRoom extends Room<MyRoomState> {
       return;
     }
 
+    this.updateMapVoteBroadcast(now);
+
     if (this.currentPhase === "intermission" && now >= this.phaseEndsAt) {
+      if (this.isMapVoteOpen) {
+        this.finalizeMapVote();
+        this.isMapLoadPending = true;
+        this.phaseEndsAt = now + MAP_LOAD_GRACE_MS;
+        this.broadcastRoundPhase();
+        return;
+      }
+
+      this.isMapLoadPending = false;
       this.beginRound(now);
       return;
     }
@@ -2934,16 +3095,29 @@ export class MyRoom extends Room<MyRoomState> {
     }
   }
 
-  private beginIntermission(now: number) {
+  private beginIntermission(now: number, openMapVote: boolean) {
     this.currentPhase = "intermission";
+    this.isMapLoadPending = false;
     this.phaseEndsAt = now + this.intermissionDurationMs;
     this.state.isGameStarted = false;
     this.resetNextbotsToSpawnPoints();
     this.resetPlayersForIntermission(now);
+    if (openMapVote) {
+      this.openMapVote(now);
+    } else {
+      this.closeMapVote();
+    }
     this.broadcastRoundPhase();
+    if (openMapVote) {
+      this.broadcastMapVoteState();
+    }
   }
 
   private beginRound(now: number) {
+    if (this.isMapVoteOpen) {
+      this.finalizeMapVote();
+    }
+    this.isMapLoadPending = false;
     this.currentPhase = "round";
     this.roundIndex += 1;
     this.phaseEndsAt = now + this.roundDurationMs;
@@ -2961,9 +3135,167 @@ export class MyRoom extends Room<MyRoomState> {
 
   private endRound(now: number) {
     const results = this.buildRoundResults(now);
-    this.beginIntermission(now);
+    this.beginIntermission(now, true);
     this.latestRoundResultsJson = JSON.stringify(results);
     this.broadcast("roundResults", this.latestRoundResultsJson);
+  }
+
+  private openMapVote(now: number) {
+    this.mapVotes.clear();
+    this.isMapVoteOpen = true;
+    this.mapVoteEndsAt = now + MAP_VOTE_DURATION_MS;
+    this.phaseEndsAt = this.mapVoteEndsAt;
+    this.nextMapVoteBroadcastAt = 0;
+    this.broadcastMapVoteState();
+  }
+
+  private closeMapVote() {
+    this.mapVotes.clear();
+    this.isMapVoteOpen = false;
+    this.isMapLoadPending = false;
+    this.mapVoteEndsAt = 0;
+    this.nextMapVoteBroadcastAt = 0;
+  }
+
+  private updateMapVoteBroadcast(now: number) {
+    if (!this.isMapVoteOpen) {
+      return;
+    }
+
+    if (now < this.nextMapVoteBroadcastAt) {
+      return;
+    }
+
+    this.nextMapVoteBroadcastAt = now + 1000;
+    this.broadcastMapVoteState();
+  }
+
+  private handleMapVote(client: Client, message: unknown) {
+    if (!this.isMapVoteOpen || this.currentPhase !== "intermission") {
+      return;
+    }
+
+    const rawMapId = typeof message === "string" ? message : (message as { mapId?: unknown })?.mapId;
+    const map = getAvailableMap(rawMapId);
+    if (map == null) {
+      return;
+    }
+
+    this.mapVotes.set(client.sessionId, map.mapId);
+    this.broadcastMapVoteState();
+  }
+
+  private finalizeMapVote() {
+    if (!this.isMapVoteOpen) {
+      return;
+    }
+
+    const nextMapId = this.getWinningVotedMapId();
+    this.closeMapVote();
+    this.setActiveMap(nextMapId, false);
+    this.broadcastMapVoteState();
+  }
+
+  private getWinningVotedMapId() {
+    const voteCounts = new Map<string, number>();
+    this.mapVotes.forEach((mapId) => {
+      voteCounts.set(mapId, (voteCounts.get(mapId) ?? 0) + 1);
+    });
+
+    let bestCount = 0;
+    const bestMapIds: string[] = [];
+    for (const map of AVAILABLE_MAPS) {
+      const count = voteCounts.get(map.mapId) ?? 0;
+      if (count <= 0) {
+        continue;
+      }
+
+      if (count > bestCount) {
+        bestCount = count;
+        bestMapIds.length = 0;
+        bestMapIds.push(map.mapId);
+      } else if (count === bestCount) {
+        bestMapIds.push(map.mapId);
+      }
+    }
+
+    if (bestMapIds.length === 0) {
+      return getRandomAvailableMap().mapId;
+    }
+
+    const index = Math.floor(Math.random() * bestMapIds.length);
+    return bestMapIds[index] ?? bestMapIds[0];
+  }
+
+  private setActiveMap(mapId: string, isInitial: boolean) {
+    const map = getAvailableMap(mapId) ?? getDefaultAvailableMap();
+    const mapChanged = this.mapId !== map.mapId;
+    this.mapId = map.mapId;
+    this.setMetadata({ mapId: this.mapId });
+
+    if (mapChanged) {
+      this.clearAllNextbotTargetingState();
+      this.initializeNextbots();
+    }
+
+    this.broadcastMapSelected(isInitial);
+    this.logRoomEvent(`${isInitial ? "using" : "selected"} map ${this.mapId}`);
+  }
+
+  private createMapVoteStateMessage(now: number): MapVoteStateMessage {
+    const votes = AVAILABLE_MAPS.map((map) => ({
+      mapId: map.mapId,
+      count: 0,
+    }));
+
+    this.mapVotes.forEach((mapId) => {
+      const vote = votes.find((entry) => entry.mapId === mapId);
+      if (vote != null) {
+        vote.count += 1;
+      }
+    });
+
+    return {
+      isOpen: this.isMapVoteOpen,
+      timeRemainingMs: this.isMapVoteOpen && this.mapVoteEndsAt > 0
+        ? Math.max(0, this.mapVoteEndsAt - now)
+        : 0,
+      selectedMapId: this.mapId,
+      candidates: AVAILABLE_MAPS.map((map) => ({
+        mapId: map.mapId,
+        sceneName: map.sceneName,
+        displayName: map.displayName,
+        difficulty: map.difficulty,
+      })),
+      votes,
+    };
+  }
+
+  private broadcastMapVoteState() {
+    this.broadcast("mapVoteState", JSON.stringify(this.createMapVoteStateMessage(Date.now())));
+  }
+
+  private sendMapVoteStateToClient(client: Client) {
+    client.send("mapVoteState", JSON.stringify(this.createMapVoteStateMessage(Date.now())));
+  }
+
+  private createMapSelectedMessage(isInitial: boolean): MapSelectedMessage {
+    const map = getAvailableMap(this.mapId) ?? getDefaultAvailableMap();
+    return {
+      mapId: map.mapId,
+      sceneName: map.sceneName,
+      displayName: map.displayName,
+      difficulty: map.difficulty,
+      isInitial,
+    };
+  }
+
+  private broadcastMapSelected(isInitial: boolean) {
+    this.broadcast("mapSelected", JSON.stringify(this.createMapSelectedMessage(isInitial)));
+  }
+
+  private sendMapSelectedToClient(client: Client, isInitial: boolean) {
+    client.send("mapSelected", JSON.stringify(this.createMapSelectedMessage(isInitial)));
   }
 
   private resetPlayersForIntermission(now: number) {
@@ -3189,6 +3521,7 @@ export class MyRoom extends Room<MyRoomState> {
       timeRemainingMs: this.phaseEndsAt > 0 ? Math.max(0, this.phaseEndsAt - now) : 0,
       roundDurationMs: this.roundDurationMs,
       intermissionDurationMs: this.intermissionDurationMs,
+      isMapVoteOpen: this.isMapVoteOpen,
     };
   }
 
