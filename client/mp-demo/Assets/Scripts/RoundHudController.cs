@@ -967,6 +967,7 @@ public class RoundHudController : MonoBehaviour
         _mapVoteTimerLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
         _mapVoteTimerLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
         _mapVoteTimerLabel.style.marginBottom = 24f;
+        _mapVoteTimerLabel.style.display = DisplayStyle.None;
 
         _mapVoteCardView = new VisualElement { name = "map-vote-card-view" };
         _mapVoteCardView.style.alignItems = Align.Center;
@@ -1077,6 +1078,7 @@ public class RoundHudController : MonoBehaviour
         if (_mapVoteTimerLabel != null)
         {
             _mapVoteTimerLabel.text = $"{Mathf.CeilToInt(timeRemaining)}s";
+            _mapVoteTimerLabel.style.display = DisplayStyle.None;
         }
 
         RebuildMapVoteCardsIfNeeded();
@@ -1109,7 +1111,12 @@ public class RoundHudController : MonoBehaviour
             return;
         }
 
-        if (_currentPhase != null && string.Equals(_currentPhase.phase, "round", StringComparison.OrdinalIgnoreCase))
+        bool shouldLock = _currentPhase != null && (
+            string.Equals(_currentPhase.phase, "round", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_currentPhase.phase, "intermission", StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (shouldLock)
         {
             UnityEngine.Cursor.lockState = CursorLockMode.Locked;
             UnityEngine.Cursor.visible = false;
@@ -1213,6 +1220,34 @@ public class RoundHudController : MonoBehaviour
         votedLabel.style.fontSize = 16f;
         votedLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
         _mapVoteVotedLabels[mapId] = votedLabel;
+
+        VisualElement icon = new VisualElement { name = "map-icon" };
+        icon.style.position = Position.Absolute;
+        icon.style.left = 0f;
+        icon.style.right = 0f;
+        icon.style.top = 0f;
+        icon.style.bottom = 0f;
+        icon.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        Texture2D iconTexture = Resources.Load<Texture2D>($"UI/{candidate.mapId}_map_icon");
+        if (iconTexture == null && !string.IsNullOrWhiteSpace(candidate.displayName))
+        {
+            iconTexture = Resources.Load<Texture2D>($"UI/{candidate.displayName}_map_icon");
+        }
+
+        if (iconTexture != null)
+        {
+            icon.style.backgroundImage = new StyleBackground(iconTexture);
+        }
+        card.Add(icon);
+
+        VisualElement overlay = new VisualElement { name = "overlay" };
+        overlay.style.position = Position.Absolute;
+        overlay.style.left = 0f;
+        overlay.style.right = 0f;
+        overlay.style.top = 0f;
+        overlay.style.bottom = 0f;
+        overlay.style.backgroundColor = new Color(0f, 0f, 0f, 0.45f);
+        card.Add(overlay);
 
         Label nameLabel = new Label(string.IsNullOrWhiteSpace(candidate.displayName) ? candidate.mapId : candidate.displayName);
         nameLabel.style.color = Color.white;

@@ -227,8 +227,4 @@ QualitySettings:
     - Android
     - iPhone
   m_TextureMipmapLimitGroupNames: []
-  m_PerPlatformDefaultQuality:
-    Nintendo Switch 2: 3
-    Server: 0
-    Standalone: 0
-    WebGL: 3
+  m_PerPlatformDefaultQuality: {}

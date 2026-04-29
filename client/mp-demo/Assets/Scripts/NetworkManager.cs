@@ -70,7 +70,7 @@ public class NetworkManager : MonoBehaviour
     private const string RampLayerName = "Ramp";
     private const string RandomMapId = "random";
     private const string ClassicMapId = "SampleScene";
-    private const string ClassicMapSceneName = "SampleScene";
+    private const string ClassicMapSceneName = "Classic";
     private const string BackroomMapId = "backroom";
     private const string BackroomMapSceneName = "backroom";
     private const string ParkourMapId = "parkour";

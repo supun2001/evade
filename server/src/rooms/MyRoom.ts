@@ -94,7 +94,7 @@ const DEFAULT_ROUND_DURATION_MS = 180_000;
 const PLAYER_SPAWN_ROTATION_Y = 180;
 const DEFAULT_MAP_ID = "SampleScene";
 const AVAILABLE_MAPS = [
-  { mapId: "SampleScene", sceneName: "SampleScene", displayName: "Classic", difficulty: "NORMAL" },
+  { mapId: "SampleScene", sceneName: "Classic", displayName: "Classic", difficulty: "NORMAL" },
   { mapId: "backroom", sceneName: "backroom", displayName: "Backroom", difficulty: "HARD" },
   { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
 ] as const;
@@ -749,7 +749,7 @@ export class MyRoom extends Room<MyRoomState> {
     player.sessionId = client.sessionId;
     player.displayName = sanitizeDisplayName(options?.username, `Player ${this.nextJoinOrder}`);
 
-    player.isReady = false;
+    player.isReady = true;
     player.isSpectator = false;
 
     const joinOrder = this.nextJoinOrder;
