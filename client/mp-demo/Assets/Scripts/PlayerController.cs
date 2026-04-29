@@ -192,6 +192,10 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _armWallHideCheckRadius = 0.16f;
     [SerializeField] private float _armWallHideDistance = 0.08f;
 
+    [Header("Camera Visibility")]
+    [SerializeField] private float _minimumGameplayFarClipPlane = 2000f;
+    [SerializeField] private bool _disableGameplayOcclusionCulling = true;
+
     [Header("Nextbot Warning Indicator")]
     [SerializeField] private float _nextbotWarningRange = 35f;
     [SerializeField, Min(0f)] private float _nextbotHitWarningMemorySeconds = 1.25f;
@@ -442,6 +446,9 @@ public class PlayerController : MonoBehaviour
         _cinemachineBrain = _gameplayCamera != null ? _gameplayCamera.GetComponent<CinemachineBrain>() : null;
         _gameplayAudioListener = _gameplayCamera != null ? _gameplayCamera.GetComponent<AudioListener>() : null;
         _spectateAudioListener = _spectateCamera != null ? _spectateCamera.GetComponent<AudioListener>() : null;
+        ConfigureGameplayVisibilityCamera(_playerCamera);
+        ConfigureGameplayVisibilityCamera(_gameplayCamera);
+        ConfigureGameplayVisibilityCamera(_spectateCamera);
         _defaultNearClipPlane = _gameplayCamera != null ? _gameplayCamera.nearClipPlane : 0.3f;
         _defaultFieldOfView = _gameplayCamera != null ? _gameplayCamera.fieldOfView : 60f;
         SetSpectateCameraActive(false);
@@ -2608,6 +2615,24 @@ public class PlayerController : MonoBehaviour
         }
 
         return null;
+    }
+
+    private void ConfigureGameplayVisibilityCamera(Camera targetCamera)
+    {
+        if (targetCamera == null)
+        {
+            return;
+        }
+
+        if (_minimumGameplayFarClipPlane > 0f && targetCamera.farClipPlane < _minimumGameplayFarClipPlane)
+        {
+            targetCamera.farClipPlane = _minimumGameplayFarClipPlane;
+        }
+
+        if (_disableGameplayOcclusionCulling)
+        {
+            targetCamera.useOcclusionCulling = false;
+        }
     }
 
     private void SetCameraView(CameraViewMode newViewMode, bool force = false)
