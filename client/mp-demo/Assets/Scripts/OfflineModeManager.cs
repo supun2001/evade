@@ -1069,7 +1069,7 @@ public class OfflineModeManager : MonoBehaviour
         ResetOfflineNextbots(active: false);
 
         // Generate candidates
-        List<string> allMaps = new List<string> { "SampleScene", "backroom", "parkour" };
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour" };
         List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
 
         // Shuffle and pick 3
@@ -1180,6 +1180,7 @@ public class OfflineModeManager : MonoBehaviour
         {
             case "SampleScene": return "Classic";
             case "backroom": return "Backroom";
+            case "brutilistVoid": return "Brutilist Void";
             case "parkour": return "Parkour";
             default: return mapId;
         }
@@ -1191,6 +1192,7 @@ public class OfflineModeManager : MonoBehaviour
         {
             case "SampleScene": return "NORMAL";
             case "backroom": return "HARD";
+            case "brutilistVoid": return "HARD";
             case "parkour": return "HARD";
             default: return "NORMAL";
         }
@@ -1202,6 +1204,7 @@ public class OfflineModeManager : MonoBehaviour
         {
             case "SampleScene": return "Classic";
             case "backroom": return "backroom";
+            case "brutilistVoid": return "BrutalistVoid";
             case "parkour": return "parkour";
             default: return mapId;
         }
@@ -1962,6 +1965,35 @@ public class OfflineModeManager : MonoBehaviour
 
         controller = playerObject.GetComponent<PlayerController>();
         return controller != null;
+    }
+
+    public bool TryEliminatePlayerInstantly(string sessionId)
+    {
+        if (!IsOfflineRoundActive || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return false;
+        }
+
+        if (!_offlinePlayerStates.TryGetValue(sessionId, out OfflinePlayerRoundState state)
+            || state == null
+            || state.IsEliminated)
+        {
+            return false;
+        }
+
+        if (state.CurrentLifeStartUnscaledTime >= 0f)
+        {
+            int runTimeMs = Mathf.Max(0, Mathf.RoundToInt((Time.unscaledTime - state.CurrentLifeStartUnscaledTime) * 1000f));
+            state.BestTimeMs = Mathf.Max(state.BestTimeMs, runTimeMs);
+        }
+
+        state.CurrentLifeStartUnscaledTime = -1f;
+        state.WasDowned = false;
+        state.IsEliminated = true;
+        state.Controller?.ApplyNetworkEliminated();
+        ReleaseRescueAssignment(sessionId);
+        ReleaseRescueAssignmentsForTarget(sessionId);
+        return true;
     }
 
     private bool IsOfflinePlayerEliminated(string sessionId)

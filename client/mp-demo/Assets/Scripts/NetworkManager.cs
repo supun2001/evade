@@ -73,6 +73,8 @@ public class NetworkManager : MonoBehaviour
     private const string ClassicMapSceneName = "Classic";
     private const string BackroomMapId = "backroom";
     private const string BackroomMapSceneName = "backroom";
+    private const string BrutilistVoidMapId = "brutilistVoid";
+    private const string BrutilistVoidMapSceneName = "BrutalistVoid";
     private const string ParkourMapId = "parkour";
     private const string ParkourMapSceneName = "parkour";
     private const float MinServerObstacleThickness = 0.25f;
@@ -256,6 +258,7 @@ public class NetworkManager : MonoBehaviour
     {
         return string.Equals(mapId, ClassicMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, BackroomMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, BrutilistVoidMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -264,6 +267,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, BackroomMapId, StringComparison.OrdinalIgnoreCase))
         {
             return BackroomMapSceneName;
+        }
+
+        if (string.Equals(mapId, BrutilistVoidMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return BrutilistVoidMapSceneName;
         }
 
         if (string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase))
@@ -279,6 +287,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, BackroomMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return BackroomMapId;
+        }
+
+        if (string.Equals(sceneName, BrutilistVoidMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return BrutilistVoidMapId;
         }
 
         if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.OrdinalIgnoreCase))
@@ -558,6 +571,16 @@ public class NetworkManager : MonoBehaviour
     {
         if (room == null) return;
         room.Send("playerSpectating", isSpectating);
+    }
+
+    public void SendHazardElimination()
+    {
+        if (room == null)
+        {
+            return;
+        }
+
+        room.Send("hazardElimination");
     }
 
     public void SendReviveRequest(string targetSessionId)

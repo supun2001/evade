@@ -96,6 +96,7 @@ const DEFAULT_MAP_ID = "SampleScene";
 const AVAILABLE_MAPS = [
   { mapId: "SampleScene", sceneName: "Classic", displayName: "Classic", difficulty: "NORMAL" },
   { mapId: "backroom", sceneName: "backroom", displayName: "Backroom", difficulty: "HARD" },
+  { mapId: "brutilistVoid", sceneName: "BrutalistVoid", displayName: "Brutilist Void", difficulty: "HARD" },
   { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
@@ -445,7 +446,7 @@ export class MyRoom extends Room<MyRoomState> {
         player.moveInputX = 0;
         player.moveInputY = 0;
         player.isJumping = false;
-        player.isInjured = true;
+        player.isInjured = false;
         player.isHitReacting = false;
         player.hitReactionTimeRemaining = 0;
         player.hitReactionPitch = 0;
@@ -698,6 +699,19 @@ export class MyRoom extends Room<MyRoomState> {
 
     this.onMessage("requestRoundPhase", (client) => {
       this.sendRoundPhaseToClient(client);
+    });
+
+    this.onMessage("hazardElimination", (client) => {
+      if (this.currentPhase !== "round" || !this.state.isGameStarted) {
+        return;
+      }
+
+      const player = this.state.players.get(client.sessionId);
+      if (!player || player.isSpectator || player.isEliminated || !player.isReady) {
+        return;
+      }
+
+      this.recordPlayerHazardElimination(client.sessionId, Date.now());
     });
 
     this.onMessage("nextbotHit", (client, message) => {
@@ -3429,26 +3443,50 @@ export class MyRoom extends Room<MyRoomState> {
 
     const player = this.state.players.get(sessionId);
     if (player != null && stats.downedCount >= PLAYER_MAX_DOWNS_BEFORE_ELIMINATION) {
-      this.clearCarryStateForPlayer(sessionId);
-      player.isEliminated = true;
-      player.isInjured = true;
-      player.isHitReacting = false;
-      player.hitReactionTimeRemaining = 0;
-      player.hitReactionPitch = 0;
-      player.hitReactionRoll = 0;
-      player.hitReactionSeed = 0;
-      player.velocityX = 0;
-      player.velocityY = 0;
-      player.velocityZ = 0;
-      player.animInputX = 0;
-      player.animInputY = 0;
-      player.moveInputX = 0;
-      player.moveInputY = 0;
-      player.isJumping = false;
-      player.isCrouching = false;
-      player.isWallRunning = false;
-      player.wallRunSide = 0;
+      this.applyPlayerEliminationState(player, false);
     }
+  }
+
+  private recordPlayerHazardElimination(sessionId: string, now: number) {
+    if (this.currentPhase !== "round") {
+      return;
+    }
+
+    const stats = this.roundStats.get(sessionId);
+    if (stats != null && stats.currentLifeStartMs != null) {
+      const runTime = Math.max(0, now - stats.currentLifeStartMs);
+      stats.bestTimeMs = Math.max(stats.bestTimeMs, runTime);
+      stats.currentLifeStartMs = null;
+    }
+
+    const player = this.state.players.get(sessionId);
+    if (player == null) {
+      return;
+    }
+
+    this.applyPlayerEliminationState(player, false);
+  }
+
+  private applyPlayerEliminationState(player: Player, keepInjuredState: boolean) {
+    this.clearCarryStateForPlayer(player.sessionId);
+    player.isEliminated = true;
+    player.isInjured = keepInjuredState;
+    player.isHitReacting = false;
+    player.hitReactionTimeRemaining = 0;
+    player.hitReactionPitch = 0;
+    player.hitReactionRoll = 0;
+    player.hitReactionSeed = 0;
+    player.velocityX = 0;
+    player.velocityY = 0;
+    player.velocityZ = 0;
+    player.animInputX = 0;
+    player.animInputY = 0;
+    player.moveInputX = 0;
+    player.moveInputY = 0;
+    player.isJumping = false;
+    player.isCrouching = false;
+    player.isWallRunning = false;
+    player.wallRunSide = 0;
   }
 
   private recordPlayerRevived(sessionId: string, now: number) {

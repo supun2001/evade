@@ -1568,6 +1568,11 @@ public class RoundHudController : MonoBehaviour
             return new Color(0.38f, 0.28f, 0.08f, 0.92f);
         }
 
+        if (string.Equals(mapId, "brutilistVoid", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.22f, 0.22f, 0.26f, 0.92f);
+        }
+
         if (string.Equals(mapId, "parkour", StringComparison.OrdinalIgnoreCase))
         {
             return new Color(0.09f, 0.22f, 0.35f, 0.92f);
@@ -1581,6 +1586,11 @@ public class RoundHudController : MonoBehaviour
         if (string.Equals(mapId, "backroom", StringComparison.OrdinalIgnoreCase))
         {
             return new Color(0.95f, 0.73f, 0.4f);
+        }
+
+        if (string.Equals(mapId, "brutilistVoid", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.88f, 0.88f, 0.95f);
         }
 
         if (string.Equals(mapId, "parkour", StringComparison.OrdinalIgnoreCase))

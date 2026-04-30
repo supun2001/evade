@@ -1,10 +1,10 @@
 <ui:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" noNamespaceSchemaLocation="../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
-    <ui:VisualElement name="hud-root" style="flex-grow: 1; position: relative;">
+    <ui:VisualElement name="hud-root" style="flex-grow: 1; width: 100%; height: 100%; position: relative;">
         <ui:VisualElement name="round-phase-container" style="position: absolute; left: 50%; top: 20px; translate: -50% 0; align-items: center; display: none;">
             <ui:Label name="round-phase-title-label" text="INTERMISSION" style="color: rgb(168, 216, 255); background-color: rgba(8, 14, 22, 0.86); padding-left: 16px; padding-right: 16px; padding-top: 6px; padding-bottom: 4px; border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; font-size: 20px; -unity-font-style: bold; unity-text-align: middle-center;"/>
             <ui:Label name="round-phase-timer-label" text="0:30" style="margin-top: 6px; color: rgb(255, 255, 255); font-size: 32px; -unity-font-style: bold; unity-text-align: middle-center;"/>
         </ui:VisualElement>
-        <ui:VisualElement name="round-announcement-container" style="position: absolute; left: 50%; top: 132px; translate: -50% 0; min-width: 420px; align-items: center; display: none;">
+        <ui:VisualElement name="round-announcement-container" style="position: absolute; left: 50%; top: 132px; translate: -50% 0; width: 100%; max-width: 680px; padding-left: 20px; padding-right: 20px; align-items: center; display: none;">
             <ui:Label name="round-announcement-title-label" text="ROUND STARTED" style="color: rgb(255, 118, 118); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-center;"/>
             <ui:Label name="round-announcement-subtitle-label" text="SURVIVE FOR 3 MINUTES" style="margin-top: 4px; color: rgb(255, 220, 158); font-size: 40px; -unity-font-style: bold; unity-text-align: middle-center;"/>
         </ui:VisualElement>
@@ -58,32 +58,34 @@
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:VisualElement name="tab-scoreboard-overlay" picking-mode="Ignore" style="display: none; position: absolute; left: 50%; top: 50%; translate: -50% -50%; width: 720px; max-width: 90%; min-height: 520px; padding-left: 18px; padding-right: 18px; padding-top: 18px; padding-bottom: 18px; background-color: rgba(6, 6, 6, 0.76); border-top-left-radius: 8px; border-top-right-radius: 8px; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(215, 191, 144, 0.2); border-right-color: rgba(215, 191, 144, 0.2); border-top-color: rgba(215, 191, 144, 0.2); border-bottom-color: rgba(215, 191, 144, 0.2);">
-            <ui:VisualElement style="height: 58px; align-items: center; justify-content: center; background-color: rgb(179, 156, 115); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;">
+        <ui:VisualElement name="tab-scoreboard-overlay" picking-mode="Ignore" style="display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; padding-left: 24px; padding-right: 24px; padding-top: 24px; padding-bottom: 24px; align-items: center; justify-content: center;">
+            <ui:VisualElement name="tab-scoreboard-card" style="width: 720px; max-width: 92%; min-height: 520px; max-height: 88%; padding-left: 18px; padding-right: 18px; padding-top: 18px; padding-bottom: 18px; background-color: rgba(6, 6, 6, 0.76); border-top-left-radius: 8px; border-top-right-radius: 8px; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(215, 191, 144, 0.2); border-right-color: rgba(215, 191, 144, 0.2); border-top-color: rgba(215, 191, 144, 0.2); border-bottom-color: rgba(215, 191, 144, 0.2);">
+                <ui:VisualElement style="height: 58px; align-items: center; justify-content: center; background-color: rgb(179, 156, 115); border-top-left-radius: 4px; border-top-right-radius: 4px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;">
                 <ui:Label text="PLAYERS" style="color: rgb(56, 48, 36); font-size: 28px; -unity-font-style: bold; unity-text-align: middle-center; letter-spacing: 1px;"/>
-            </ui:VisualElement>
-            <ui:VisualElement style="flex-direction: row; margin-top: 14px; padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; background-color: rgba(0, 0, 0, 0.42);">
-                <ui:Label text="NAME" style="flex-grow: 1; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold;"/>
-                <ui:Label text="STATE" style="width: 110px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-center;"/>
-                <ui:Label text="READY" style="width: 88px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-right;"/>
-            </ui:VisualElement>
-            <ui:ScrollView name="tab-scoreboard-list" mode="Vertical" vertical-scroller-visibility="Hidden" horizontal-scroller-visibility="Hidden" style="flex-grow: 1; margin-top: 4px; background-color: rgba(0, 0, 0, 0.14);"/>
-            <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: flex-end; margin-top: 14px;">
-                <ui:VisualElement>
-                    <ui:Label name="tab-scoreboard-map-label" text="Map: SampleScene" style="color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;"/>
-                    <ui:Label name="tab-scoreboard-phase-label" text="Phase: Waiting" style="margin-top: 4px; color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;"/>
                 </ui:VisualElement>
-                <ui:VisualElement style="align-items: flex-end;">
-                    <ui:Label name="tab-scoreboard-mode-label" text="Gamemode: Default" style="color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;"/>
-                    <ui:Label name="tab-scoreboard-player-count-label" text="0 players" style="margin-top: 4px; color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;"/>
+                <ui:VisualElement style="flex-direction: row; margin-top: 14px; padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; background-color: rgba(0, 0, 0, 0.42);">
+                    <ui:Label text="NAME" style="flex-grow: 1; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold;"/>
+                    <ui:Label text="STATE" style="width: 110px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-center;"/>
+                    <ui:Label text="READY" style="width: 88px; color: rgba(255, 255, 255, 0.55); font-size: 15px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                </ui:VisualElement>
+                <ui:ScrollView name="tab-scoreboard-list" mode="Vertical" vertical-scroller-visibility="Hidden" horizontal-scroller-visibility="Hidden" style="flex-grow: 1; margin-top: 4px; background-color: rgba(0, 0, 0, 0.14);"/>
+                <ui:VisualElement style="flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; margin-top: 14px; row-gap: 10px;">
+                    <ui:VisualElement style="max-width: 48%;">
+                        <ui:Label name="tab-scoreboard-map-label" text="Map: SampleScene" style="color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;"/>
+                        <ui:Label name="tab-scoreboard-phase-label" text="Phase: Waiting" style="margin-top: 4px; color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold;"/>
+                    </ui:VisualElement>
+                    <ui:VisualElement style="max-width: 48%; align-items: flex-end;">
+                        <ui:Label name="tab-scoreboard-mode-label" text="Gamemode: Default" style="color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                        <ui:Label name="tab-scoreboard-player-count-label" text="0 players" style="margin-top: 4px; color: rgb(214, 189, 138); font-size: 17px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+                    </ui:VisualElement>
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
         <ui:VisualElement name="round-results-overlay" style="display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0.36);">
-            <ui:VisualElement name="round-results-card" style="width: 620px; max-width: 92%; padding-left: 24px; padding-right: 24px; padding-top: 22px; padding-bottom: 22px; background-color: rgba(12, 16, 22, 0.94); border-top-left-radius: 16px; border-top-right-radius: 16px; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(255, 255, 255, 0.08); border-right-color: rgba(255, 255, 255, 0.08); border-top-color: rgba(255, 255, 255, 0.08); border-bottom-color: rgba(255, 255, 255, 0.08);">
-                <ui:Label name="round-results-title-label" text="SURVIVED" style="color: rgb(255, 193, 88); font-size: 44px; -unity-font-style: bold;"/>
+            <ui:VisualElement name="round-results-card" style="width: 620px; max-width: 92%; max-height: 88%; padding-left: 24px; padding-right: 24px; padding-top: 22px; padding-bottom: 22px; background-color: rgba(12, 16, 22, 0.94); border-top-left-radius: 16px; border-top-right-radius: 16px; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(255, 255, 255, 0.08); border-right-color: rgba(255, 255, 255, 0.08); border-top-color: rgba(255, 255, 255, 0.08); border-bottom-color: rgba(255, 255, 255, 0.08); align-self: center;">
+                <ui:Label name="round-results-title-label" text="SURVIVED" style="color: rgb(255, 193, 88); font-size: 44px; -unity-font-style: bold; unity-text-align: middle-center;"/>
                 <ui:Label text="OVERVIEW" style="margin-top: 12px; color: rgb(255, 255, 255); font-size: 18px; -unity-font-style: bold;"/>
-                <ui:VisualElement style="flex-direction: row; margin-top: 10px;">
+                <ui:VisualElement style="flex-direction: row; flex-wrap: wrap; margin-top: 10px; row-gap: 12px;">
                     <ui:VisualElement style="flex-grow: 1;">
                         <ui:Label text="BEST TIME" style="color: rgb(255, 255, 255); font-size: 16px; -unity-font-style: bold;"/>
                         <ui:Label name="round-results-best-time-value" text="0:00" style="margin-top: 6px; color: rgb(255, 255, 255); font-size: 26px; -unity-font-style: bold;"/>
@@ -98,9 +100,9 @@
                     </ui:VisualElement>
                 </ui:VisualElement>
                 <ui:Label text="LEADERBOARD" style="margin-top: 22px; color: rgb(255, 255, 255); font-size: 18px; -unity-font-style: bold;"/>
-                <ui:ScrollView name="round-results-leaderboard-list" mode="Vertical" vertical-scroller-visibility="Auto" horizontal-scroller-visibility="Hidden" style="margin-top: 10px; min-height: 188px; max-height: 280px; padding-top: 10px; padding-right: 12px; padding-bottom: 10px; padding-left: 12px; background-color: rgba(255, 255, 255, 0.04); border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;"/>
-                <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center; margin-top: 16px;">
-                    <ui:Label name="round-results-close-hint-label" text="Press Tab, Enter, or Esc to close" style="color: rgba(255, 255, 255, 0.72); font-size: 15px; unity-text-align: middle-left;"/>
+                <ui:ScrollView name="round-results-leaderboard-list" mode="Vertical" vertical-scroller-visibility="Auto" horizontal-scroller-visibility="Hidden" style="margin-top: 10px; min-height: 188px; max-height: 280px; flex-shrink: 1; padding-top: 10px; padding-right: 12px; padding-bottom: 10px; padding-left: 12px; background-color: rgba(255, 255, 255, 0.04); border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;"/>
+                <ui:VisualElement style="flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 16px; row-gap: 10px;">
+                    <ui:Label name="round-results-close-hint-label" text="Press Tab, Enter, or Esc to close" style="color: rgba(255, 255, 255, 0.72); font-size: 15px; unity-text-align: middle-left; white-space: normal; flex-grow: 1;"/>
                     <ui:Button name="round-results-exit-button" text="Exit" style="width: 148px; height: 42px; color: rgb(255, 255, 255); background-color: rgb(45, 53, 133); border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; -unity-font-style: bold;"/>
                 </ui:VisualElement>
             </ui:VisualElement>

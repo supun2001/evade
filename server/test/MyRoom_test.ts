@@ -96,6 +96,26 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(targetState.isInjured, false);
   });
 
+  it("instantly eliminates hazard deaths without marking players injured", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+    const client = await colyseus.connectTo(room);
+
+    client.send("playerReady", true);
+    await room.waitForNextPatch();
+
+    const roomAny = room as any;
+    roomAny.currentPhase = "round";
+    room.state.isGameStarted = true;
+
+    client.send("hazardElimination");
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+    assert.strictEqual(player.isEliminated, true);
+    assert.strictEqual(player.isInjured, false);
+  });
+
   it("keeps nextbots out of configured obstacles", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {
       nextbotObstacles: [
