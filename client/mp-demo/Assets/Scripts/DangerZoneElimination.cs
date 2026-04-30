@@ -4,20 +4,21 @@ using UnityEngine;
 public class DangerZoneElimination : MonoBehaviour
 {
     [SerializeField] private bool _requireAirborneEntry = true;
+    [SerializeField] private BoxCollider _triggerCollider;
 
     private void Awake()
     {
-        EnsureTriggerCollider();
+        EnsureSupportedTriggerCollider();
     }
 
     private void Reset()
     {
-        EnsureTriggerCollider();
+        EnsureSupportedTriggerCollider();
     }
 
     private void OnValidate()
     {
-        EnsureTriggerCollider();
+        EnsureSupportedTriggerCollider();
     }
 
     private void OnTriggerEnter(Collider other)
@@ -99,12 +100,48 @@ public class DangerZoneElimination : MonoBehaviour
         return true;
     }
 
-    private void EnsureTriggerCollider()
+    private void EnsureSupportedTriggerCollider()
     {
-        Collider triggerCollider = GetComponent<Collider>();
-        if (triggerCollider != null)
+        if (_triggerCollider == null)
         {
-            triggerCollider.isTrigger = true;
+            _triggerCollider = GetComponent<BoxCollider>();
         }
+
+        if (_triggerCollider == null)
+        {
+            _triggerCollider = gameObject.AddComponent<BoxCollider>();
+        }
+
+        _triggerCollider.isTrigger = true;
+
+        MeshCollider meshCollider = GetComponent<MeshCollider>();
+        if (meshCollider != null)
+        {
+            meshCollider.enabled = false;
+        }
+
+        if (_triggerCollider.size == Vector3.zero || _triggerCollider.size == Vector3.one)
+        {
+            Renderer targetRenderer = GetComponent<Renderer>();
+            if (targetRenderer != null)
+            {
+                Vector3 lossyScale = transform.lossyScale;
+                _triggerCollider.center = transform.InverseTransformPoint(targetRenderer.bounds.center);
+                _triggerCollider.size = new Vector3(
+                    SafeDivide(targetRenderer.bounds.size.x, lossyScale.x),
+                    Mathf.Max(0.5f, SafeDivide(targetRenderer.bounds.size.y, lossyScale.y)),
+                    SafeDivide(targetRenderer.bounds.size.z, lossyScale.z));
+            }
+        }
+    }
+
+    private static float SafeDivide(float value, float divisor)
+    {
+        if (Mathf.Approximately(divisor, 0f))
+        {
+            return value;
+        }
+
+        return value / divisor;
     }
 }

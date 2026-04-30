@@ -218,6 +218,7 @@ public class NetworkManager : MonoBehaviour
         selectedMapId = SanitizeMapId(mapId);
     }
 
+
     public void UseServerRandomMap()
     {
         selectedMapId = RandomMapId;

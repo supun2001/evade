@@ -70,6 +70,7 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _comingSoonCloseButton;
     private UIToolkitButton _mapClassicButton;
     private UIToolkitButton _mapBackroomButton;
+    private UIToolkitButton _mapBrutilistVoidButton;
     private UIToolkitButton _mapParkourButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
@@ -129,6 +130,8 @@ public class LobbyUI : MonoBehaviour
     private const string ClassicMapId = "SampleScene";
     private const string BackroomMapSceneName = "backroom";
     private const string BackroomMapId = "backroom";
+    private const string BrutilistVoidMapSceneName = "BrutalistVoid";
+    private const string BrutilistVoidMapId = "brutilistVoid";
     private const string ParkourMapSceneName = "parkour";
     private const string ParkourMapId = "parkour";
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
@@ -389,20 +392,24 @@ public class LobbyUI : MonoBehaviour
         }
     }
 
-    public async void OnStartClicked()
+    public void OnStartClicked()
+    {
+        SetMapSelectionVisible(true);
+    }
+
+    private async void StartSelectedMapJoin()
     {
         SetStartButtonEnabled(false);
 
         if (createButton != null) createButton.interactable = false;
         if (joinButton != null) joinButton.interactable = false;
 
-        NetworkManager.Instance?.UseServerRandomMap();
-
         string error = await NetworkManager.Instance.JoinOrCreateGame();
 
         if (string.IsNullOrEmpty(error))
         {
             SaveAndSyncSkin();
+            OnGameStarted();
         }
         else
         {
@@ -549,6 +556,7 @@ public class LobbyUI : MonoBehaviour
         _comingSoonCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("coming-soon-close-button");
         _mapClassicButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-classic-button");
         _mapBackroomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-backroom-button");
+        _mapBrutilistVoidButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-brutilistvoid-button");
         _mapParkourButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-parkour-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
@@ -719,6 +727,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapBackroomButton.clicked += HandleBackroomMapButtonClicked;
         }
+        if (_mapBrutilistVoidButton != null)
+        {
+            _mapBrutilistVoidButton.clicked += HandleBrutilistVoidMapButtonClicked;
+        }
         if (_mapParkourButton != null)
         {
             _mapParkourButton.clicked += HandleParkourMapButtonClicked;
@@ -836,6 +848,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapBackroomButton.clicked -= HandleBackroomMapButtonClicked;
         }
+        if (_mapBrutilistVoidButton != null)
+        {
+            _mapBrutilistVoidButton.clicked -= HandleBrutilistVoidMapButtonClicked;
+        }
         if (_mapParkourButton != null)
         {
             _mapParkourButton.clicked -= HandleParkourMapButtonClicked;
@@ -884,6 +900,11 @@ public class LobbyUI : MonoBehaviour
         BeginJoinForMap(ParkourMapSceneName, ParkourMapId);
     }
 
+    private void HandleBrutilistVoidMapButtonClicked()
+    {
+        BeginJoinForMap(BrutilistVoidMapSceneName, BrutilistVoidMapId);
+    }
+
     private void HandleMapSelectionCloseButtonClicked()
     {
         SetMapSelectionVisible(false);
@@ -930,7 +951,7 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(SceneManager.GetActiveScene().name, sceneName, StringComparison.Ordinal))
         {
             s_pendingJoinAfterMapLoad = false;
-            OnStartClicked();
+            StartSelectedMapJoin();
             return;
         }
 
@@ -995,7 +1016,7 @@ public class LobbyUI : MonoBehaviour
             NetworkManager.Instance.SetSelectedMapId(s_pendingJoinMapId);
         }
 
-        OnStartClicked();
+        StartSelectedMapJoin();
     }
 
     private static string GetActiveSceneMapId()
@@ -1004,6 +1025,11 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(sceneName, BackroomMapSceneName, StringComparison.Ordinal))
         {
             return BackroomMapId;
+        }
+
+        if (string.Equals(sceneName, BrutilistVoidMapSceneName, StringComparison.Ordinal))
+        {
+            return BrutilistVoidMapId;
         }
         
         if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.Ordinal))
@@ -1423,6 +1449,7 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
         SetMenuButtonDescription(_mapClassicButton, "Join the classic map");
         SetMenuButtonDescription(_mapBackroomButton, "Join the Backroom map");
+        SetMenuButtonDescription(_mapBrutilistVoidButton, "Join the Brutilist Void map");
         SetMenuButtonDescription(_mapParkourButton, "Join the Parkour map");
 
         _pendingHoverLabelText = DefaultMenuHoverText;
@@ -1457,6 +1484,7 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_spectateButton);
         RegisterHoverButton(_mapClassicButton);
         RegisterHoverButton(_mapBackroomButton);
+        RegisterHoverButton(_mapBrutilistVoidButton);
         RegisterHoverButton(_mapParkourButton);
     }
 

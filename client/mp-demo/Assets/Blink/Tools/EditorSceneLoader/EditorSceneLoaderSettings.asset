@@ -15,9 +15,9 @@ MonoBehaviour:
   sceneEntries:
   - displayName: Classic
     scene: {fileID: 102900000, guid: 99c9720ab356a0642a771bea13969a05, type: 3}
-  - displayName: Parkout
-    scene: {fileID: 102900000, guid: a88a920fa294f4137878aeb3381337fa, type: 3}
   - displayName: Backroom
     scene: {fileID: 102900000, guid: 88b1c96b5ab4f4582b1df3e2ef8c1bca, type: 3}
-  - displayName: 'Brutalist Void '
+  - displayName: Brutalist Void
     scene: {fileID: 102900000, guid: 056e81fe9051e4f1c857d452182b611f, type: 3}
+  - displayName: Parkour
+    scene: {fileID: 102900000, guid: a88a920fa294f4137878aeb3381337fa, type: 3}
