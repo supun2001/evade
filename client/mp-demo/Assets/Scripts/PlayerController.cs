@@ -8,7 +8,7 @@ using PlayerCharacterController;
 using System;
 using System.Collections;
 
-[DefaultExecutionOrder(-1)]
+[DefaultExecutionOrder(100)]
 public class PlayerController : MonoBehaviour
 {
     private enum CameraViewMode
@@ -249,6 +249,8 @@ public class PlayerController : MonoBehaviour
     [SerializeField, Range(0f, 1f)] private float _gunshotVolume = 0.9f;
     [SerializeField] private string _bulletVfxResourcePath = "VFX/Bullet";
     [SerializeField] private string _ak47AttachPointName = "AK47 Attach point";
+    [SerializeField] private Transform _muzzleFlashSpawnPoint;
+    [SerializeField] private Transform _bulletParticleSpawnPoint;
     [SerializeField] private Vector3 _bulletParticleLocalPosition = Vector3.zero;
     [SerializeField] private Vector3 _bulletParticleLocalEuler = Vector3.zero;
     [SerializeField, Min(0f)] private float _bulletParticleMuzzleForwardOffset = 0.03f;
@@ -498,6 +500,35 @@ public class PlayerController : MonoBehaviour
         _cinemachineCamera = GetComponentInChildren<CinemachineCamera>(true);
         _gameplayCamera = FindGameplayCamera();
         _gameplayCameraTransform = _gameplayCamera != null ? _gameplayCamera.transform : null;
+        
+        // Ensure FPS arms can't pick up physics jitter from imported child bodies/colliders
+        if (_firstPersonArmRoot != null)
+        {
+            Rigidbody[] rigidbodies = _firstPersonArmRoot.GetComponentsInChildren<Rigidbody>(true);
+            for (int i = 0; i < rigidbodies.Length; i++)
+            {
+                Rigidbody rb = rigidbodies[i];
+                if (rb == null)
+                {
+                    continue;
+                }
+
+                rb.isKinematic = true;
+                rb.useGravity = false;
+            }
+
+            Collider[] colliders = _firstPersonArmRoot.GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider collider = colliders[i];
+                if (collider == null)
+                {
+                    continue;
+                }
+
+                collider.enabled = false;
+            }
+        }
         _spectateCamera = FindSpectateCamera();
         _spectateCameraTransform = _spectateCamera != null ? _spectateCamera.transform : null;
         _playerHudDocument = GetComponentInChildren<UIDocument>(true);
@@ -2162,15 +2193,29 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Transform attachPoint = FindChildRecursive(transform, _ak47AttachPointName);
-        if (attachPoint == null)
+        Vector3 spawnPosition;
+        Quaternion spawnRotation;
+        Vector3 direction;
+
+        if (_bulletParticleSpawnPoint != null)
         {
-            return;
+            spawnPosition = _bulletParticleSpawnPoint.position;
+            direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : _bulletParticleSpawnPoint.forward;
+            spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _bulletParticlePrefabLocalRotation;
+        }
+        else
+        {
+            Transform attachPoint = FindChildRecursive(transform, _ak47AttachPointName);
+            if (attachPoint == null)
+            {
+                return;
+            }
+
+            direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
+            spawnPosition = GetMuzzleWorldPosition(attachPoint, direction, _bulletParticleLocalPosition, _bulletParticleMuzzleForwardOffset);
+            spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _bulletParticlePrefabLocalRotation * Quaternion.Euler(_bulletParticleLocalEuler);
         }
 
-        Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
-        Vector3 spawnPosition = GetMuzzleWorldPosition(attachPoint, direction, _bulletParticleLocalPosition, _bulletParticleMuzzleForwardOffset);
-        Quaternion spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _bulletParticlePrefabLocalRotation * Quaternion.Euler(_bulletParticleLocalEuler);
         SpawnOneShotParticleEffect(_bulletVfxPrefab, spawnPosition, spawnRotation, true, direction);
     }
 
@@ -2190,15 +2235,28 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Transform attachPoint = FindChildRecursive(transform, _ak47AttachPointName);
-        if (attachPoint == null)
+        Vector3 spawnPosition;
+        Quaternion spawnRotation;
+
+        if (_muzzleFlashSpawnPoint != null)
         {
-            return;
+            spawnPosition = _muzzleFlashSpawnPoint.position;
+            Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : _muzzleFlashSpawnPoint.forward;
+            spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _muzzleFlashPrefabLocalRotation;
+        }
+        else
+        {
+            Transform attachPoint = FindChildRecursive(transform, _ak47AttachPointName);
+            if (attachPoint == null)
+            {
+                return;
+            }
+
+            Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
+            spawnPosition = GetMuzzleWorldPosition(attachPoint, direction, _muzzleFlashLocalPosition, _muzzleFlashForwardOffset);
+            spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _muzzleFlashPrefabLocalRotation * Quaternion.Euler(_muzzleFlashLocalEuler);
         }
 
-        Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
-        Vector3 spawnPosition = GetMuzzleWorldPosition(attachPoint, direction, _muzzleFlashLocalPosition, _muzzleFlashForwardOffset);
-        Quaternion spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _muzzleFlashPrefabLocalRotation * Quaternion.Euler(_muzzleFlashLocalEuler);
         SpawnOneShotParticleEffect(_muzzleFlashVfxPrefab, spawnPosition, spawnRotation, false, null);
     }
 

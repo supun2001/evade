@@ -1,5 +1,67 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1194618258257592837
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6649532019823269084}
+  m_Layer: 0
+  m_Name: MuzzleSpawn
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6649532019823269084
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1194618258257592837}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0.00000005960463, y: 0.000000014901158, z: -0.00000011920926, w: 1}
+  m_LocalPosition: {x: -15.675805, y: -1.5837543, z: 0.4260339}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1015370086106487661}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1583929895921172313
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3649089480608302062}
+  m_Layer: 0
+  m_Name: BulletSpawn
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3649089480608302062
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1583929895921172313}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0.00000005960463, y: 0.000000014901158, z: -0.00000011920926, w: 1}
+  m_LocalPosition: {x: -13.393801, y: -1.4897532, z: 0.39503378}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1015370086106487661}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &4125142228217673944
 GameObject:
   m_ObjectHideFlags: 0
@@ -27,8 +89,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
-  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
+  m_LocalRotation: {x: -0.000000026462367, y: 0.8741787, z: -0.48560452, w: -0.000000034791217}
+  m_LocalPosition: {x: 0, y: -0.05941777, z: 0.20573585}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -288,6 +350,7 @@ MonoBehaviour:
   _spectateCameraName: SpecCamera
   _firstPersonArmRoot: {fileID: 4179248386504170215}
   _thirdPersonBodyRoot: {fileID: 3157317695037094368}
+  _thirdPersonBodyRotationOffset: {x: 0, y: 180, z: 0}
   _firstPersonOnlyRootNames:
   - arms
   _firstPersonArmsBasePositionOffset: {x: 0, y: -0.22, z: 0.1}
@@ -402,6 +465,8 @@ MonoBehaviour:
   _gunshotVolume: 0.9
   _bulletVfxResourcePath: VFX/Bullet
   _ak47AttachPointName: AK47 Attach point
+  _muzzleFlashSpawnPoint: {fileID: 6649532019823269084}
+  _bulletParticleSpawnPoint: {fileID: 3649089480608302062}
   _bulletParticleLocalPosition: {x: 0, y: 0, z: 0}
   _bulletParticleLocalEuler: {x: 0, y: 0, z: 0}
   _bulletParticleMuzzleForwardOffset: 0.03
@@ -589,6 +654,8 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2068249378107263168}
+  - {fileID: 6649532019823269084}
+  - {fileID: 3649089480608302062}
   m_Father: {fileID: 1654152597135460100}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7200473197087058331
@@ -886,8 +953,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
-  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
+  m_LocalRotation: {x: -0.000000026462367, y: 0.8741787, z: -0.48560452, w: -0.000000034791217}
+  m_LocalPosition: {x: 0, y: -0.05941777, z: 0.20573585}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -1293,6 +1360,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: player
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 2579012927138111666, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
       propertyPath: m_LocalPosition.x
       value: -0.000040140796
@@ -1533,7 +1604,9 @@ PrefabInstance:
       value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
-    m_RemovedGameObjects: []
+    m_RemovedGameObjects:
+    - {fileID: 8009987137999418058, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
+    - {fileID: -4258411891960909470, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 2579012927138111666, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
       insertIndex: -1

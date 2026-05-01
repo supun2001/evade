@@ -8,6 +8,7 @@ public class PlayerAppearance : MonoBehaviour
     public SkinRegistry skinRegistry;
     public Renderer[] targetRenderers;
     [SerializeField] private float _skinPollInterval = 0.25f;
+    [SerializeField] private string[] _excludedRendererRootNames = { "arms", "ak47", "AK47 Attach point" };
     private Player _playerSchema;
     private float _nextSkinPollTime;
 
@@ -75,11 +76,46 @@ public class PlayerAppearance : MonoBehaviour
                 continue;
             }
 
+            if (IsExcludedRenderer(renderer))
+            {
+                continue;
+            }
+
             validRenderers.Add(renderer);
         }
 
         targetRenderers = validRenderers.ToArray();
         return targetRenderers;
+    }
+
+    private bool IsExcludedRenderer(Renderer renderer)
+    {
+        if (renderer == null || _excludedRendererRootNames == null)
+        {
+            return false;
+        }
+
+        Transform current = renderer.transform;
+        while (current != null && current != transform)
+        {
+            for (int i = 0; i < _excludedRendererRootNames.Length; i++)
+            {
+                string rootName = _excludedRendererRootNames[i];
+                if (string.IsNullOrWhiteSpace(rootName))
+                {
+                    continue;
+                }
+
+                if (string.Equals(current.name, rootName, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            current = current.parent;
+        }
+
+        return false;
     }
 
     public static bool ApplySkinToRenderers(SkinRegistry registry, int index, Renderer[] renderers)
