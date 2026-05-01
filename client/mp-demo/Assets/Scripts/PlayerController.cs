@@ -8,7 +8,7 @@ using PlayerCharacterController;
 using System;
 using System.Collections;
 
-[DefaultExecutionOrder(100)]
+[DefaultExecutionOrder(500)]
 public class PlayerController : MonoBehaviour
 {
     private enum CameraViewMode
@@ -164,6 +164,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Vector3 _leftArmSprintRotation = new Vector3(18f, -12f, 16f);
     [SerializeField] private Vector3 _rightArmSprintRotation = new Vector3(18f, 12f, -16f);
     [SerializeField] private float _sprintArmBlendSpeed = 10f;
+    [SerializeField] private bool _applyManualSprintArmPose = true;
 
     [Header("Sprint Camera Feel")]
     [SerializeField] private float _sprintFovBonus = 8f;
@@ -490,6 +491,18 @@ public class PlayerController : MonoBehaviour
 
     #region Setup
     private void Awake() {
+        // Check for duplicate PlayerController scripts to prevent shaking/double movement
+        PlayerController[] controllers = GetComponents<PlayerController>();
+        if (controllers.Length > 1)
+        {
+            if (controllers[0] != this)
+            {
+                Debug.LogWarning($"Duplicate PlayerController detected on {gameObject.name}. Disabling this instance to prevent shaking.");
+                this.enabled = false;
+                return;
+            }
+        }
+
         _playerLocomotionInput = GetComponent<PlayerLocomotionInput>();
         _playerAnimation = GetComponent<PlayerAnimation>();
         _networkPlayer = GetComponent<NetworkPlayer>();
@@ -500,34 +513,35 @@ public class PlayerController : MonoBehaviour
         _cinemachineCamera = GetComponentInChildren<CinemachineCamera>(true);
         _gameplayCamera = FindGameplayCamera();
         _gameplayCameraTransform = _gameplayCamera != null ? _gameplayCamera.transform : null;
+
+        // Consolidate cameras: ensure only one camera is active to prevent buffer fighting (shaking)
+        ConsolidateGameplayCameras();
         
         // Ensure FPS arms can't pick up physics jitter from imported child bodies/colliders
+        // Ensure ALL child rigidbodies in the prefab are kinematic to prevent physics-based jitter
+        Rigidbody[] allRigidbodies = GetComponentsInChildren<Rigidbody>(true);
+        for (int i = 0; i < allRigidbodies.Length; i++)
+        {
+            if (allRigidbodies[i] != null)
+            {
+                allRigidbodies[i].isKinematic = true;
+                allRigidbodies[i].useGravity = false;
+            }
+        }
+
+        // Disable all child colliders that might interfere with movement or camera
         if (_firstPersonArmRoot != null)
         {
-            Rigidbody[] rigidbodies = _firstPersonArmRoot.GetComponentsInChildren<Rigidbody>(true);
-            for (int i = 0; i < rigidbodies.Length; i++)
+            Collider[] armColliders = _firstPersonArmRoot.GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < armColliders.Length; i++)
             {
-                Rigidbody rb = rigidbodies[i];
-                if (rb == null)
+                if (armColliders[i] != null)
                 {
-                    continue;
+                    armColliders[i].enabled = false;
                 }
-
-                rb.isKinematic = true;
-                rb.useGravity = false;
             }
 
-            Collider[] colliders = _firstPersonArmRoot.GetComponentsInChildren<Collider>(true);
-            for (int i = 0; i < colliders.Length; i++)
-            {
-                Collider collider = colliders[i];
-                if (collider == null)
-                {
-                    continue;
-                }
-
-                collider.enabled = false;
-            }
+            StabilizeFirstPersonArmAndGunHierarchy();
         }
         _spectateCamera = FindSpectateCamera();
         _spectateCameraTransform = _spectateCamera != null ? _spectateCamera.transform : null;
@@ -1197,7 +1211,11 @@ public class PlayerController : MonoBehaviour
 
                 if (string.Equals(candidate.name, rootName, StringComparison.OrdinalIgnoreCase))
                 {
-                    roots.Add(candidate);
+                    // Avoid duplicates if multiple objects have the same name
+                    if (!roots.Contains(candidate))
+                    {
+                        roots.Add(candidate);
+                    }
                     break;
                 }
             }
@@ -1337,6 +1355,57 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+    }
+
+    private void StabilizeFirstPersonArmAndGunHierarchy()
+    {
+        if (_firstPersonArmRoot == null)
+        {
+            return;
+        }
+
+        Transform[] transforms = _firstPersonArmRoot.GetComponentsInChildren<Transform>(true);
+        System.Collections.Generic.HashSet<string> seenPrimaryRoots = new();
+        Transform primaryGun = null;
+
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            if (candidate == null) continue;
+
+            // Handle duplicate guns
+            if (candidate.name.Equals("ak47", StringComparison.OrdinalIgnoreCase))
+            {
+                if (primaryGun == null)
+                {
+                    primaryGun = candidate;
+                }
+                else if (candidate != primaryGun)
+                {
+                    candidate.gameObject.SetActive(false);
+                }
+                continue;
+            }
+
+            // Handle duplicate arm roots (e.g. if there are two "arms" objects)
+            for (int j = 0; j < _firstPersonOnlyRootNames.Length; j++)
+            {
+                string rootName = _firstPersonOnlyRootNames[j];
+                if (candidate.name.Equals(rootName, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (seenPrimaryRoots.Contains(rootName.ToLowerInvariant()))
+                    {
+                        // Already have one root with this name, disable the duplicate
+                        candidate.gameObject.SetActive(false);
+                    }
+                    else
+                    {
+                        seenPrimaryRoots.Add(rootName.ToLowerInvariant());
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     private void CacheFirstPersonWallHideRenderers()
@@ -3396,40 +3465,64 @@ public class PlayerController : MonoBehaviour
     private Camera FindGameplayCamera()
     {
         Camera[] cameras = GetComponentsInChildren<Camera>(true);
+        
+        // Priority 1: Child camera tagged as MainCamera or named "Main Camera"
         foreach (Camera childCamera in cameras)
         {
-            if (childCamera == null || childCamera == _playerCamera)
-            {
-                continue;
-            }
-
-            if (string.Equals(childCamera.gameObject.name, _spectateCameraName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (string.Equals(childCamera.gameObject.tag, "MainCamera", StringComparison.Ordinal) || string.Equals(childCamera.gameObject.name, "Main Camera", StringComparison.Ordinal))
+            if (childCamera == null || childCamera == _playerCamera) continue;
+            if (string.Equals(childCamera.gameObject.tag, "MainCamera", StringComparison.Ordinal) || 
+                string.Equals(childCamera.gameObject.name, "Main Camera", StringComparison.Ordinal))
             {
                 return childCamera;
             }
         }
 
+        // Priority 2: Any child camera that isn't the spectate camera
         foreach (Camera childCamera in cameras)
         {
-            if (childCamera == null || childCamera == _playerCamera)
-            {
-                continue;
-            }
-
-            if (string.Equals(childCamera.gameObject.name, _spectateCameraName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
+            if (childCamera == null || childCamera == _playerCamera) continue;
+            if (string.Equals(childCamera.gameObject.name, _spectateCameraName, StringComparison.Ordinal)) continue;
             return childCamera;
         }
 
-        return _playerCamera;
+        // Priority 3: The assigned _playerCamera
+        if (_playerCamera != null) return _playerCamera;
+
+        // Priority 4: Scene Main Camera
+        return Camera.main;
+    }
+
+    private void ConsolidateGameplayCameras()
+    {
+        Camera[] cameras = GetComponentsInChildren<Camera>(true);
+        
+        // Ensure the chosen gameplay camera and its entire parent chain are active
+        if (_gameplayCamera != null)
+        {
+            Transform current = _gameplayCamera.transform;
+            while (current != null && current != transform)
+            {
+                current.gameObject.SetActive(true);
+                current = current.parent;
+            }
+            _gameplayCamera.enabled = true;
+        }
+
+        foreach (Camera childCamera in cameras)
+        {
+            if (childCamera == null) continue;
+
+            // Only allow the chosen gameplay camera or spectate camera (when active)
+            bool isGameplayCamera = (childCamera == _gameplayCamera);
+            bool isSpectateCamera = (childCamera == _spectateCamera);
+
+            if (!isGameplayCamera && !isSpectateCamera)
+            {
+                // ONLY disable the component, NOT the GameObject.
+                // This ensures we don't accidentally disable a parent of the camera we want to keep.
+                childCamera.enabled = false;
+            }
+        }
     }
 
     private Camera FindSpectateCamera()
@@ -4044,6 +4137,14 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateSprintArmPose()
     {
+        if (!_applyManualSprintArmPose || HasFirstPersonArmAnimatorController())
+        {
+            _sprintArmWeight = 0f;
+            _lastLeftArmSprintOffset = Quaternion.identity;
+            _lastRightArmSprintOffset = Quaternion.identity;
+            return;
+        }
+
         float sprintProgress = GetSprintProgress();
         float targetWeight =
             _currentViewMode == CameraViewMode.FirstPerson
@@ -4068,6 +4169,17 @@ public class PlayerController : MonoBehaviour
             _rightArmTransform.localRotation = rightBaseRotation * rightOffset;
             _lastRightArmSprintOffset = rightOffset;
         }
+    }
+
+    private bool HasFirstPersonArmAnimatorController()
+    {
+        if (_firstPersonArmRoot == null)
+        {
+            return false;
+        }
+
+        Animator armAnimator = _firstPersonArmRoot.GetComponentInChildren<Animator>(true);
+        return armAnimator != null && armAnimator.runtimeAnimatorController != null;
     }
 
     private void SetLocalRenderMode(bool firstPerson)
@@ -4173,10 +4285,22 @@ public class PlayerController : MonoBehaviour
                 root.SetParent(_gameplayCameraTransform, false);
             }
 
-            // By explicitly setting localPosition every LateUpdate, we override any 
-            // drifting caused by animators, physics, or floating point errors.
-            root.localPosition = _firstPersonOnlyRootLocalPositions[i] + basePositionOffset;
-            root.localRotation = _firstPersonOnlyRootLocalRotations[i] * baseRotationOffset;
+            // Calculate desired local state
+            Vector3 targetLocalPos = _firstPersonOnlyRootLocalPositions[i] + basePositionOffset;
+            Quaternion targetLocalRot = _firstPersonOnlyRootLocalRotations[i] * baseRotationOffset;
+
+            // Only apply if the difference is significant to avoid "micro-vibrations"
+            // caused by floating point competition with Animators or Cinemachine.
+            if (Vector3.SqrMagnitude(root.localPosition - targetLocalPos) > 0.000001f)
+            {
+                root.localPosition = targetLocalPos;
+            }
+
+            if (Quaternion.Angle(root.localRotation, targetLocalRot) > 0.01f)
+            {
+                root.localRotation = targetLocalRot;
+            }
+
             root.localScale = _firstPersonOnlyRootLocalScales[i];
         }
     }

@@ -86,7 +86,8 @@ public class PlayerAnimation : MonoBehaviour
     private bool _lastAppliedJumping;
     private float _lastAppliedVerticalSpeed;
     private PresentationMode _presentationMode = PresentationMode.Default;
-    private AnimatorOverrideController _shootingAnimatorOverrideController;
+    private readonly System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController> _shootingAnimatorOverrides
+        = new System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController>();
 
     private const float DEFAULT_SMOOTH_SPEED = 10f;
     #endregion
@@ -488,9 +489,7 @@ public class PlayerAnimation : MonoBehaviour
 
     private RuntimeAnimatorController GetDesiredAnimatorController(Animator targetAnimator)
     {
-        RuntimeAnimatorController baseController = _childAnimatorControllerOverride != null
-            ? _childAnimatorControllerOverride
-            : targetAnimator.runtimeAnimatorController;
+        RuntimeAnimatorController baseController = GetBaseAnimatorController(targetAnimator);
 
         if (_presentationMode != PresentationMode.Shooting)
         {
@@ -498,6 +497,37 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         return GetOrCreateShootingAnimatorOverride(baseController);
+    }
+
+    private RuntimeAnimatorController GetBaseAnimatorController(Animator targetAnimator)
+    {
+        if (targetAnimator == null)
+        {
+            return null;
+        }
+
+        RuntimeAnimatorController assignedController = targetAnimator.runtimeAnimatorController;
+        if (assignedController is AnimatorOverrideController overrideController
+            && overrideController.runtimeAnimatorController != null)
+        {
+            assignedController = overrideController.runtimeAnimatorController;
+        }
+
+        bool isPrimaryAnimator = targetAnimator == _animator || targetAnimator.gameObject == gameObject;
+        if (isPrimaryAnimator)
+        {
+            return assignedController;
+        }
+
+        if (assignedController != null
+            && (_childAnimatorControllerOverride == null || assignedController != _childAnimatorControllerOverride))
+        {
+            return assignedController;
+        }
+
+        return _childAnimatorControllerOverride != null
+            ? _childAnimatorControllerOverride
+            : assignedController;
     }
 
     private AnimatorOverrideController GetOrCreateShootingAnimatorOverride(RuntimeAnimatorController baseController)
@@ -512,15 +542,16 @@ public class PlayerAnimation : MonoBehaviour
             return null;
         }
 
-        if (_shootingAnimatorOverrideController != null
-            && _shootingAnimatorOverrideController.runtimeAnimatorController == baseController)
+        if (_shootingAnimatorOverrides.TryGetValue(baseController, out AnimatorOverrideController cachedOverride)
+            && cachedOverride != null
+            && cachedOverride.runtimeAnimatorController == baseController)
         {
-            return _shootingAnimatorOverrideController;
+            return cachedOverride;
         }
 
-        _shootingAnimatorOverrideController = new AnimatorOverrideController(baseController);
+        AnimatorOverrideController shootingOverrideController = new AnimatorOverrideController(baseController);
         var overrides = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<AnimationClip, AnimationClip>>();
-        _shootingAnimatorOverrideController.GetOverrides(overrides);
+        shootingOverrideController.GetOverrides(overrides);
 
         for (int i = 0; i < overrides.Count; i++)
         {
@@ -532,8 +563,9 @@ public class PlayerAnimation : MonoBehaviour
             }
         }
 
-        _shootingAnimatorOverrideController.ApplyOverrides(overrides);
-        return _shootingAnimatorOverrideController;
+        shootingOverrideController.ApplyOverrides(overrides);
+        _shootingAnimatorOverrides[baseController] = shootingOverrideController;
+        return shootingOverrideController;
     }
 
     private AnimationClip GetShootingReplacementClip(AnimationClip sourceClip)
