@@ -148,7 +148,17 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _spectateTargetRefreshInterval = 0.35f;
     [SerializeField] private string _spectateCameraName = "SpecCamera";
 
+    [Header("Model Roots")]
+    [SerializeField] private GameObject _firstPersonArmRoot;
+    [SerializeField] private GameObject _thirdPersonBodyRoot;
+    [SerializeField] private Vector3 _thirdPersonBodyRotationOffset = new Vector3(0f, 180f, 0f);
+
     [Header("Sprint Arms")]
+    [SerializeField] private string[] _firstPersonOnlyRootNames = { "arms", "arm", "R_Arm", "L_Arm" };
+    [SerializeField] private Vector3 _firstPersonArmsBasePositionOffset = new Vector3(0f, -0.22f, 0.1f);
+    [SerializeField] private Vector3 _firstPersonArmsBaseRotationOffset = new Vector3(8f, 0f, 0f);
+    [SerializeField] private Vector3 _firstPersonArmsLookDownPositionOffset = new Vector3(0f, -0.42f, 0.24f);
+    [SerializeField] private Vector3 _firstPersonArmsLookDownRotationOffset = new Vector3(18f, 0f, 0f);
     [SerializeField] private string _leftArmBoneName = "arm-left";
     [SerializeField] private string _rightArmBoneName = "arm-right";
     [SerializeField] private Vector3 _leftArmSprintRotation = new Vector3(18f, -12f, 16f);
@@ -364,12 +374,18 @@ public class PlayerController : MonoBehaviour
     private Vector3 _cachedThirdPersonCameraLocalPosition;
     private Quaternion _cachedThirdPersonCameraLocalRotation;
     private Renderer[] _localRenderers;
+    private Renderer[] _firstPersonOnlyRenderers;
     private ShadowCastingMode[] _defaultShadowCastingModes;
     private Renderer[] _firstPersonHiddenRenderers;
     private Renderer[] _firstPersonWallHideRenderers;
     private bool[] _defaultRendererEnabledStates;
+    private bool[] _defaultFirstPersonOnlyRendererEnabledStates;
     private bool[] _defaultHiddenRendererEnabledStates;
     private bool[] _defaultWallHideRendererEnabledStates;
+    private Transform[] _firstPersonOnlyRoots = Array.Empty<Transform>();
+    private Vector3[] _firstPersonOnlyRootLocalPositions = Array.Empty<Vector3>();
+    private Quaternion[] _firstPersonOnlyRootLocalRotations = Array.Empty<Quaternion>();
+    private Vector3[] _firstPersonOnlyRootLocalScales = Array.Empty<Vector3>();
     private Transform _leftArmTransform;
     private Transform _rightArmTransform;
     private Transform _carryLeftAnchorTransform;
@@ -735,6 +751,7 @@ public class PlayerController : MonoBehaviour
     {
         if (!_playerLocomotionInput.InputEnabled) return;
         if (ShouldForceThirdPersonView()) return;
+        if (ShouldForceFirstPersonView()) return; // Prevent switching in combat mode
 
         if (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
         {
@@ -873,6 +890,7 @@ public class PlayerController : MonoBehaviour
         }
 
         bool shouldForceThirdPerson = ShouldForceThirdPersonView();
+        bool shouldForceFirstPerson = ShouldForceFirstPersonView();
 
         if (shouldForceThirdPerson)
         {
@@ -886,7 +904,14 @@ public class PlayerController : MonoBehaviour
             {
                 SetCameraView(CameraViewMode.ThirdPerson, forceImmediate);
             }
-
+            return;
+        }
+        else if (shouldForceFirstPerson)
+        {
+            if (_currentViewMode != CameraViewMode.FirstPerson)
+            {
+                SetCameraView(CameraViewMode.FirstPerson, forceImmediate);
+            }
             return;
         }
 
@@ -902,6 +927,11 @@ public class PlayerController : MonoBehaviour
     private bool ShouldForceThirdPersonView()
     {
         return IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried;
+    }
+
+    private bool ShouldForceFirstPersonView()
+    {
+        return _combatModeActive;
     }
 
     private void UpdateAutoSprint()
@@ -954,6 +984,7 @@ public class PlayerController : MonoBehaviour
             UpdateSprintCameraBob();
             UpdateFirstPersonWallRunCameraPose();
             ResolveCameraWallCollision();
+            SyncFirstPersonOnlyRootsToGameplayCamera();
             UpdateSprintArmPose();
             UpdateArmWallClipVisibility();
             return;
@@ -1001,6 +1032,7 @@ public class PlayerController : MonoBehaviour
         UpdateSprintCameraBob();
         UpdateFirstPersonWallRunCameraPose();
         ResolveCameraWallCollision();
+        SyncFirstPersonOnlyRootsToGameplayCamera();
         UpdateSprintArmPose();
         UpdateArmWallClipVisibility();
     }
@@ -1039,6 +1071,7 @@ public class PlayerController : MonoBehaviour
         }
 
         UpdateDownedVisualRootPosition();
+        SyncFirstPersonOnlyRootsToGameplayCamera();
         UpdateSprintArmPose();
         EnsureRemoteFullBodyVisible();
     }
@@ -1058,9 +1091,33 @@ public class PlayerController : MonoBehaviour
 
     private void CacheLocalRenderers()
     {
-        _localRenderers = GetComponentsInChildren<Renderer>(true);
+        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
+        System.Collections.Generic.List<Renderer> standardRenderers = new();
+        System.Collections.Generic.List<Renderer> firstPersonOnlyRenderers = new();
+
+        for (int i = 0; i < allRenderers.Length; i++)
+        {
+            Renderer renderer = allRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            if (IsFirstPersonOnlyRenderer(renderer))
+            {
+                firstPersonOnlyRenderers.Add(renderer);
+            }
+            else
+            {
+                standardRenderers.Add(renderer);
+            }
+        }
+
+        _localRenderers = standardRenderers.ToArray();
+        _firstPersonOnlyRenderers = firstPersonOnlyRenderers.ToArray();
         _defaultShadowCastingModes = new ShadowCastingMode[_localRenderers.Length];
         _defaultRendererEnabledStates = new bool[_localRenderers.Length];
+        _defaultFirstPersonOnlyRendererEnabledStates = new bool[_firstPersonOnlyRenderers.Length];
 
         for (int i = 0; i < _localRenderers.Length; i++)
         {
@@ -1068,7 +1125,101 @@ public class PlayerController : MonoBehaviour
             _defaultRendererEnabledStates[i] = _localRenderers[i].enabled;
         }
 
+        for (int i = 0; i < _firstPersonOnlyRenderers.Length; i++)
+        {
+            _defaultFirstPersonOnlyRendererEnabledStates[i] = _firstPersonOnlyRenderers[i] != null && _firstPersonOnlyRenderers[i].enabled;
+        }
+
+        CacheFirstPersonOnlyRoots();
         CacheFirstPersonHiddenRenderers();
+    }
+
+    private void CacheFirstPersonOnlyRoots()
+    {
+        if (_firstPersonOnlyRootNames == null || _firstPersonOnlyRootNames.Length == 0)
+        {
+            _firstPersonOnlyRoots = Array.Empty<Transform>();
+            _firstPersonOnlyRootLocalPositions = Array.Empty<Vector3>();
+            _firstPersonOnlyRootLocalRotations = Array.Empty<Quaternion>();
+            _firstPersonOnlyRootLocalScales = Array.Empty<Vector3>();
+            return;
+        }
+
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+        System.Collections.Generic.List<Transform> roots = new();
+
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            if (candidate == null)
+            {
+                continue;
+            }
+
+            for (int j = 0; j < _firstPersonOnlyRootNames.Length; j++)
+            {
+                string rootName = _firstPersonOnlyRootNames[j];
+                if (string.IsNullOrWhiteSpace(rootName))
+                {
+                    continue;
+                }
+
+                if (string.Equals(candidate.name, rootName, StringComparison.OrdinalIgnoreCase))
+                {
+                    roots.Add(candidate);
+                    break;
+                }
+            }
+        }
+
+        _firstPersonOnlyRoots = roots.ToArray();
+        _firstPersonOnlyRootLocalPositions = new Vector3[_firstPersonOnlyRoots.Length];
+        _firstPersonOnlyRootLocalRotations = new Quaternion[_firstPersonOnlyRoots.Length];
+        _firstPersonOnlyRootLocalScales = new Vector3[_firstPersonOnlyRoots.Length];
+
+        for (int i = 0; i < _firstPersonOnlyRoots.Length; i++)
+        {
+            Transform root = _firstPersonOnlyRoots[i];
+            _firstPersonOnlyRootLocalPositions[i] = root.localPosition;
+            _firstPersonOnlyRootLocalRotations[i] = root.localRotation;
+            _firstPersonOnlyRootLocalScales[i] = root.localScale;
+        }
+    }
+
+    private bool IsFirstPersonOnlyRenderer(Renderer renderer)
+    {
+        if (renderer == null || _firstPersonOnlyRootNames == null)
+        {
+            return false;
+        }
+
+        Transform current = renderer.transform;
+        while (current != null && current != _transform)
+        {
+            for (int i = 0; i < _firstPersonOnlyRootNames.Length; i++)
+            {
+                string rootName = _firstPersonOnlyRootNames[i];
+                if (string.IsNullOrWhiteSpace(rootName))
+                {
+                    continue;
+                }
+
+                if (string.Equals(current.name, rootName, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Specifically exclude the body mesh even if it's under an "arm" root
+                    if (renderer.gameObject.name.Contains("Body", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+            }
+
+            current = current.parent;
+        }
+
+        return false;
     }
 
     private void CacheFirstPersonHiddenRenderers()
@@ -3863,6 +4014,24 @@ public class PlayerController : MonoBehaviour
 
     private void SetLocalRenderMode(bool firstPerson)
     {
+        // Handle explicit roots if assigned
+        if (_firstPersonArmRoot != null)
+        {
+            _firstPersonArmRoot.SetActive(firstPerson);
+        }
+
+        if (_thirdPersonBodyRoot != null)
+        {
+            _thirdPersonBodyRoot.SetActive(!firstPerson);
+            
+            // Apply rotation offset to ensure the model faces the correct way
+            if (!firstPerson)
+            {
+                _thirdPersonBodyRoot.transform.localRotation = Quaternion.Euler(_thirdPersonBodyRotationOffset);
+            }
+        }
+
+        // Fallback to renderer caching for secondary parts (heads, accessories)
         if (_localRenderers == null)
         {
             return;
@@ -3877,10 +4046,81 @@ public class PlayerController : MonoBehaviour
             }
 
             renderer.shadowCastingMode = _defaultShadowCastingModes[i];
-            renderer.enabled = _defaultRendererEnabledStates[i];
+            
+            // If we have explicit roots, we don't need to hide individual renderers here
+            // unless they aren't part of those roots.
+            if (_thirdPersonBodyRoot == null)
+            {
+                bool shouldBeEnabled = !firstPerson && _defaultRendererEnabledStates[i];
+                renderer.enabled = shouldBeEnabled;
+            }
         }
 
         SetFirstPersonHeadHidden(firstPerson);
+        
+        // Handle legacy arm syncing if explicit root isn't used
+        if (_firstPersonArmRoot == null)
+        {
+            SetFirstPersonOnlyRenderersVisible(firstPerson);
+        }
+    }
+
+    private void SetFirstPersonOnlyRenderersVisible(bool visible)
+    {
+        if (_firstPersonOnlyRenderers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _firstPersonOnlyRenderers.Length; i++)
+        {
+            Renderer renderer = _firstPersonOnlyRenderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            renderer.enabled = visible && _defaultFirstPersonOnlyRendererEnabledStates[i];
+        }
+    }
+
+    private void SyncFirstPersonOnlyRootsToGameplayCamera()
+    {
+        if (_gameplayCameraTransform == null || _firstPersonOnlyRoots == null)
+        {
+            return;
+        }
+
+        float lookDownWeight = 0f;
+        if (_currentViewMode == CameraViewMode.FirstPerson && _firstPersonLookDownLimit > 0.001f)
+        {
+            lookDownWeight = Mathf.Clamp01(Mathf.Max(0f, _cameraRotation.y) / _firstPersonLookDownLimit);
+        }
+
+        // Apply procedural offsets (look-down tilt and position adjustment)
+        Vector3 basePositionOffset = _firstPersonArmsBasePositionOffset + (_firstPersonArmsLookDownPositionOffset * lookDownWeight);
+        Quaternion baseRotationOffset = Quaternion.Euler(_firstPersonArmsBaseRotationOffset + (_firstPersonArmsLookDownRotationOffset * lookDownWeight));
+
+        for (int i = 0; i < _firstPersonOnlyRoots.Length; i++)
+        {
+            Transform root = _firstPersonOnlyRoots[i];
+            if (root == null)
+            {
+                continue;
+            }
+
+            // Force parentage to the current gameplay camera if it's lost
+            if (root.parent != _gameplayCameraTransform)
+            {
+                root.SetParent(_gameplayCameraTransform, false);
+            }
+
+            // By explicitly setting localPosition every LateUpdate, we override any 
+            // drifting caused by animators, physics, or floating point errors.
+            root.localPosition = _firstPersonOnlyRootLocalPositions[i] + basePositionOffset;
+            root.localRotation = _firstPersonOnlyRootLocalRotations[i] * baseRotationOffset;
+            root.localScale = _firstPersonOnlyRootLocalScales[i];
+        }
     }
 
     private void SetLocalSpectatorBodyVisible(bool visible)
@@ -3925,6 +4165,8 @@ public class PlayerController : MonoBehaviour
                 renderer.enabled = visible && _defaultHiddenRendererEnabledStates[i];
             }
         }
+
+        SetFirstPersonOnlyRenderersVisible(false);
 
         if (_firstPersonWallHideRenderers != null)
         {
@@ -5235,6 +5477,10 @@ public class PlayerController : MonoBehaviour
         {
             _playerLocomotionInput.InputEnabled = true;
         }
+
+        // Refresh visibility and camera state when combat mode changes
+        UpdateForcedCameraViewState(true);
+        SetLocalRenderMode(_currentViewMode == CameraViewMode.FirstPerson);
     }
 
     public void SetCombatHealth(float health)
@@ -5278,6 +5524,18 @@ public class PlayerController : MonoBehaviour
     private void ApplySimulationPresentationState()
     {
         EnsureRemoteFullBodyVisible();
+
+        // For remote players, always show the body and hide the FPS arms
+        if (_firstPersonArmRoot != null)
+        {
+            _firstPersonArmRoot.SetActive(false);
+        }
+
+        if (_thirdPersonBodyRoot != null)
+        {
+            _thirdPersonBodyRoot.SetActive(true);
+            _thirdPersonBodyRoot.transform.localRotation = Quaternion.Euler(_thirdPersonBodyRotationOffset);
+        }
 
         Camera[] cameras = GetComponentsInChildren<Camera>(true);
         for (int i = 0; i < cameras.Length; i++)

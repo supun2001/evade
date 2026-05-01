@@ -11,6 +11,8 @@ public class PlayerAnimation : MonoBehaviour
     #region Class Variables
     [SerializeField] private Animator _animator;
     [SerializeField] private RuntimeAnimatorController _childAnimatorControllerOverride;
+    [SerializeField] private string[] _runtimeChildAnimatorNameHints = { "arms" };
+    [SerializeField] private bool _createRuntimeAnimationPathShims = true;
     [Header("Shooting Mode")]
     [SerializeField] private AnimationClip _shootingIdleClip;
     [SerializeField] private AnimationClip _shootingRunningClip;
@@ -95,6 +97,8 @@ public class PlayerAnimation : MonoBehaviour
         _playerLocomotionInput = GetComponent<PlayerLocomotionInput>();
         _playerController = GetComponent<PlayerController>();
         ResolveAnimatorReference();
+        EnsureRuntimeChildAnimators();
+        ResolveAnimatorReference();
 
         if (_animator != null)
         {
@@ -122,6 +126,7 @@ public class PlayerAnimation : MonoBehaviour
             _animator.applyRootMotion = false;
         }
 
+        EnsureRuntimeChildAnimators();
         UpdateAnimation();
     }
     #endregion
@@ -240,6 +245,185 @@ public class PlayerAnimation : MonoBehaviour
 
         _animator = bestAnimator != null ? bestAnimator : fallbackAnimator;
         ApplyAnimatorOverrideIfNeeded(_animator);
+    }
+
+    private void EnsureRuntimeChildAnimators()
+    {
+        if (_animator == null)
+        {
+            return;
+        }
+
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+        bool addedAnimator = false;
+
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            EnsureAnimationBindingPathShim(candidate);
+
+            if (!ShouldCreateRuntimeChildAnimator(candidate))
+            {
+                continue;
+            }
+
+            Animator childAnimator = candidate.gameObject.AddComponent<Animator>();
+            childAnimator.avatar = _animator.avatar;
+            childAnimator.applyRootMotion = false;
+            childAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            childAnimator.speed = 1f;
+            ApplyAnimatorOverrideIfNeeded(childAnimator);
+            addedAnimator = true;
+        }
+
+        if (addedAnimator)
+        {
+            _childAnimators = GetComponentsInChildren<Animator>(true);
+        }
+    }
+
+    private bool ShouldCreateRuntimeChildAnimator(Transform candidate)
+    {
+        if (candidate == null
+            || candidate == transform
+            || candidate.GetComponent<Animator>() != null
+            || candidate.GetComponentInChildren<Animator>(true) != null)
+        {
+            return false;
+        }
+
+        if (candidate.GetComponentInChildren<SkinnedMeshRenderer>(true) == null)
+        {
+            return false;
+        }
+
+        if (_runtimeChildAnimatorNameHints == null || _runtimeChildAnimatorNameHints.Length == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < _runtimeChildAnimatorNameHints.Length; i++)
+        {
+            string hint = _runtimeChildAnimatorNameHints[i];
+            if (string.IsNullOrWhiteSpace(hint))
+            {
+                continue;
+            }
+
+            if (candidate.name.IndexOf(hint, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureAnimationBindingPathShim(Transform candidate)
+    {
+        if (!_createRuntimeAnimationPathShims || !IsRuntimeChildAnimatorTarget(candidate))
+        {
+            return;
+        }
+
+        EnsureChildBindingParent(candidate, "R_Arm", "ArmL_Offset");
+        EnsureChildBindingParent(candidate, "L_Arm", "ArmR_Offset");
+        EnsureDummyBindingPath(candidate, "MainBody/Rig1/Spine1/Spine2/Neck1");
+    }
+
+    private bool IsRuntimeChildAnimatorTarget(Transform candidate)
+    {
+        if (candidate == null || _runtimeChildAnimatorNameHints == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < _runtimeChildAnimatorNameHints.Length; i++)
+        {
+            string hint = _runtimeChildAnimatorNameHints[i];
+            if (string.IsNullOrWhiteSpace(hint))
+            {
+                continue;
+            }
+
+            if (candidate.name.IndexOf(hint, System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void EnsureChildBindingParent(Transform root, string parentName, string animatedChildName)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        Transform animatedChild = root.Find(animatedChildName);
+        if (animatedChild == null)
+        {
+            Transform existingParent = root.Find(parentName);
+            if (existingParent != null && existingParent.Find(animatedChildName) != null)
+            {
+                return;
+            }
+
+            return;
+        }
+
+        Transform bindingParent = root.Find(parentName);
+        if (bindingParent == null)
+        {
+            GameObject parentObject = new GameObject(parentName);
+            bindingParent = parentObject.transform;
+            bindingParent.SetParent(root, false);
+            bindingParent.localPosition = Vector3.zero;
+            bindingParent.localRotation = Quaternion.identity;
+            bindingParent.localScale = Vector3.one;
+        }
+
+        if (animatedChild.parent == bindingParent)
+        {
+            return;
+        }
+
+        animatedChild.SetParent(bindingParent, false);
+    }
+
+    private static void EnsureDummyBindingPath(Transform root, string relativePath)
+    {
+        if (root == null || string.IsNullOrWhiteSpace(relativePath))
+        {
+            return;
+        }
+
+        string[] segments = relativePath.Split('/');
+        Transform current = root;
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            string segment = segments[i];
+            if (string.IsNullOrWhiteSpace(segment))
+            {
+                continue;
+            }
+
+            Transform next = current.Find(segment);
+            if (next == null)
+            {
+                GameObject segmentObject = new GameObject(segment);
+                next = segmentObject.transform;
+                next.SetParent(current, false);
+                next.localPosition = Vector3.zero;
+                next.localRotation = Quaternion.identity;
+                next.localScale = Vector3.one;
+            }
+
+            current = next;
+        }
     }
 
     private int ScoreAnimatorCandidate(Animator candidate)
