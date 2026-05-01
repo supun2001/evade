@@ -2,9 +2,21 @@ using UnityEngine;
 
 public class PlayerAnimation : MonoBehaviour
 {
+    private enum PresentationMode
+    {
+        Default,
+        Shooting
+    }
+
     #region Class Variables
     [SerializeField] private Animator _animator;
     [SerializeField] private RuntimeAnimatorController _childAnimatorControllerOverride;
+    [Header("Shooting Mode")]
+    [SerializeField] private AnimationClip _shootingIdleClip;
+    [SerializeField] private AnimationClip _shootingRunningClip;
+    [SerializeField] private AnimationClip _shootingBackwardClip;
+    [SerializeField] private AnimationClip _shootingLeftClip;
+    [SerializeField] private AnimationClip _shootingRightClip;
     public Animator Animator => _animator;
     public Transform VisualRootTransform => _animator != null ? _animator.transform : null;
     public bool IsInjuredActive => _debugForceInjured || (_useNetworkAnimationState ? _networkIsInjured : _isInjured);
@@ -71,6 +83,8 @@ public class PlayerAnimation : MonoBehaviour
     private bool _lastAppliedGrounded = true;
     private bool _lastAppliedJumping;
     private float _lastAppliedVerticalSpeed;
+    private PresentationMode _presentationMode = PresentationMode.Default;
+    private AnimatorOverrideController _shootingAnimatorOverrideController;
 
     private const float DEFAULT_SMOOTH_SPEED = 10f;
     #endregion
@@ -151,6 +165,18 @@ public class PlayerAnimation : MonoBehaviour
     public void SetInjured(bool isInjured)
     {
         _isInjured = isInjured;
+    }
+
+    public void SetShootingModeActive(bool isActive)
+    {
+        PresentationMode targetMode = isActive ? PresentationMode.Shooting : PresentationMode.Default;
+        if (_presentationMode == targetMode)
+        {
+            return;
+        }
+
+        _presentationMode = targetMode;
+        ReapplyAnimatorControllers();
     }
 
     public bool IsCrouchingActive => _debugForceCrouching || (_useNetworkAnimationState ? _networkIsCrouching : (_playerController != null && _playerController.IsCrouching()));
@@ -252,7 +278,7 @@ public class PlayerAnimation : MonoBehaviour
 
     private void ApplyAnimatorOverrideIfNeeded(Animator targetAnimator)
     {
-        if (targetAnimator == null || _childAnimatorControllerOverride == null)
+        if (targetAnimator == null)
         {
             return;
         }
@@ -262,17 +288,106 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
-        if (targetAnimator.runtimeAnimatorController == _childAnimatorControllerOverride)
+        RuntimeAnimatorController desiredController = GetDesiredAnimatorController(targetAnimator);
+        if (desiredController == null || targetAnimator.runtimeAnimatorController == desiredController)
         {
             return;
         }
 
-        targetAnimator.runtimeAnimatorController = _childAnimatorControllerOverride;
+        targetAnimator.runtimeAnimatorController = desiredController;
         targetAnimator.applyRootMotion = false;
         targetAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
         targetAnimator.speed = 1f;
         targetAnimator.Rebind();
         targetAnimator.Update(0f);
+    }
+
+    private RuntimeAnimatorController GetDesiredAnimatorController(Animator targetAnimator)
+    {
+        RuntimeAnimatorController baseController = _childAnimatorControllerOverride != null
+            ? _childAnimatorControllerOverride
+            : targetAnimator.runtimeAnimatorController;
+
+        if (_presentationMode != PresentationMode.Shooting)
+        {
+            return baseController;
+        }
+
+        return GetOrCreateShootingAnimatorOverride(baseController);
+    }
+
+    private AnimatorOverrideController GetOrCreateShootingAnimatorOverride(RuntimeAnimatorController baseController)
+    {
+        if (baseController == null
+            || _shootingIdleClip == null
+            || _shootingRunningClip == null
+            || _shootingBackwardClip == null
+            || _shootingLeftClip == null
+            || _shootingRightClip == null)
+        {
+            return null;
+        }
+
+        if (_shootingAnimatorOverrideController != null
+            && _shootingAnimatorOverrideController.runtimeAnimatorController == baseController)
+        {
+            return _shootingAnimatorOverrideController;
+        }
+
+        _shootingAnimatorOverrideController = new AnimatorOverrideController(baseController);
+        var overrides = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<AnimationClip, AnimationClip>>();
+        _shootingAnimatorOverrideController.GetOverrides(overrides);
+
+        for (int i = 0; i < overrides.Count; i++)
+        {
+            AnimationClip sourceClip = overrides[i].Key;
+            AnimationClip replacementClip = GetShootingReplacementClip(sourceClip);
+            if (replacementClip != null)
+            {
+                overrides[i] = new System.Collections.Generic.KeyValuePair<AnimationClip, AnimationClip>(sourceClip, replacementClip);
+            }
+        }
+
+        _shootingAnimatorOverrideController.ApplyOverrides(overrides);
+        return _shootingAnimatorOverrideController;
+    }
+
+    private AnimationClip GetShootingReplacementClip(AnimationClip sourceClip)
+    {
+        if (sourceClip == null)
+        {
+            return null;
+        }
+
+        string clipName = sourceClip.name.Replace(" ", string.Empty).ToLowerInvariant();
+        return clipName switch
+        {
+            "idle" => _shootingIdleClip,
+            "running" => _shootingRunningClip,
+            "walkback" => _shootingBackwardClip,
+            "walkleft" => _shootingLeftClip,
+            "walkright" => _shootingRightClip,
+            "runningstrafeleft" => _shootingLeftClip,
+            "runningstraferight" => _shootingRightClip,
+            _ => null,
+        };
+    }
+
+    private void ReapplyAnimatorControllers()
+    {
+        Animator[] animators = GetComponentsInChildren<Animator>(true);
+        _childAnimators = animators;
+
+        for (int i = 0; i < animators.Length; i++)
+        {
+            Animator targetAnimator = animators[i];
+            if (targetAnimator == null || targetAnimator.gameObject == gameObject)
+            {
+                continue;
+            }
+
+            ApplyAnimatorOverrideIfNeeded(targetAnimator);
+        }
     }
 
     private void ApplyAnimationStateToAllAnimators(float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)

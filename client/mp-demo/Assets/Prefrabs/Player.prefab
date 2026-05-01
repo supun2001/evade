@@ -435,6 +435,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PlayerAnimation
   _animator: {fileID: 8537408513011366176}
   _childAnimatorControllerOverride: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
+  _shootingIdleClip: {fileID: 7400000, guid: 415844d1f4bd44e2daccf2423588aafc, type: 2}
+  _shootingRunningClip: {fileID: 7400000, guid: b3b07313353264167bd790ebbe121030, type: 2}
+  _shootingBackwardClip: {fileID: 7400000, guid: 927b66c184dd146158df6a9fc1f55ed2, type: 2}
+  _shootingLeftClip: {fileID: 7400000, guid: aec2a6ad5af9e4aac97a589e3fc5f37e, type: 2}
+  _shootingRightClip: {fileID: 7400000, guid: 44dc4fba9bfc1488cb5855de938c4533, type: 2}
   animationSmoothTime: 0.1
   _useSingleForwardRunAnimation: 0
   _debugForceInjured: 0

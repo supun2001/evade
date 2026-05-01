@@ -53,6 +53,7 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _graphicsMediumButton;
     private UIToolkitButton _shopButton;
     private UIToolkitButton _offlineButton;
+    private UIToolkitButton _shootingButton;
     private UIToolkitButton _loginButton;
     private UIToolkitButton _loginCloseButton;
     private UIToolkitButton _loginSubmitButton;
@@ -432,17 +433,33 @@ public class LobbyUI : MonoBehaviour
 
     private void StartOfflineMode()
     {
+        StartOfflineMode(
+            OfflineModeManager.OfflinePresentationMode.Runner,
+            "Offline mode started. Press O in the menu to launch it again later.");
+    }
+
+    private void StartShootingMode()
+    {
+        StartOfflineMode(
+            OfflineModeManager.OfflinePresentationMode.Shooting,
+            "Shooting mode started with AK47 movement animations.");
+    }
+
+    private void StartOfflineMode(
+        OfflineModeManager.OfflinePresentationMode presentationMode,
+        string startedMessage)
+    {
         OfflineModeManager offlineModeManager = OfflineModeManager.Instance;
-        bool started = offlineModeManager.StartOfflineMode(GetOfflineDisplayName(), currentSkinIndex);
+        bool started = offlineModeManager.StartOfflineMode(GetOfflineDisplayName(), currentSkinIndex, presentationMode);
         if (!started)
         {
-            ShowNotification("Offline mode could not start.");
+            ShowNotification($"{presentationMode} mode could not start.");
             return;
         }
 
         hasAutoReadiedCurrentRoom = true;
         OnGameStarted();
-        ShowNotification("Offline mode started. Press O in the menu to launch it again later.");
+        ShowNotification(startedMessage);
     }
 
     private string GetOfflineDisplayName()
@@ -539,6 +556,7 @@ public class LobbyUI : MonoBehaviour
         _graphicsMediumButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("graphics-medium-button");
         _shopButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shop-button");
         _offlineButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("offline-button");
+        _shootingButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("shooting-button");
         _loginButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("login-button");
         _loginCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("login-close-button");
         _loginSubmitButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("login-submit-button");
@@ -695,6 +713,10 @@ public class LobbyUI : MonoBehaviour
         {
             _offlineButton.clicked += HandleOfflineButtonClicked;
         }
+        if (_shootingButton != null)
+        {
+            _shootingButton.clicked += HandleShootingButtonClicked;
+        }
         if (_shopSkinsMenuButton != null)
         {
             _shopSkinsMenuButton.clicked += HandleShopSkinsMenuButtonClicked;
@@ -815,6 +837,10 @@ public class LobbyUI : MonoBehaviour
         if (_offlineButton != null)
         {
             _offlineButton.clicked -= HandleOfflineButtonClicked;
+        }
+        if (_shootingButton != null)
+        {
+            _shootingButton.clicked -= HandleShootingButtonClicked;
         }
         if (_shopSkinsMenuButton != null)
         {
@@ -1043,6 +1069,11 @@ public class LobbyUI : MonoBehaviour
     private void HandleOfflineButtonClicked()
     {
         OnOfflineClicked();
+    }
+
+    private void HandleShootingButtonClicked()
+    {
+        StartShootingMode();
     }
 
     private async void HandleSpectateButtonClicked()
@@ -1438,6 +1469,7 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_startButton, "Pick a map and join a game");
         SetMenuButtonDescription(_shopButton, "Browse the shop");
         SetMenuButtonDescription(_offlineButton, "Start a local offline match with bots");
+        SetMenuButtonDescription(_shootingButton, "Start the same local mode with AK47 movement animations");
         SetMenuButtonDescription(_loginButton, "Login and save your cash");
         SetMenuButtonDescription(_shopDailyStoreButton, "Browse the daily store");
         SetMenuButtonDescription(_shopEquipmentButton, "Check equipment");
@@ -1475,6 +1507,7 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_graphicsMediumButton);
         RegisterHoverButton(_shopButton);
         RegisterHoverButton(_offlineButton);
+        RegisterHoverButton(_shootingButton);
         RegisterHoverButton(_shopDailyStoreButton);
         RegisterHoverButton(_shopEquipmentButton);
         RegisterHoverButton(_shopSkinsMenuButton);
@@ -1573,6 +1606,7 @@ public class LobbyUI : MonoBehaviour
 
         if (string.Equals(button.name, "shop-button", StringComparison.Ordinal)
             || string.Equals(button.name, "offline-button", StringComparison.Ordinal)
+            || string.Equals(button.name, "shooting-button", StringComparison.Ordinal)
             || string.Equals(button.name, "inventory-button", StringComparison.Ordinal))
         {
             return FeaturedSideHoverButtonScale;
@@ -1595,6 +1629,7 @@ public class LobbyUI : MonoBehaviour
 
         if (string.Equals(button.name, "shop-button", StringComparison.Ordinal)
             || string.Equals(button.name, "offline-button", StringComparison.Ordinal)
+            || string.Equals(button.name, "shooting-button", StringComparison.Ordinal)
             || string.Equals(button.name, "inventory-button", StringComparison.Ordinal))
         {
             return new Vector3(1.18f, 1.18f, 1f);
@@ -1681,6 +1716,12 @@ public class LobbyUI : MonoBehaviour
         {
             _offlineButton.style.backgroundImage = new StyleBackground(s_offlineCardTexture);
             _offlineButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        }
+
+        if (_shootingButton != null && s_offlineCardTexture != null)
+        {
+            _shootingButton.style.backgroundImage = new StyleBackground(s_offlineCardTexture);
+            _shootingButton.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
         }
 
         if (_inventoryButton != null && s_inventoryCardTexture != null)
@@ -1771,6 +1812,7 @@ public class LobbyUI : MonoBehaviour
             "start-button" => new Color(239f / 255f, 186f / 255f, 101f / 255f, 0.84f),
             "shop-button" => new Color(84f / 255f, 223f / 255f, 83f / 255f, 0.72f),
             "offline-button" => new Color(104f / 255f, 182f / 255f, 1f, 0.72f),
+            "shooting-button" => new Color(1f, 118f / 255f, 72f / 255f, 0.72f),
             "inventory-button" => new Color(240f / 255f, 101f / 255f, 111f / 255f, 0.72f),
             "spectate-button" => new Color(154f / 255f, 124f / 255f, 1f, 0.5f),
             "settings-button" => new Color(1f, 1f, 1f, 0.18f),
@@ -1787,6 +1829,7 @@ public class LobbyUI : MonoBehaviour
             "start-button" => new Color(0f, 0f, 0f, 0.08f),
             "shop-button" => new Color(16f / 255f, 24f / 255f, 20f / 255f, 0.9f),
             "offline-button" => new Color(14f / 255f, 20f / 255f, 31f / 255f, 0.92f),
+            "shooting-button" => new Color(34f / 255f, 18f / 255f, 15f / 255f, 0.92f),
             "inventory-button" => new Color(26f / 255f, 14f / 255f, 16f / 255f, 0.9f),
             "spectate-button" => new Color(18f / 255f, 18f / 255f, 20f / 255f, 0.88f),
             "settings-button" => new Color(8f / 255f, 12f / 255f, 18f / 255f, 0.9f),
@@ -1803,6 +1846,7 @@ public class LobbyUI : MonoBehaviour
             "start-button" => new Color(0f, 0f, 0f, 0.02f),
             "shop-button" => new Color(20f / 255f, 30f / 255f, 24f / 255f, 0.96f),
             "offline-button" => new Color(18f / 255f, 28f / 255f, 42f / 255f, 0.96f),
+            "shooting-button" => new Color(44f / 255f, 24f / 255f, 18f / 255f, 0.96f),
             "inventory-button" => new Color(31f / 255f, 18f / 255f, 21f / 255f, 0.96f),
             "spectate-button" => new Color(24f / 255f, 22f / 255f, 30f / 255f, 0.95f),
             "settings-button" => new Color(16f / 255f, 18f / 255f, 24f / 255f, 0.95f),

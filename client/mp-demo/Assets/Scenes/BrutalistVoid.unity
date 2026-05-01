@@ -71216,14 +71216,14 @@ MonoBehaviour:
       m_SwapUV: 0
       m_Fill: 1
       m_Scale: {x: 1, y: 1}
-      m_Offset: {x: 0, y: 0}
+      m_Offset: {x: -27.76294, y: 43.590553}
       m_Rotation: 0
-      m_Anchor: 0
+      m_Anchor: 9
     m_Material: {fileID: 2100000, guid: c22777d6e868e4f2fb421913386b154e, type: 2}
     m_SubmeshIndex: 0
     m_ManualUV: 0
-    elementGroup: 0
-    m_TextureGroup: 39
+    elementGroup: -1
+    m_TextureGroup: -1
   - m_Indexes: c4030000c5030000c7030000c5030000c6030000c7030000
     m_SmoothingGroup: 0
     m_Uv:
@@ -75125,7 +75125,7 @@ MonoBehaviour:
   m_PreserveMeshAssetOnDestroy: 0
   assetGuid: 
   m_Mesh: {fileID: 675302009}
-  m_VersionIndex: 21346
+  m_VersionIndex: 21402
   m_IsSelectable: 1
   m_SelectedFaces: 
   m_SelectedEdges: []
@@ -135992,6 +135992,63 @@ Transform:
   m_Children: []
   m_Father: {fileID: 794391640}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1001 &4799511277117775204
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -1.5071
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 23.72779
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 98.9619
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 0.7071068
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: -0.7071068
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: -90
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3019008969410093966, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
+      propertyPath: m_Name
+      value: MuzzleFlash
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -136011,3 +136068,4 @@ SceneRoots:
   - {fileID: 1971912846}
   - {fileID: 1309555392}
   - {fileID: 929531113}
+  - {fileID: 4799511277117775204}

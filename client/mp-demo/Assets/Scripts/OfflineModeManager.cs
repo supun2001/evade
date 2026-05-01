@@ -5,6 +5,12 @@ using UnityEngine.AI;
 
 public class OfflineModeManager : MonoBehaviour
 {
+    public enum OfflinePresentationMode
+    {
+        Runner,
+        Shooting
+    }
+
     private const float InteractionDistance = 6f;
     private const float NextbotStartGraceSeconds = 3.5f;
     private const int PlayerMaxDownsBeforeElimination = 3;
@@ -73,6 +79,7 @@ public class OfflineModeManager : MonoBehaviour
     public bool IsOfflineModeActive { get; private set; }
     public bool IsOfflineRoundActive => IsOfflineModeActive && string.Equals(_currentPhase, RoundPhase, System.StringComparison.OrdinalIgnoreCase);
     public bool CanOfflineNextbotsDamagePlayers => IsOfflineRoundActive && Time.unscaledTime >= _nextbotDamageEnabledAtUnscaledTime;
+    public OfflinePresentationMode CurrentPresentationMode { get; private set; } = OfflinePresentationMode.Runner;
 
     private void Awake()
     {
@@ -100,7 +107,7 @@ public class OfflineModeManager : MonoBehaviour
         }
     }
 
-    public bool StartOfflineMode(string localDisplayName, int localSkinIndex)
+    public bool StartOfflineMode(string localDisplayName, int localSkinIndex, OfflinePresentationMode presentationMode = OfflinePresentationMode.Runner)
     {
         NetworkManager networkManager = NetworkManager.Instance;
         if (networkManager == null || networkManager.PlayerPrefab == null)
@@ -113,6 +120,7 @@ public class OfflineModeManager : MonoBehaviour
 
         _localDisplayName = string.IsNullOrWhiteSpace(localDisplayName) ? "Offline Player" : localDisplayName;
         _localSkinIndex = localSkinIndex;
+        CurrentPresentationMode = presentationMode;
         IsOfflineModeActive = true;
 
         RespawnAllPlayers();
@@ -161,6 +169,12 @@ public class OfflineModeManager : MonoBehaviour
                 spawnIndex: spawnIndex,
                 isLocalPlayer: false,
                 botIndex: botIndex);
+        }
+
+        if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
+        {
+            ResetOfflineNextbots(active: false);
+            return;
         }
 
         EnsureOfflineNextbots();
@@ -250,6 +264,7 @@ public class OfflineModeManager : MonoBehaviour
         _nextbotSpawnPositions.Clear();
         _patrolPositions.Clear();
         IsOfflineModeActive = false;
+        CurrentPresentationMode = OfflinePresentationMode.Runner;
         _currentPhase = WaitingPhase;
         _roundIndex = 0;
         _phaseEndsAtUnscaledTime = 0f;
@@ -273,6 +288,11 @@ public class OfflineModeManager : MonoBehaviour
 
     public bool TryRevivePlayer(string reviverSessionId, string targetSessionId)
     {
+        if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
+        {
+            return false;
+        }
+
         if (!TryGetPlayerController(reviverSessionId, out PlayerController reviver)
             || !TryGetPlayerController(targetSessionId, out PlayerController target)
             || reviver == null
@@ -315,6 +335,11 @@ public class OfflineModeManager : MonoBehaviour
 
     public bool TryToggleCarryPlayer(string carrierSessionId, string targetSessionId)
     {
+        if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
+        {
+            return false;
+        }
+
         if (!TryGetPlayerController(carrierSessionId, out PlayerController carrier)
             || !TryGetPlayerController(targetSessionId, out PlayerController target)
             || carrier == null
@@ -383,6 +408,53 @@ public class OfflineModeManager : MonoBehaviour
         }
 
         player.ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+    }
+
+    public bool TryApplyCombatDamage(string targetSessionId, float damage, string attackerSessionId = "")
+    {
+        if (!IsOfflineRoundActive
+            || CurrentPresentationMode != OfflinePresentationMode.Shooting
+            || string.IsNullOrWhiteSpace(targetSessionId)
+            || damage <= 0f)
+        {
+            return false;
+        }
+
+        if (!_offlinePlayerStates.TryGetValue(targetSessionId, out OfflinePlayerRoundState state)
+            || state == null
+            || state.IsEliminated)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(attackerSessionId)
+            && string.Equals(attackerSessionId, targetSessionId, System.StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        float nextHealth = Mathf.Max(0f, state.CurrentHealth - damage);
+        state.CurrentHealth = nextHealth;
+        state.Controller?.SetCombatHealth(nextHealth);
+
+        if (nextHealth > 0f)
+        {
+            return true;
+        }
+
+        if (state.CurrentLifeStartUnscaledTime >= 0f)
+        {
+            int runTimeMs = Mathf.Max(0, Mathf.RoundToInt((Time.unscaledTime - state.CurrentLifeStartUnscaledTime) * 1000f));
+            state.BestTimeMs = Mathf.Max(state.BestTimeMs, runTimeMs);
+        }
+
+        state.CurrentLifeStartUnscaledTime = -1f;
+        state.WasDowned = false;
+        state.IsEliminated = true;
+        state.Controller?.ApplyNetworkEliminated();
+        ReleaseRescueAssignment(targetSessionId);
+        ReleaseRescueAssignmentsForTarget(targetSessionId);
+        return true;
     }
 
     public bool TryGetNearestDownedPlayer(
@@ -1033,15 +1105,19 @@ public class OfflineModeManager : MonoBehaviour
         _currentPhase = RoundPhase;
         _roundIndex += 1;
         _phaseEndsAtUnscaledTime = Time.unscaledTime + GetRoundDurationSeconds();
-        _nextbotDamageEnabledAtUnscaledTime = Time.unscaledTime + NextbotStartGraceSeconds;
+        _nextbotDamageEnabledAtUnscaledTime = CurrentPresentationMode == OfflinePresentationMode.Shooting
+            ? float.PositiveInfinity
+            : Time.unscaledTime + NextbotStartGraceSeconds;
 
         ResetOfflinePlayersForPhase(roundStarted: true);
-        ResetOfflineNextbots(active: true);
+        ResetOfflineNextbots(active: CurrentPresentationMode != OfflinePresentationMode.Shooting);
         PublishRoundPhase(RoundPhase, _roundIndex);
         NetworkManager.Instance?.PublishSimulatedRoundAnnouncement(new RoundAnnouncementMessageData
         {
             title = "ROUND STARTED",
-            subtitle = "SURVIVE FOR 3 MINUTES",
+            subtitle = CurrentPresentationMode == OfflinePresentationMode.Shooting
+                ? "ELIMINATE THE OTHER RUNNERS"
+                : "SURVIVE FOR 3 MINUTES",
             durationSeconds = 3f,
         });
     }
@@ -1251,6 +1327,7 @@ public class OfflineModeManager : MonoBehaviour
 
             state.WasDowned = false;
             state.IsEliminated = false;
+            state.CurrentHealth = controller != null ? controller.MaxHealth : 100f;
             state.CurrentLifeStartUnscaledTime = roundStarted ? Time.unscaledTime : -1f;
             if (roundStarted)
             {
@@ -1308,6 +1385,7 @@ public class OfflineModeManager : MonoBehaviour
         state.PlayerState.jumpBoostMultiplier = 1f;
         state.PlayerState.jumpBoostTimeRemaining = 0f;
         state.PlayerState.isSpectator = false;
+        state.Controller?.SetCombatHealth(state.CurrentHealth > 0f ? state.CurrentHealth : state.Controller.MaxHealth);
     }
 
     private void ResetOfflineNextbots(bool active)
@@ -1333,6 +1411,11 @@ public class OfflineModeManager : MonoBehaviour
 
     private void PollRoundStats()
     {
+        if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
+        {
+            return;
+        }
+
         foreach (KeyValuePair<string, OfflinePlayerRoundState> pair in _offlinePlayerStates)
         {
             OfflinePlayerRoundState state = pair.Value;
@@ -1628,6 +1711,12 @@ public class OfflineModeManager : MonoBehaviour
 
     private void EnsureOfflineNextbots()
     {
+        if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
+        {
+            ResetOfflineNextbots(active: false);
+            return;
+        }
+
         NextbotSpawner spawner = FindFirstObjectByType<NextbotSpawner>();
         if (spawner == null)
         {
@@ -1809,6 +1898,14 @@ public class OfflineModeManager : MonoBehaviour
         if (controller != null)
         {
             controller.SetSimulationControlled(!isLocalPlayer);
+            controller.SetCombatModeActive(CurrentPresentationMode == OfflinePresentationMode.Shooting);
+            controller.SetCombatHealth(controller.MaxHealth);
+        }
+
+        PlayerAnimation playerAnimation = playerObject.GetComponent<PlayerAnimation>();
+        if (playerAnimation != null)
+        {
+            playerAnimation.SetShootingModeActive(CurrentPresentationMode == OfflinePresentationMode.Shooting);
         }
 
         Player simulatedState = CreateSimulatedPlayerState(
@@ -1829,7 +1926,7 @@ public class OfflineModeManager : MonoBehaviour
             PlayerObject = playerObject,
             Controller = controller,
             LocomotionInput = locomotionInput,
-            Animation = playerObject.GetComponent<PlayerAnimation>(),
+            Animation = playerAnimation,
             PlayerState = simulatedState,
         };
 
@@ -1990,6 +2087,8 @@ public class OfflineModeManager : MonoBehaviour
         state.CurrentLifeStartUnscaledTime = -1f;
         state.WasDowned = false;
         state.IsEliminated = true;
+        state.CurrentHealth = 0f;
+        state.Controller?.SetCombatHealth(0f);
         state.Controller?.ApplyNetworkEliminated();
         ReleaseRescueAssignment(sessionId);
         ReleaseRescueAssignmentsForTarget(sessionId);
@@ -2041,6 +2140,7 @@ public class OfflineModeManager : MonoBehaviour
         public int BestTimeMs;
         public int DownedCount;
         public int RevivesDone;
+        public float CurrentHealth;
         public float CurrentLifeStartUnscaledTime = -1f;
         public bool WasDowned;
         public bool IsEliminated;

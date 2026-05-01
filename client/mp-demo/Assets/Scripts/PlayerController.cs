@@ -229,6 +229,25 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private AudioClip _playerGotHitClip;
     [SerializeField, Range(0f, 1f)] private float _playerGotHitVolume = 1f;
 
+    [Header("Shooting Mode")]
+    [SerializeField, Min(1f)] private float _maxHealth = 100f;
+    [SerializeField, Min(1f)] private float _ak47Damage = 25f;
+    [SerializeField, Min(0.01f)] private float _ak47FireInterval = 0.12f;
+    [SerializeField, Min(1f)] private float _ak47Range = 220f;
+    [SerializeField] private LayerMask _ak47HitLayers = Physics.DefaultRaycastLayers;
+    [SerializeField] private string _gunshotResourceFolder = "SFX/Gunshots";
+    [SerializeField, Range(0f, 1f)] private float _gunshotVolume = 0.9f;
+    [SerializeField] private string _bulletVfxResourcePath = "VFX/Bullet";
+    [SerializeField] private string _ak47AttachPointName = "AK47 Attach point";
+    [SerializeField] private Vector3 _bulletParticleLocalPosition = Vector3.zero;
+    [SerializeField] private Vector3 _bulletParticleLocalEuler = Vector3.zero;
+    [SerializeField, Min(0f)] private float _bulletParticleMuzzleForwardOffset = 0.03f;
+    [SerializeField] private bool _forceStraightBulletParticle = true;
+    [SerializeField] private string _muzzleFlashVfxResourcePath = "VFX/MuzzleFlash";
+    [SerializeField] private Vector3 _muzzleFlashLocalPosition = Vector3.zero;
+    [SerializeField] private Vector3 _muzzleFlashLocalEuler = Vector3.zero;
+    [SerializeField, Min(0f)] private float _muzzleFlashForwardOffset = 0.015f;
+
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
     private Transform _cameraTransform;
@@ -241,7 +260,11 @@ public class PlayerController : MonoBehaviour
     private UIDocument _playerHudDocument;
     private Label _speedLabel;
     private Label _animationDebugLabel;
+    private Label _localHealthLabelElement;
     private VisualElement _crosshairDotElement;
+    private VisualElement _localHealthContainerElement;
+    private VisualElement _localHealthFillElement;
+    private VisualElement _enemyHealthOverlayElement;
     private VisualElement _pickupFadeOverlayElement;
     private VisualElement _nextbotWarningIndicatorElement;
     private VisualElement _nextbotWarningArrowElement;
@@ -266,6 +289,7 @@ public class PlayerController : MonoBehaviour
     private AudioSource _footstepAudioSource;
     private AudioSource _pickupAudioSource;
     private AudioSource _hurtAudioSource;
+    private AudioSource _gunshotAudioSource;
     private AudioListener _gameplayAudioListener;
     private AudioListener _spectateAudioListener;
     private Coroutine _pickupAudioStopCoroutine;
@@ -313,6 +337,17 @@ public class PlayerController : MonoBehaviour
     private float _injuredFacingYaw = 180f;
     private Vector3 _recentNextbotHitSource = Vector3.zero;
     private float _recentNextbotHitSourceExpiresAt = float.NegativeInfinity;
+    private float _currentHealth;
+    private bool _combatModeActive;
+    private bool _isEliminatedState;
+    private float _nextAllowedShotTime;
+    private AudioClip[] _gunshotClips = Array.Empty<AudioClip>();
+    private int _lastGunshotClipIndex = -1;
+    private readonly System.Collections.Generic.Dictionary<string, EnemyHealthBarView> _enemyHealthBarViews = new();
+    private GameObject _bulletVfxPrefab;
+    private Quaternion _bulletParticlePrefabLocalRotation = Quaternion.identity;
+    private GameObject _muzzleFlashVfxPrefab;
+    private Quaternion _muzzleFlashPrefabLocalRotation = Quaternion.identity;
 
     private CameraViewMode _currentViewMode;
     private CameraViewMode _preferredViewMode;
@@ -391,6 +426,13 @@ public class PlayerController : MonoBehaviour
     private const float FOOTSTEP_RUN_INTERVAL = 0.28f;
     private const float FOOTSTEP_MAX_UPWARD_SPEED = 0.15f;
     private const float FOOTSTEP_ANIMATION_EVENT_COOLDOWN = 0.08f;
+
+    private sealed class EnemyHealthBarView
+    {
+        public VisualElement Root;
+        public VisualElement Fill;
+        public Label Label;
+    }
 
     private const float JUMP_VELOCITY_MULTIPLIER = 3f;
     private float NextbotHitImpactForce => Mathf.Lerp(_nextbotHitShoveForce * 1.15f, _nextbotHitShoveForce * 1.75f, _nextbotHitTumble);
@@ -493,6 +535,16 @@ public class PlayerController : MonoBehaviour
         _hurtAudioSource.spatialBlend = 0f;
         _hurtAudioSource.dopplerLevel = 0f;
 
+        _gunshotAudioSource = gameObject.AddComponent<AudioSource>();
+        _gunshotAudioSource.playOnAwake = false;
+        _gunshotAudioSource.loop = false;
+        _gunshotAudioSource.spatialBlend = 0f;
+        _gunshotAudioSource.dopplerLevel = 0f;
+        _gunshotAudioSource.volume = _gunshotVolume;
+
+        _gunshotClips = Resources.LoadAll<AudioClip>(_gunshotResourceFolder) ?? Array.Empty<AudioClip>();
+        _currentHealth = _maxHealth;
+
         SetLocalCharacterAudio(true);
     }
     
@@ -542,6 +594,7 @@ public class PlayerController : MonoBehaviour
             UpdateSpeedHud();
             UpdateAnimationDebugHud();
             UpdateCrosshairVisibility();
+            UpdateCombatHud();
             UpdateNextbotWarningIndicator();
             UpdateInjuredInteractionPrompt();
             HandleInjuredInteractionInput();
@@ -556,6 +609,11 @@ public class PlayerController : MonoBehaviour
         if (!_isSimulationControlled)
         {
             UpdateZoom();
+        }
+
+        if (!_isSimulationControlled)
+        {
+            HandleCombatInput();
         }
 
         RefreshGroundProbeState();
@@ -693,6 +751,12 @@ public class PlayerController : MonoBehaviour
     private void HandleInjuredInteractionInput()
     {
         if (_isSimulationControlled)
+        {
+            ResetReviveHoldState();
+            return;
+        }
+
+        if (_combatModeActive)
         {
             ResetReviveHoldState();
             return;
@@ -1284,6 +1348,10 @@ public class PlayerController : MonoBehaviour
 
         _speedLabel = root.Q<Label>("speed-label");
         _animationDebugLabel = root.Q<Label>("animation-debug-label");
+        _localHealthContainerElement = root.Q<VisualElement>("local-health-container");
+        _localHealthLabelElement = root.Q<Label>("local-health-label");
+        _localHealthFillElement = root.Q<VisualElement>("local-health-fill");
+        _enemyHealthOverlayElement = root.Q<VisualElement>("enemy-health-overlay");
         _crosshairDotElement = root.Q<VisualElement>("crosshair-dot");
         _nextbotWarningIndicatorElement = root.Q<VisualElement>("nextbot-warning-indicator");
         _nextbotWarningArrowElement = root.Q<VisualElement>("nextbot-warning-arrow");
@@ -1482,6 +1550,12 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        if (_combatModeActive)
+        {
+            SetInjuredInteractionPromptVisible(false);
+            return;
+        }
+
         if (_isSpectating || _isPauseMenuOpen || IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried)
         {
             SetInjuredInteractionPromptVisible(false);
@@ -1510,6 +1584,213 @@ public class PlayerController : MonoBehaviour
 
         bool shouldShowCrosshair = !_isSpectating && !_isPauseMenuOpen && !IsInjuredOrHitReacting();
         _crosshairDotElement.style.display = shouldShowCrosshair ? DisplayStyle.Flex : DisplayStyle.None;
+    }
+
+    private void UpdateCombatHud()
+    {
+        if (_localHealthContainerElement == null || _enemyHealthOverlayElement == null)
+        {
+            CacheHudElements();
+            if (_localHealthContainerElement == null || _enemyHealthOverlayElement == null)
+            {
+                return;
+            }
+        }
+
+        bool showCombatHud = _combatModeActive && !_isSpectating;
+        _localHealthContainerElement.style.display = showCombatHud ? DisplayStyle.Flex : DisplayStyle.None;
+        _enemyHealthOverlayElement.style.display = showCombatHud ? DisplayStyle.Flex : DisplayStyle.None;
+
+        if (!showCombatHud)
+        {
+            HideAllEnemyHealthBars();
+            return;
+        }
+
+        float maxHealth = Mathf.Max(1f, _maxHealth);
+        float normalizedHealth = Mathf.Clamp01(_currentHealth / maxHealth);
+        if (_localHealthLabelElement != null)
+        {
+            _localHealthLabelElement.text = $"{Mathf.CeilToInt(_currentHealth)} / {Mathf.CeilToInt(maxHealth)}";
+        }
+
+        if (_localHealthFillElement != null)
+        {
+            _localHealthFillElement.style.width = Length.Percent(normalizedHealth * 100f);
+            _localHealthFillElement.style.backgroundColor = GetHealthColor(normalizedHealth);
+        }
+
+        UpdateEnemyHealthBars();
+    }
+
+    private void UpdateEnemyHealthBars()
+    {
+        if (_enemyHealthOverlayElement == null || _gameplayCamera == null)
+        {
+            return;
+        }
+
+        OfflinePlayerIdentity[] identities = FindObjectsByType<OfflinePlayerIdentity>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        System.Collections.Generic.HashSet<string> activeSessionIds = new();
+
+        for (int i = 0; i < identities.Length; i++)
+        {
+            OfflinePlayerIdentity identity = identities[i];
+            if (identity == null
+                || identity.IsLocalPlayer
+                || string.IsNullOrWhiteSpace(identity.SessionId))
+            {
+                continue;
+            }
+
+            PlayerController targetController = identity.GetComponent<PlayerController>();
+            if (targetController == null
+                || !targetController.IsCombatModeActive
+                || targetController.IsEliminatedStateActive)
+            {
+                continue;
+            }
+
+            Vector3 worldAnchor = identity.transform.position + Vector3.up * 2.75f;
+            Vector3 screenPoint = _gameplayCamera.WorldToScreenPoint(worldAnchor);
+            if (screenPoint.z <= 0f)
+            {
+                continue;
+            }
+
+            float rootWidth = _enemyHealthOverlayElement.resolvedStyle.width;
+            float rootHeight = _enemyHealthOverlayElement.resolvedStyle.height;
+            if (rootWidth <= 1f || rootHeight <= 1f)
+            {
+                return;
+            }
+
+            float uiX = screenPoint.x;
+            float uiY = rootHeight - screenPoint.y;
+            if (uiX < -140f || uiX > rootWidth + 140f || uiY < -40f || uiY > rootHeight + 40f)
+            {
+                continue;
+            }
+
+            activeSessionIds.Add(identity.SessionId);
+            EnemyHealthBarView view = GetOrCreateEnemyHealthBar(identity.SessionId);
+            if (view == null)
+            {
+                continue;
+            }
+
+            float normalizedHealth = Mathf.Clamp01(targetController.CurrentHealth / Mathf.Max(1f, targetController.MaxHealth));
+            view.Root.style.display = DisplayStyle.Flex;
+            view.Root.style.left = uiX;
+            view.Root.style.top = uiY;
+            view.Label.text = $"{identity.DisplayName}  {Mathf.CeilToInt(targetController.CurrentHealth)}";
+            view.Fill.style.width = Length.Percent(normalizedHealth * 100f);
+            view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
+        }
+
+        foreach (System.Collections.Generic.KeyValuePair<string, EnemyHealthBarView> pair in _enemyHealthBarViews)
+        {
+            if (!activeSessionIds.Contains(pair.Key) && pair.Value?.Root != null)
+            {
+                pair.Value.Root.style.display = DisplayStyle.None;
+            }
+        }
+    }
+
+    private EnemyHealthBarView GetOrCreateEnemyHealthBar(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || _enemyHealthOverlayElement == null)
+        {
+            return null;
+        }
+
+        if (_enemyHealthBarViews.TryGetValue(sessionId, out EnemyHealthBarView existingView) && existingView?.Root != null)
+        {
+            return existingView;
+        }
+
+        VisualElement root = new VisualElement
+        {
+            pickingMode = PickingMode.Ignore
+        };
+        root.style.position = Position.Absolute;
+        root.style.width = 148f;
+        root.style.height = 32f;
+        root.style.translate = new Translate(new Length(-50f, LengthUnit.Percent), new Length(0f, LengthUnit.Pixel));
+        root.style.paddingLeft = 8f;
+        root.style.paddingRight = 8f;
+        root.style.paddingTop = 6f;
+        root.style.paddingBottom = 6f;
+        root.style.backgroundColor = new Color(0.05f, 0.06f, 0.08f, 0.76f);
+        root.style.borderTopLeftRadius = 8f;
+        root.style.borderTopRightRadius = 8f;
+        root.style.borderBottomLeftRadius = 8f;
+        root.style.borderBottomRightRadius = 8f;
+        root.style.display = DisplayStyle.None;
+
+        Label label = new Label();
+        label.style.color = Color.white;
+        label.style.fontSize = 11f;
+        label.style.unityFontStyleAndWeight = FontStyle.Bold;
+        label.style.unityTextAlign = TextAnchor.MiddleCenter;
+        label.style.marginBottom = 4f;
+        root.Add(label);
+
+        VisualElement track = new VisualElement();
+        track.style.height = 8f;
+        track.style.backgroundColor = new Color(1f, 1f, 1f, 0.12f);
+        track.style.borderTopLeftRadius = 999f;
+        track.style.borderTopRightRadius = 999f;
+        track.style.borderBottomLeftRadius = 999f;
+        track.style.borderBottomRightRadius = 999f;
+
+        VisualElement fill = new VisualElement();
+        fill.style.height = Length.Percent(100f);
+        fill.style.width = Length.Percent(100f);
+        fill.style.backgroundColor = new Color(0.37f, 0.87f, 0.43f, 1f);
+        fill.style.borderTopLeftRadius = 999f;
+        fill.style.borderTopRightRadius = 999f;
+        fill.style.borderBottomLeftRadius = 999f;
+        fill.style.borderBottomRightRadius = 999f;
+        track.Add(fill);
+        root.Add(track);
+
+        _enemyHealthOverlayElement.Add(root);
+
+        EnemyHealthBarView view = new EnemyHealthBarView
+        {
+            Root = root,
+            Fill = fill,
+            Label = label,
+        };
+        _enemyHealthBarViews[sessionId] = view;
+        return view;
+    }
+
+    private void HideAllEnemyHealthBars()
+    {
+        foreach (System.Collections.Generic.KeyValuePair<string, EnemyHealthBarView> pair in _enemyHealthBarViews)
+        {
+            if (pair.Value?.Root != null)
+            {
+                pair.Value.Root.style.display = DisplayStyle.None;
+            }
+        }
+    }
+
+    private static Color GetHealthColor(float normalizedHealth)
+    {
+        if (normalizedHealth > 0.6f)
+        {
+            return new Color(94f / 255f, 222f / 255f, 109f / 255f, 1f);
+        }
+
+        if (normalizedHealth > 0.3f)
+        {
+            return new Color(242f / 255f, 196f / 255f, 82f / 255f, 1f);
+        }
+
+        return new Color(239f / 255f, 84f / 255f, 84f / 255f, 1f);
     }
 
     private void UpdateNextbotWarningIndicator()
@@ -1597,6 +1878,311 @@ public class PlayerController : MonoBehaviour
         {
             _nextbotWarningSkullElement.style.display = DisplayStyle.None;
         }
+    }
+
+    private void HandleCombatInput()
+    {
+        if (!_combatModeActive
+            || _isPauseMenuOpen
+            || _isSpectating
+            || _isEliminatedState
+            || IsInjuredOrHitReacting()
+            || _isBeingCarried
+            || _isCarryingPlayer
+            || Mouse.current == null)
+        {
+            return;
+        }
+
+        if (Time.time < _nextAllowedShotTime || !Mouse.current.leftButton.isPressed)
+        {
+            return;
+        }
+
+        if (EventSystem.current != null
+            && EventSystem.current.IsPointerOverGameObject()
+            && UnityEngine.Cursor.lockState == CursorLockMode.None)
+        {
+            return;
+        }
+
+        FireCombatShot();
+        _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
+    }
+
+    private void FireCombatShot()
+    {
+        PlayGunshotSound();
+
+        if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            || !offlineModeManager.IsOfflineModeActive
+            || offlineModeManager.CurrentPresentationMode != OfflineModeManager.OfflinePresentationMode.Shooting)
+        {
+            return;
+        }
+
+        Camera sourceCamera = _gameplayCamera != null ? _gameplayCamera : _playerCamera;
+        if (sourceCamera == null)
+        {
+            return;
+        }
+
+        Ray shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        PlayMuzzleFlashEffect(shotRay.direction);
+        PlayBulletParticleEffect(shotRay.direction);
+        RaycastHit[] hits = Physics.RaycastAll(
+            shotRay,
+            Mathf.Max(1f, _ak47Range),
+            _ak47HitLayers,
+            QueryTriggerInteraction.Ignore);
+
+        if (hits == null || hits.Length == 0)
+        {
+            return;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        string attackerSessionId = GetComponent<OfflinePlayerIdentity>()?.SessionId ?? string.Empty;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider hitCollider = hits[i].collider;
+            if (hitCollider == null)
+            {
+                continue;
+            }
+
+            PlayerController hitController = hitCollider.GetComponentInParent<PlayerController>();
+            if (hitController == null || hitController == this || hitController.IsEliminatedStateActive)
+            {
+                continue;
+            }
+
+            OfflinePlayerIdentity targetIdentity = hitController.GetComponent<OfflinePlayerIdentity>();
+            if (targetIdentity == null
+                || targetIdentity.IsLocalPlayer
+                || string.IsNullOrWhiteSpace(targetIdentity.SessionId)
+                || string.Equals(targetIdentity.SessionId, attackerSessionId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            offlineModeManager.TryApplyCombatDamage(targetIdentity.SessionId, _ak47Damage, attackerSessionId);
+            return;
+        }
+    }
+
+    private void PlayGunshotSound()
+    {
+        if (_gunshotAudioSource == null || _gunshotClips == null || _gunshotClips.Length == 0)
+        {
+            return;
+        }
+
+        int clipIndex = UnityEngine.Random.Range(0, _gunshotClips.Length);
+        if (_gunshotClips.Length > 1 && clipIndex == _lastGunshotClipIndex)
+        {
+            clipIndex = (clipIndex + 1) % _gunshotClips.Length;
+        }
+
+        _lastGunshotClipIndex = clipIndex;
+        AudioClip clip = _gunshotClips[clipIndex];
+        if (clip == null)
+        {
+            return;
+        }
+
+        _gunshotAudioSource.PlayOneShot(clip, _gunshotVolume);
+    }
+
+    private void PlayBulletParticleEffect(Vector3 shotDirection)
+    {
+        if (_bulletVfxPrefab == null)
+        {
+            _bulletVfxPrefab = Resources.Load<GameObject>(_bulletVfxResourcePath);
+            if (_bulletVfxPrefab != null)
+            {
+                _bulletParticlePrefabLocalRotation = _bulletVfxPrefab.transform.localRotation;
+            }
+        }
+
+        if (_bulletVfxPrefab == null)
+        {
+            return;
+        }
+
+        Transform attachPoint = FindChildRecursive(transform, _ak47AttachPointName);
+        if (attachPoint == null)
+        {
+            return;
+        }
+
+        Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
+        Vector3 spawnPosition = GetMuzzleWorldPosition(attachPoint, direction, _bulletParticleLocalPosition, _bulletParticleMuzzleForwardOffset);
+        Quaternion spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _bulletParticlePrefabLocalRotation * Quaternion.Euler(_bulletParticleLocalEuler);
+        SpawnOneShotParticleEffect(_bulletVfxPrefab, spawnPosition, spawnRotation, true, direction);
+    }
+
+    private void PlayMuzzleFlashEffect(Vector3 shotDirection)
+    {
+        if (_muzzleFlashVfxPrefab == null)
+        {
+            _muzzleFlashVfxPrefab = Resources.Load<GameObject>(_muzzleFlashVfxResourcePath);
+            if (_muzzleFlashVfxPrefab != null)
+            {
+                _muzzleFlashPrefabLocalRotation = _muzzleFlashVfxPrefab.transform.localRotation;
+            }
+        }
+
+        if (_muzzleFlashVfxPrefab == null)
+        {
+            return;
+        }
+
+        Transform attachPoint = FindChildRecursive(transform, _ak47AttachPointName);
+        if (attachPoint == null)
+        {
+            return;
+        }
+
+        Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
+        Vector3 spawnPosition = GetMuzzleWorldPosition(attachPoint, direction, _muzzleFlashLocalPosition, _muzzleFlashForwardOffset);
+        Quaternion spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _muzzleFlashPrefabLocalRotation * Quaternion.Euler(_muzzleFlashLocalEuler);
+        SpawnOneShotParticleEffect(_muzzleFlashVfxPrefab, spawnPosition, spawnRotation, false, null);
+    }
+
+    private void SpawnOneShotParticleEffect(
+        GameObject prefab,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        bool forceStraight,
+        Vector3? explicitDirection)
+    {
+        if (prefab == null)
+        {
+            return;
+        }
+
+        GameObject particleClone = Instantiate(prefab, worldPosition, worldRotation);
+        particleClone.name = $"{prefab.name}_Shot";
+        particleClone.transform.localScale = Vector3.one;
+
+        ParticleSystem particleSystem = particleClone.GetComponent<ParticleSystem>();
+        if (particleSystem == null)
+        {
+            Destroy(particleClone);
+            return;
+        }
+
+        var main = particleSystem.main;
+        main.loop = false;
+        main.playOnAwake = false;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        if (forceStraight)
+        {
+            var shape = particleSystem.shape;
+            shape.alignToDirection = true;
+            shape.angle = 0f;
+            shape.radius = 0f;
+            shape.radiusThickness = 0f;
+            shape.randomDirectionAmount = 0f;
+            shape.randomPositionAmount = 0f;
+            shape.sphericalDirectionAmount = 0f;
+        }
+
+        particleSystem.Clear(true);
+        particleSystem.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+        if (explicitDirection.HasValue)
+        {
+            Vector3 direction = explicitDirection.Value.sqrMagnitude > 0.0001f
+                ? explicitDirection.Value.normalized
+                : particleClone.transform.forward;
+            ParticleSystem.EmitParams emitParams = new ParticleSystem.EmitParams
+            {
+                position = worldPosition,
+                velocity = direction * GetParticleStartSpeed(main),
+                applyShapeToPosition = false,
+            };
+            particleSystem.Emit(emitParams, 1);
+        }
+        else
+        {
+            particleSystem.Emit(1);
+        }
+
+        float cleanupDelay = main.duration + Mathf.Max(main.startLifetime.constantMax, 0.15f) + 0.25f;
+        Destroy(particleClone, cleanupDelay);
+    }
+
+    private static float GetParticleStartSpeed(ParticleSystem.MainModule mainModule)
+    {
+        float speed = mainModule.startSpeed.constantMax;
+        return speed > 0.01f ? speed : 1f;
+    }
+
+    private Vector3 GetMuzzleWorldPosition(
+        Transform attachPoint,
+        Vector3 shotDirection,
+        Vector3 localOffset,
+        float forwardOffset)
+    {
+        Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : attachPoint.forward;
+        Vector3 muzzleAnchorWorld = attachPoint.TransformPoint(localOffset);
+        Vector3 bestPosition = muzzleAnchorWorld;
+        float bestDistance = Vector3.Dot(bestPosition - attachPoint.position, direction);
+
+        Renderer[] gunRenderers = attachPoint.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < gunRenderers.Length; i++)
+        {
+            Renderer renderer = gunRenderers[i];
+            if (renderer == null || !renderer.enabled)
+            {
+                continue;
+            }
+
+            Bounds bounds = renderer.bounds;
+            Vector3 candidate = bounds.center + Vector3.Scale(
+                bounds.extents,
+                new Vector3(
+                    Mathf.Sign(direction.x),
+                    Mathf.Sign(direction.y),
+                    Mathf.Sign(direction.z)));
+            float candidateDistance = Vector3.Dot(candidate - attachPoint.position, direction);
+            if (candidateDistance > bestDistance)
+            {
+                bestDistance = candidateDistance;
+                bestPosition = candidate;
+            }
+        }
+
+        return bestPosition + direction * Mathf.Max(0f, forwardOffset);
+    }
+
+    private static Transform FindChildRecursive(Transform root, string childName)
+    {
+        if (root == null || string.IsNullOrWhiteSpace(childName))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (string.Equals(child.name, childName, StringComparison.Ordinal))
+            {
+                return child;
+            }
+
+            Transform nestedChild = FindChildRecursive(child, childName);
+            if (nestedChild != null)
+            {
+                return nestedChild;
+            }
+        }
+
+        return null;
     }
 
     private bool TryGetActiveNextbotWarningData(out Vector2 warningDirection, out float nearestDistance)
@@ -1757,6 +2343,13 @@ public class PlayerController : MonoBehaviour
             {
                 return;
             }
+        }
+
+        if (_combatModeActive)
+        {
+            ApplyPromptActionRowStyle(_reviveActionRowElement, _reviveActionFillElement, false, 0f);
+            ApplyPromptActionRowStyle(_carryActionRowElement, _carryActionFillElement, false, 0f);
+            return;
         }
 
         bool promptVisible = _injuredInteractionPromptElement != null
@@ -2321,6 +2914,12 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
+            PlayerController candidateController = candidate.GetComponentInParent<PlayerController>();
+            if (candidateController != null && candidateController.IsEliminatedStateActive)
+            {
+                continue;
+            }
+
             NetworkPlayer candidateNetworkPlayer = candidate.GetComponent<NetworkPlayer>();
             if (candidateNetworkPlayer == null || !candidateNetworkPlayer.TryGetSessionId(out targetSessionId))
             {
@@ -2350,6 +2949,17 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkRevive()
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        _isEliminatedState = false;
+        if (_combatModeActive)
+        {
+            _currentHealth = _maxHealth;
+        }
+
+        if (!_isSimulationControlled && _playerLocomotionInput != null)
+        {
+            _playerLocomotionInput.InputEnabled = true;
+        }
+
         SetDebugInjuredState(false);
         ResetInjuredVisualRootRotation();
         UpdateDownedCollisionShape();
@@ -2360,6 +2970,7 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkInjured()
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        _isEliminatedState = false;
         PlayPlayerGotHitSound();
         SetDebugInjuredState(true);
         _horizontalVelocity = Vector3.zero;
@@ -2379,6 +2990,13 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkEliminated()
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        _isEliminatedState = true;
+        _currentHealth = 0f;
+        if (!_isSimulationControlled && _playerLocomotionInput != null)
+        {
+            _playerLocomotionInput.InputEnabled = false;
+        }
+
         SetDebugInjuredState(true);
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
@@ -2397,6 +3015,8 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkRoundReset(Vector3 worldPosition, float rotationY)
     {
         ApplyNetworkRevive();
+        _currentHealth = _maxHealth;
+        _isEliminatedState = false;
 
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
@@ -4597,6 +5217,33 @@ public class PlayerController : MonoBehaviour
     public bool IsSimulationControlled()
     {
         return _isSimulationControlled;
+    }
+
+    public float MaxHealth => _maxHealth;
+    public float CurrentHealth => _currentHealth;
+    public bool IsCombatModeActive => _combatModeActive;
+    public bool IsEliminatedStateActive => _isEliminatedState;
+
+    public void SetCombatModeActive(bool isActive)
+    {
+        _combatModeActive = isActive;
+        _nextAllowedShotTime = 0f;
+        _currentHealth = _maxHealth;
+        _isEliminatedState = false;
+
+        if (!_isSimulationControlled && _playerLocomotionInput != null)
+        {
+            _playerLocomotionInput.InputEnabled = true;
+        }
+    }
+
+    public void SetCombatHealth(float health)
+    {
+        _currentHealth = Mathf.Clamp(health, 0f, _maxHealth);
+        if (_currentHealth > 0f)
+        {
+            _isEliminatedState = false;
+        }
     }
 
     public void SetSimulationControlled(bool isSimulationControlled)

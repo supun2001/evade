@@ -9,6 +9,16 @@
             <ui:Label name="round-announcement-subtitle-label" text="SURVIVE FOR 3 MINUTES" style="margin-top: 4px; color: rgb(255, 220, 158); font-size: 40px; -unity-font-style: bold; unity-text-align: middle-center;"/>
         </ui:VisualElement>
         <ui:Label name="speed-label" text="Speed 0.0" style="position: absolute; left: 28px; bottom: 24px; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0.45); padding-left: 14px; padding-right: 14px; padding-top: 8px; padding-bottom: 8px; border-top-left-radius: 10px; border-top-right-radius: 10px; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; font-size: 22px; -unity-font-style: bold;"/>
+        <ui:VisualElement name="local-health-container" style="display: none; position: absolute; left: 28px; top: 24px; width: 280px; padding-left: 14px; padding-right: 14px; padding-top: 12px; padding-bottom: 12px; background-color: rgba(8, 10, 14, 0.76); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; border-left-width: 1px; border-right-width: 1px; border-top-width: 1px; border-bottom-width: 1px; border-left-color: rgba(255,255,255,0.08); border-right-color: rgba(255,255,255,0.08); border-top-color: rgba(255,255,255,0.08); border-bottom-color: rgba(255,255,255,0.08);">
+            <ui:VisualElement style="flex-direction: row; justify-content: space-between; align-items: center;">
+                <ui:Label text="HEALTH" style="color: rgba(255,255,255,0.82); font-size: 14px; -unity-font-style: bold; letter-spacing: 1px;"/>
+                <ui:Label name="local-health-label" text="100 / 100" style="color: rgb(255,255,255); font-size: 18px; -unity-font-style: bold; unity-text-align: middle-right;"/>
+            </ui:VisualElement>
+            <ui:VisualElement style="margin-top: 10px; height: 14px; background-color: rgba(255,255,255,0.12); border-top-left-radius: 999px; border-top-right-radius: 999px; border-bottom-left-radius: 999px; border-bottom-right-radius: 999px; overflow: hidden;">
+                <ui:VisualElement name="local-health-fill" style="height: 100%; width: 100%; background-color: rgb(94, 222, 109); border-top-left-radius: 999px; border-top-right-radius: 999px; border-bottom-left-radius: 999px; border-bottom-right-radius: 999px;"/>
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="enemy-health-overlay" picking-mode="Ignore" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0;"/>
         <ui:VisualElement name="crosshair-dot" style="position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; translate: -50% -50%; background-color: rgb(255, 255, 255); border-top-left-radius: 999px; border-top-right-radius: 999px; border-bottom-left-radius: 999px; border-bottom-right-radius: 999px; opacity: 0.95;"/>
         <ui:VisualElement name="nextbot-warning-indicator" picking-mode="Ignore" style="display: none; position: absolute; left: 50%; top: 50%; width: 96px; height: 96px; translate: -50% -50%; opacity: 0.9;">
             <ui:VisualElement name="nextbot-warning-skull" style="display: none;"/>
