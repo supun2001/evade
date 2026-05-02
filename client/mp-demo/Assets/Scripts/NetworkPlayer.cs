@@ -203,6 +203,17 @@ public class NetworkPlayer : MonoBehaviour
                 }
             }
 
+            if (isLocal)
+            {
+                if (playerState != null && controller != null)
+                {
+                    if (playerState.maxCombatHealth > 0f)
+                    {
+                        controller.SetCombatHealth(playerState.combatHealth);
+                    }
+                }
+            }
+
             if (controller != null && controller.IsSpectating())
             {
                 return;

@@ -6036,7 +6036,15 @@ public class PlayerController : MonoBehaviour
 
     public void SetCombatHealth(float health)
     {
+        float oldHealth = _currentHealth;
         _currentHealth = Mathf.Clamp(health, 0f, _maxHealth);
+
+        // If we took damage and are not dead, play feedback
+        if (_currentHealth < oldHealth && _currentHealth > 0f)
+        {
+            PlayPlayerGotHitSound();
+        }
+
         if (_currentHealth > 0f)
         {
             _isEliminatedState = false;
