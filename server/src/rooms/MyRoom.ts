@@ -966,7 +966,7 @@ export class MyRoom extends Room<MyRoomState> {
       if (!nextbot.isActive && controller.respawnAt > 0 && now >= controller.respawnAt) {
         controller.respawnAt = 0;
         this.resetSingleNextbotToSpawnPoint(index);
-        console.log(`[room ${this.roomId}] nextbot ${nextbot.id} respawned`);
+        console.log(`[room ${this.roomId}] nextbot ${controller.id} respawned`);
         continue;
       }
 
@@ -1060,6 +1060,7 @@ export class MyRoom extends Room<MyRoomState> {
         unreachableTargetSessionId: "",
         unreachableTargetUntil: 0,
         pathWaypoints: [],
+        pathTargetX: spawnPoint.x,
         pathTargetZ: spawnPoint.z,
         pathComputedAt: 0,
         respawnAt: 0,
