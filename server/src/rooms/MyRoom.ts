@@ -976,12 +976,12 @@ export class MyRoom extends Room<MyRoomState> {
 
     // Fallback if no IDs were provided by the client
     if (nextbotIdsToUse.length === 0) {
-        nextbotIdsToUse = DEFAULT_NEXTBOT_IDS;
+      nextbotIdsToUse = DEFAULT_NEXTBOT_IDS;
     }
 
     // If it's parkour, try to use obunga, but only if the client actually has it.
     if (mapConfig.preferredSingleNextbotId && nextbotIdsToUse.includes(mapConfig.preferredSingleNextbotId)) {
-        nextbotIdsToUse = [mapConfig.preferredSingleNextbotId];
+      nextbotIdsToUse = [mapConfig.preferredSingleNextbotId];
     }
 
     for (let index = 0; index < nextbotIdsToUse.length; index++) {

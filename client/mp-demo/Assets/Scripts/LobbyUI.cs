@@ -405,6 +405,11 @@ public class LobbyUI : MonoBehaviour
         if (createButton != null) createButton.interactable = false;
         if (joinButton != null) joinButton.interactable = false;
 
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SetMultiplayerShootingPresentationEnabled(false);
+        }
+
         string error = await NetworkManager.Instance.JoinOrCreateGame();
 
         if (string.IsNullOrEmpty(error))
@@ -493,6 +498,10 @@ public class LobbyUI : MonoBehaviour
         }
 
         if (joinButton != null) joinButton.interactable = false;
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SetMultiplayerShootingPresentationEnabled(true);
+        }
         string error = await NetworkManager.Instance.JoinGame(code);
 
         if (string.IsNullOrEmpty(error))
@@ -1084,6 +1093,11 @@ public class LobbyUI : MonoBehaviour
         {
             ActivateSpectateMode();
             return;
+        }
+
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SetMultiplayerShootingPresentationEnabled(false);
         }
 
         string error = await NetworkManager.Instance.JoinOrCreateGame();

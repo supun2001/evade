@@ -44,4 +44,10 @@ public NextbotState() { }
 
 	[Type(9, "number")]
 	public float sampleTimeMs = default(float);
+
+	[Type(10, "number")]
+	public float currentHealth = default(float);
+
+	[Type(11, "number")]
+	public float maxHealth = default(float);
 }

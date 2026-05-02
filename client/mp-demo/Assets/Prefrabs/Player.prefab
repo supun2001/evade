@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 6649532019823269084}
   m_Layer: 0
-  m_Name: MuzzleSpawn
+  m_Name: Shooting spawns
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -26,37 +26,6 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0.00000005960463, y: 0.000000014901158, z: -0.00000011920926, w: 1}
   m_LocalPosition: {x: -15.675805, y: -1.5837543, z: 0.4260339}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1015370086106487661}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1583929895921172313
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 3649089480608302062}
-  m_Layer: 0
-  m_Name: BulletSpawn
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &3649089480608302062
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1583929895921172313}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0.00000005960463, y: 0.000000014901158, z: -0.00000011920926, w: 1}
-  m_LocalPosition: {x: -13.393801, y: -1.4897532, z: 0.39503378}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -89,8 +58,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122106, y: 0.0000000074063085, z: 8.110277e-10, w: 0.9994177}
-  m_LocalPosition: {x: 0, y: 0.023889482, z: -6.05423}
+  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
+  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -464,10 +433,9 @@ MonoBehaviour:
     m_Bits: 755
   _gunshotResourceFolder: SFX/Gunshots
   _gunshotVolume: 0.9
+  _shotEffectSpawnPoint: {fileID: 6649532019823269084}
   _bulletVfxResourcePath: VFX/Bullet
   _ak47AttachPointName: AK47 Attach point
-  _muzzleFlashSpawnPoint: {fileID: 6649532019823269084}
-  _bulletParticleSpawnPoint: {fileID: 3649089480608302062}
   _bulletParticleLocalPosition: {x: 0, y: 0, z: 0}
   _bulletParticleLocalEuler: {x: 0, y: 0, z: 0}
   _bulletParticleMuzzleForwardOffset: 0.03
@@ -549,6 +517,8 @@ MonoBehaviour:
   _wallRunAnimationExitBuffer: 0.1
   _networkAnimationBlendSpeed: 18
   _networkAnimationReleaseSpeed: 32
+  _shootAnimationDuration: 0.09
+  _shootAnimationTransitionDuration: 0.03
 --- !u!114 &7426455774788748035
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -660,7 +630,6 @@ Transform:
   m_Children:
   - {fileID: 2068249378107263168}
   - {fileID: 6649532019823269084}
-  - {fileID: 3649089480608302062}
   m_Father: {fileID: 1654152597135460100}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7200473197087058331

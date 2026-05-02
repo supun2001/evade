@@ -35,6 +35,8 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private float _wallRunAnimationExitBuffer = 0.04f;
     [SerializeField] private float _networkAnimationBlendSpeed = 18f;
     [SerializeField] private float _networkAnimationReleaseSpeed = 32f;
+    [SerializeField, Min(0.01f)] private float _shootAnimationDuration = 0.09f;
+    [SerializeField, Min(0f)] private float _shootAnimationTransitionDuration = 0.03f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private PlayerController _playerController;
@@ -47,11 +49,25 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _verticalSpeedHash = Animator.StringToHash("VerticalSpeed");
     private static readonly int _injuredHash = Animator.StringToHash("IsInjured");
     private static readonly int _crouchHash = Animator.StringToHash("IsCrouching");
+    private static readonly int _shootingModeHash = Animator.StringToHash("IsShootingMode");
+    private static readonly int _idleRunStateHash = Animator.StringToHash("Base Layer.Idle/Run");
+    private static readonly int _shootingIdleRunStateHash = Animator.StringToHash("Base Layer.ShootingIdle/Run");
+    private static readonly int _wallSlideLeftStateHash = Animator.StringToHash("Base Layer.WallSlideLeft");
+    private static readonly int _wallSlideRightStateHash = Animator.StringToHash("Base Layer.WallSlideRight");
+    private static readonly int _fallingStateHash = Animator.StringToHash("Base Layer.Falling");
+    private static readonly int _inAirStateHash = Animator.StringToHash("Base Layer.InAir");
+    private static readonly int _crouchStateHash = Animator.StringToHash("Base Layer.Crouch");
+    private static readonly int _crouchRunningStateHash = Animator.StringToHash("Base Layer.CrouchRunning");
+    private static readonly int _carryingMeStateHash = Animator.StringToHash("Base Layer.CarryingMe");
+    private static readonly int _carryingIdleStateHash = Animator.StringToHash("Base Layer.CarryingIdle");
+    private static readonly int _carryingRunStateHash = Animator.StringToHash("Base Layer.CarryingRun");
+    private static readonly int _ak47ShootStateHash = Animator.StringToHash("Base Layer.ak47_shooting");
     private const string WALL_SLIDE_LEFT_STATE = "Base Layer.WallSlideLeft";
     private const string WALL_SLIDE_RIGHT_STATE = "Base Layer.WallSlideRight";
     private const string FALLING_STATE = "Base Layer.Falling";
     private const string IN_AIR_STATE = "Base Layer.InAir";
     private const string IDLE_RUN_STATE = "Base Layer.Idle/Run";
+    private const string SHOOTING_IDLE_RUN_STATE = "Base Layer.ShootingIdle/Run";
     private const string CROUCH_STATE = "Base Layer.Crouch";
     private const string CROUCH_RUNNING_STATE = "Base Layer.CrouchRunning";
     private const string CARRYING_ME_STATE = "Base Layer.CarryingMe";
@@ -85,7 +101,8 @@ public class PlayerAnimation : MonoBehaviour
     private bool _lastAppliedGrounded = true;
     private bool _lastAppliedJumping;
     private float _lastAppliedVerticalSpeed;
-    private PresentationMode _presentationMode = PresentationMode.Default;
+    private PresentationMode _presentationMode = PresentationMode.Shooting;
+    private float _shootAnimationTimer;
     private readonly System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController> _shootingAnimatorOverrides
         = new System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController>();
 
@@ -188,6 +205,17 @@ public class PlayerAnimation : MonoBehaviour
     public bool IsCrouchingActive => _debugForceCrouching || (_useNetworkAnimationState ? _networkIsCrouching : (_playerController != null && _playerController.IsCrouching()));
     public bool IsCarryingActive => _playerController != null && _playerController.IsCarrying();
     public bool IsBeingCarriedActive => _playerController != null && _playerController.IsBeingCarried();
+    private string ActiveLocomotionState => _presentationMode == PresentationMode.Shooting ? SHOOTING_IDLE_RUN_STATE : IDLE_RUN_STATE;
+
+    public void PlayShootAnimation()
+    {
+        if (_presentationMode != PresentationMode.Shooting)
+        {
+            return;
+        }
+
+        _shootAnimationTimer = Mathf.Max(_shootAnimationDuration, 0.01f);
+    }
 
     public string GetAnimatorDebugInfo()
     {
@@ -490,13 +518,13 @@ public class PlayerAnimation : MonoBehaviour
     private RuntimeAnimatorController GetDesiredAnimatorController(Animator targetAnimator)
     {
         RuntimeAnimatorController baseController = GetBaseAnimatorController(targetAnimator);
-
         if (_presentationMode != PresentationMode.Shooting)
         {
             return baseController;
         }
 
-        return GetOrCreateShootingAnimatorOverride(baseController);
+        AnimatorOverrideController shootingOverride = GetOrCreateShootingAnimatorOverride(baseController);
+        return shootingOverride != null ? shootingOverride : baseController;
     }
 
     private RuntimeAnimatorController GetBaseAnimatorController(Animator targetAnimator)
@@ -657,6 +685,15 @@ public class PlayerAnimation : MonoBehaviour
         bool isCrouchRunningActive = !_useNetworkAnimationState && _playerController != null && _playerController.IsCrouchRunAnimationActive();
         targetAnimator.SetBool(_injuredHash, isInjuredActive);
         targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive && !isCrouchRunningActive);
+        targetAnimator.SetBool(_shootingModeHash, _presentationMode == PresentationMode.Shooting);
+
+        if (_shootAnimationTimer > 0f
+            && _presentationMode == PresentationMode.Shooting
+            && targetAnimator.HasState(0, _ak47ShootStateHash))
+        {
+            CrossFadeIfNeeded(targetAnimator, "Base Layer.ak47_shooting", _shootAnimationTransitionDuration);
+            return;
+        }
 
         if (isBeingCarriedActive)
         {
@@ -703,9 +740,17 @@ public class PlayerAnimation : MonoBehaviour
         if (currentState.IsName(CROUCH_RUNNING_STATE))
         {
             string recoveryState = isGrounded
-                ? IDLE_RUN_STATE
+                ? ActiveLocomotionState
                 : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
             CrossFadeIfNeeded(targetAnimator, recoveryState, _crouchRunExitTransitionDuration);
+            return;
+        }
+
+        // Keep grounded locomotion pinned to the presentation-specific state
+        // so join-mode shooting does not drift back to the default run tree.
+        if (isGrounded)
+        {
+            CrossFadeIfNeeded(targetAnimator, ActiveLocomotionState, 0.08f);
             return;
         }
 
@@ -728,6 +773,11 @@ public class PlayerAnimation : MonoBehaviour
         if (_animator == null)
         {
             return;
+        }
+
+        if (_shootAnimationTimer > 0f)
+        {
+            _shootAnimationTimer = Mathf.Max(0f, _shootAnimationTimer - Time.deltaTime);
         }
 
         if (!IsInjuredActive)
@@ -1031,7 +1081,7 @@ public class PlayerAnimation : MonoBehaviour
         _wallRunAnimationHoldTimer = 0f;
 
         string recoveryState = isGrounded
-            ? (IsCrouchingActive ? CROUCH_STATE : IDLE_RUN_STATE)
+            ? (IsCrouchingActive ? CROUCH_STATE : ActiveLocomotionState)
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.08f);
@@ -1056,7 +1106,7 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         string recoveryState = isGrounded
-            ? (isCrouchingActive ? CROUCH_STATE : IDLE_RUN_STATE)
+            ? (isCrouchingActive ? CROUCH_STATE : ActiveLocomotionState)
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.06f);
@@ -1065,17 +1115,18 @@ public class PlayerAnimation : MonoBehaviour
 
     private static void CrossFadeIfNeeded(Animator targetAnimator, string stateName, float duration)
     {
-        if (targetAnimator.GetCurrentAnimatorStateInfo(0).IsName(stateName))
+        int targetStateHash = Animator.StringToHash(stateName);
+        if (targetAnimator.GetCurrentAnimatorStateInfo(0).fullPathHash == targetStateHash)
         {
             return;
         }
 
-        if (targetAnimator.IsInTransition(0) && targetAnimator.GetNextAnimatorStateInfo(0).IsName(stateName))
+        if (targetAnimator.IsInTransition(0) && targetAnimator.GetNextAnimatorStateInfo(0).fullPathHash == targetStateHash)
         {
             return;
         }
 
-        targetAnimator.CrossFadeInFixedTime(stateName, duration);
+        targetAnimator.CrossFadeInFixedTime(targetStateHash, duration, 0);
     }
 
     private void OnAnimatorMove()

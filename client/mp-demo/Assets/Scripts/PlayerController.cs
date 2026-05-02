@@ -248,10 +248,9 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private LayerMask _ak47HitLayers = Physics.DefaultRaycastLayers;
     [SerializeField] private string _gunshotResourceFolder = "SFX/Gunshots";
     [SerializeField, Range(0f, 1f)] private float _gunshotVolume = 0.9f;
+    [SerializeField] private Transform _shotEffectSpawnPoint;
     [SerializeField] private string _bulletVfxResourcePath = "VFX/Bullet";
     [SerializeField] private string _ak47AttachPointName = "AK47 Attach point";
-    [SerializeField] private Transform _muzzleFlashSpawnPoint;
-    [SerializeField] private Transform _bulletParticleSpawnPoint;
     [SerializeField] private Vector3 _bulletParticleLocalPosition = Vector3.zero;
     [SerializeField] private Vector3 _bulletParticleLocalEuler = Vector3.zero;
     [SerializeField, Min(0f)] private float _bulletParticleMuzzleForwardOffset = 0.03f;
@@ -2163,14 +2162,8 @@ public class PlayerController : MonoBehaviour
 
     private void FireCombatShot()
     {
+        _playerAnimation?.PlayShootAnimation();
         PlayGunshotSound();
-
-        if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
-            || !offlineModeManager.IsOfflineModeActive
-            || offlineModeManager.CurrentPresentationMode != OfflineModeManager.OfflinePresentationMode.Shooting)
-        {
-            return;
-        }
 
         Camera sourceCamera = _gameplayCamera != null ? _gameplayCamera : _playerCamera;
         if (sourceCamera == null)
@@ -2181,6 +2174,13 @@ public class PlayerController : MonoBehaviour
         Ray shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
         PlayMuzzleFlashEffect(shotRay.direction);
         PlayBulletParticleEffect(shotRay.direction);
+
+        if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            || !offlineModeManager.IsOfflineModeActive
+            || offlineModeManager.CurrentPresentationMode != OfflineModeManager.OfflinePresentationMode.Shooting)
+        {
+            return;
+        }
         RaycastHit[] hits = Physics.RaycastAll(
             shotRay,
             Mathf.Max(1f, _ak47Range),
@@ -2266,10 +2266,10 @@ public class PlayerController : MonoBehaviour
         Quaternion spawnRotation;
         Vector3 direction;
 
-        if (_bulletParticleSpawnPoint != null)
+        if (_shotEffectSpawnPoint != null)
         {
-            spawnPosition = _bulletParticleSpawnPoint.position;
-            direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : _bulletParticleSpawnPoint.forward;
+            spawnPosition = _shotEffectSpawnPoint.position;
+            direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : _shotEffectSpawnPoint.forward;
             spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _bulletParticlePrefabLocalRotation;
         }
         else
@@ -2307,10 +2307,10 @@ public class PlayerController : MonoBehaviour
         Vector3 spawnPosition;
         Quaternion spawnRotation;
 
-        if (_muzzleFlashSpawnPoint != null)
+        if (_shotEffectSpawnPoint != null)
         {
-            spawnPosition = _muzzleFlashSpawnPoint.position;
-            Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : _muzzleFlashSpawnPoint.forward;
+            spawnPosition = _shotEffectSpawnPoint.position;
+            Vector3 direction = shotDirection.sqrMagnitude > 0.0001f ? shotDirection.normalized : _shotEffectSpawnPoint.forward;
             spawnRotation = Quaternion.LookRotation(direction, Vector3.up) * _muzzleFlashPrefabLocalRotation;
         }
         else

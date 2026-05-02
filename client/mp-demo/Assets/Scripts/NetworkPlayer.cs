@@ -41,9 +41,23 @@ public class NetworkPlayer : MonoBehaviour
         if (animator == null) animator = GetComponent<Animator>();
         if (animator == null) animator = GetComponentInChildren<Animator>();
 
+        bool useShootingPresentation = NetworkManager.Instance != null
+            && NetworkManager.Instance.IsMultiplayerShootingPresentationEnabled;
+
         if (controller != null)
         {
+            controller.SetSimulationControlled(!isLocal);
+            controller.SetCombatModeActive(useShootingPresentation);
+            if (useShootingPresentation)
+            {
+                controller.SetCombatHealth(controller.MaxHealth);
+            }
             controller.SetLocalCharacterAudio(isLocal);
+        }
+
+        if (anim != null)
+        {
+            anim.SetShootingModeActive(useShootingPresentation);
         }
 
         if (!isLocal)

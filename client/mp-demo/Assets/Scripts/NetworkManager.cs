@@ -209,9 +209,15 @@ public class NetworkManager : MonoBehaviour
     public bool IsPreparingServerSelectedMap => _awaitingInitialMapSelection || _isLoadingServerMap;
     public int IntermissionDurationMilliseconds => IntermissionDurationMs;
     public int RoundDurationMilliseconds => RoundDurationMs;
+    public bool IsMultiplayerShootingPresentationEnabled { get; private set; }
     private bool _hasReceivedRoundPhaseFromServer;
     private Coroutine _fallbackRoundFlowCoroutine;
     private Coroutine _localRoundResetCoroutine;
+
+    public void SetMultiplayerShootingPresentationEnabled(bool isEnabled)
+    {
+        IsMultiplayerShootingPresentationEnabled = isEnabled;
+    }
 
     public void SetSelectedMapId(string mapId)
     {
