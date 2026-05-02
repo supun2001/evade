@@ -543,6 +543,9 @@ public class LobbyUI : MonoBehaviour
 
         // Ensure movement is enabled
         SetLocalPlayerInput(true);
+        SetLocalPlayerCombatMode(
+            NetworkManager.Instance != null
+            && NetworkManager.Instance.IsMultiplayerShootingPresentationEnabled);
     }
 
     private void CacheMenuUi()
@@ -2003,7 +2006,7 @@ public class LobbyUI : MonoBehaviour
 
     private void SetLocalPlayerInput(bool enabled)
     {
-        GameObject localPlayer = GameObject.Find("LocalPlayer");
+        GameObject localPlayer = FindLocalPlayerObject();
         if (localPlayer != null)
         {
             var input = localPlayer.GetComponent<PlayerLocomotionInput>();
@@ -2014,9 +2017,32 @@ public class LobbyUI : MonoBehaviour
         }
     }
 
+    private void SetLocalPlayerCombatMode(bool enabled)
+    {
+        GameObject localPlayer = FindLocalPlayerObject();
+        if (localPlayer == null)
+        {
+            return;
+        }
+
+        PlayerController controller = localPlayer.GetComponent<PlayerController>();
+        if (controller == null)
+        {
+            return;
+        }
+
+        controller.SetCombatModeActive(enabled);
+
+        PlayerAnimation animation = localPlayer.GetComponent<PlayerAnimation>();
+        if (animation != null)
+        {
+            animation.SetShootingModeActive(enabled);
+        }
+    }
+
     private void SetLocalPlayerSpectating(bool enabled)
     {
-        GameObject localPlayer = GameObject.Find("LocalPlayer");
+        GameObject localPlayer = FindLocalPlayerObject();
         if (localPlayer == null)
         {
             return;
@@ -2044,16 +2070,32 @@ public class LobbyUI : MonoBehaviour
         }
         else
         {
-            if (input != null)
-            {
-                input.InputEnabled = false;
-            }
-
             if (controller.IsSpectating())
             {
                 controller.ExitSpectateMode();
             }
         }
+    }
+
+    private static GameObject FindLocalPlayerObject()
+    {
+        GameObject localPlayer = GameObject.Find("LocalPlayer");
+        if (localPlayer != null)
+        {
+            return localPlayer;
+        }
+
+        NetworkPlayer[] networkPlayers = FindObjectsByType<NetworkPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < networkPlayers.Length; i++)
+        {
+            NetworkPlayer candidate = networkPlayers[i];
+            if (candidate != null && candidate.IsLocalPlayer)
+            {
+                return candidate.gameObject;
+            }
+        }
+
+        return null;
     }
 
     private void ActivateSpectateMode()

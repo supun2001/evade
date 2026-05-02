@@ -81,6 +81,8 @@ public class NetworkManager : MonoBehaviour
     private const int MaxServerFloorSamples = 384;
     private const int MaxServerObstacles = 384;
     private const float MaxServerObstacleEnclosingSpan = 45f;
+    private static bool s_multiplayerShootingPresentationEnabled;
+    private static bool s_joinGameUsesShootingMode;
 
     public static NetworkManager Instance;
     
@@ -209,14 +211,15 @@ public class NetworkManager : MonoBehaviour
     public bool IsPreparingServerSelectedMap => _awaitingInitialMapSelection || _isLoadingServerMap;
     public int IntermissionDurationMilliseconds => IntermissionDurationMs;
     public int RoundDurationMilliseconds => RoundDurationMs;
-    public bool IsMultiplayerShootingPresentationEnabled { get; private set; }
+    public bool IsMultiplayerShootingPresentationEnabled => s_multiplayerShootingPresentationEnabled;
+    public bool JoinGameUsesShootingMode => s_joinGameUsesShootingMode;
     private bool _hasReceivedRoundPhaseFromServer;
     private Coroutine _fallbackRoundFlowCoroutine;
     private Coroutine _localRoundResetCoroutine;
 
     public void SetMultiplayerShootingPresentationEnabled(bool isEnabled)
     {
-        IsMultiplayerShootingPresentationEnabled = isEnabled;
+        s_multiplayerShootingPresentationEnabled = isEnabled;
     }
 
     public void SetSelectedMapId(string mapId)
@@ -375,6 +378,7 @@ public class NetworkManager : MonoBehaviour
         }
 
         GameObject obj = Instantiate(playerPrefab, pos, Quaternion.identity);
+        obj.name = isLocal ? "LocalPlayer" : $"RemotePlayer_{id}";
 
         NetworkPlayer np = obj.GetComponent<NetworkPlayer>();
         if (np == null) np = obj.AddComponent<NetworkPlayer>();
@@ -396,12 +400,6 @@ public class NetworkManager : MonoBehaviour
             
              var audioListener = obj.GetComponentInChildren<AudioListener>();
             if (audioListener) audioListener.enabled = false;
-
-            obj.name = $"RemotePlayer_{id}";
-        }
-        else
-        {
-            obj.name = "LocalPlayer";
         }
 
         players.Add(id, obj);
@@ -792,6 +790,7 @@ public class NetworkManager : MonoBehaviour
     public async Task<string> JoinOrCreateGame()
     {
         InitializeClient();
+        s_joinGameUsesShootingMode = false;
         try
         {
             room = await client.JoinOrCreate<MyRoomState>(roomName, BuildJoinRoomOptions());
@@ -808,6 +807,8 @@ public class NetworkManager : MonoBehaviour
     public async Task<string> JoinGame(string targetRoomId)
     {
         InitializeClient();
+        SetMultiplayerShootingPresentationEnabled(true);
+        s_joinGameUsesShootingMode = true;
         try
         {
             room = await client.JoinById<MyRoomState>(targetRoomId, BuildJoinRoomOptions());
@@ -1819,6 +1820,8 @@ public class NetworkManager : MonoBehaviour
         bool hadRoomState = room != null || !string.IsNullOrEmpty(currentRoomId) || players.Count > 0;
         room = null;
         currentRoomId = "";
+        s_joinGameUsesShootingMode = false;
+        s_multiplayerShootingPresentationEnabled = false;
         activeServerMapId = "";
         _isLoadingServerMap = false;
         _awaitingInitialMapSelection = false;

@@ -259,6 +259,9 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Vector3 _muzzleFlashLocalPosition = Vector3.zero;
     [SerializeField] private Vector3 _muzzleFlashLocalEuler = Vector3.zero;
     [SerializeField, Min(0f)] private float _muzzleFlashForwardOffset = 0.015f;
+    [Header("Shooting Debug")]
+    [SerializeField] private bool _debugShootingLogs = false;
+    [SerializeField, Min(0f)] private float _debugShootingLogCooldown = 0.2f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
@@ -360,6 +363,8 @@ public class PlayerController : MonoBehaviour
     private Quaternion _bulletParticlePrefabLocalRotation = Quaternion.identity;
     private GameObject _muzzleFlashVfxPrefab;
     private Quaternion _muzzleFlashPrefabLocalRotation = Quaternion.identity;
+    private float _nextDebugShootingLogTime;
+    private float _nextDebugClickPathLogTime;
 
     private CameraViewMode _currentViewMode;
     private CameraViewMode _preferredViewMode;
@@ -632,6 +637,20 @@ public class PlayerController : MonoBehaviour
     #region Update
     private void Update() {
         _jumpedThisFrame = false;
+
+        if (Mouse.current != null
+            && Mouse.current.leftButton.wasPressedThisFrame
+            && Time.unscaledTime >= _nextDebugClickPathLogTime)
+        {
+            _nextDebugClickPathLogTime = Time.unscaledTime + 0.2f;
+            Debug.Log(
+                $"[JoinShootDebug] PlayerController click seen | " +
+                $"name={gameObject.name}, sim={_isSimulationControlled}, spectate={_isSpectating}, " +
+                $"combat={_combatModeActive}, eliminated={_isEliminatedState}, " +
+                $"injured={IsInjuredOrHitReacting()}, carried={_isBeingCarried || _isCarryingPlayer}, " +
+                $"pause={_isPauseMenuOpen}, inputEnabled={(_playerLocomotionInput != null && _playerLocomotionInput.InputEnabled)}");
+        }
+
         if (!_isSimulationControlled)
         {
             HandlePauseMenuToggle();
@@ -2132,6 +2151,40 @@ public class PlayerController : MonoBehaviour
 
     private void HandleCombatInput()
     {
+        if (!CanProcessCombatShot(out string blockReason))
+        {
+            LogShootingDebug("HandleCombatInput.Blocked", blockReason);
+            return;
+        }
+
+        if (EventSystem.current != null
+            && EventSystem.current.IsPointerOverGameObject()
+            && UnityEngine.Cursor.lockState == CursorLockMode.None)
+        {
+            LogShootingDebug("HandleCombatInput.Blocked", "Pointer over UI while cursor unlocked");
+            return;
+        }
+
+        LogShootingDebug("HandleCombatInput.Fire", "Local combat input accepted");
+        FireCombatShot();
+        _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
+    }
+
+    public void TryFireCombatShotFromExternalInput()
+    {
+        if (!CanProcessCombatShot(out string blockReason))
+        {
+            LogShootingDebug("ExternalFire.Blocked", blockReason);
+            return;
+        }
+
+        LogShootingDebug("ExternalFire.Fire", "External fire hook accepted");
+        FireCombatShot();
+        _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
+    }
+
+    private bool CanProcessCombatShot(out string blockReason)
+    {
         if (!_combatModeActive
             || _isPauseMenuOpen
             || _isSpectating
@@ -2141,44 +2194,49 @@ public class PlayerController : MonoBehaviour
             || _isCarryingPlayer
             || Mouse.current == null)
         {
-            return;
+            blockReason =
+                $"combat={_combatModeActive}, pause={_isPauseMenuOpen}, spectate={_isSpectating}, " +
+                $"eliminated={_isEliminatedState}, injured={IsInjuredOrHitReacting()}, carried={_isBeingCarried}, " +
+                $"carrying={_isCarryingPlayer}, mouseNull={Mouse.current == null}";
+            return false;
         }
 
-        if (Time.time < _nextAllowedShotTime || !Mouse.current.leftButton.isPressed)
+        bool fireHeld = Mouse.current.leftButton.isPressed || Mouse.current.leftButton.wasPressedThisFrame;
+        if (Time.time < _nextAllowedShotTime || !fireHeld)
         {
-            return;
+            blockReason =
+                $"cooldownRemaining={Mathf.Max(0f, _nextAllowedShotTime - Time.time):0.000}, " +
+                $"leftPressed={Mouse.current.leftButton.isPressed}, leftPressedThisFrame={Mouse.current.leftButton.wasPressedThisFrame}";
+            return false;
         }
 
-        if (EventSystem.current != null
-            && EventSystem.current.IsPointerOverGameObject()
-            && UnityEngine.Cursor.lockState == CursorLockMode.None)
-        {
-            return;
-        }
-
-        FireCombatShot();
-        _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
+        blockReason = null;
+        return true;
     }
 
     private void FireCombatShot()
     {
+        LogShootingDebug("FireCombatShot.Begin", "Shot started");
         _playerAnimation?.PlayShootAnimation();
         PlayGunshotSound();
 
         Camera sourceCamera = _gameplayCamera != null ? _gameplayCamera : _playerCamera;
         if (sourceCamera == null)
         {
+            LogShootingDebug("FireCombatShot.Abort", "No source camera");
             return;
         }
 
         Ray shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
         PlayMuzzleFlashEffect(shotRay.direction);
         PlayBulletParticleEffect(shotRay.direction);
+        LogShootingDebug("FireCombatShot.Visuals", $"camera={sourceCamera.gameObject.name}, dir={shotRay.direction}");
 
         if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
             || !offlineModeManager.IsOfflineModeActive
             || offlineModeManager.CurrentPresentationMode != OfflineModeManager.OfflinePresentationMode.Shooting)
         {
+            LogShootingDebug("FireCombatShot.End", "Visual/audio only path (not offline shooting damage mode)");
             return;
         }
         RaycastHit[] hits = Physics.RaycastAll(
@@ -2189,10 +2247,12 @@ public class PlayerController : MonoBehaviour
 
         if (hits == null || hits.Length == 0)
         {
+            LogShootingDebug("FireCombatShot.Raycast", "No hits");
             return;
         }
 
         Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+        LogShootingDebug("FireCombatShot.Raycast", $"Hit count={hits.Length}");
 
         string attackerSessionId = GetComponent<OfflinePlayerIdentity>()?.SessionId ?? string.Empty;
         for (int i = 0; i < hits.Length; i++)
@@ -2219,8 +2279,28 @@ public class PlayerController : MonoBehaviour
             }
 
             offlineModeManager.TryApplyCombatDamage(targetIdentity.SessionId, _ak47Damage, attackerSessionId);
+            LogShootingDebug("FireCombatShot.Damage", $"Applied {_ak47Damage:0.##} damage to {targetIdentity.SessionId}");
             return;
         }
+
+        LogShootingDebug("FireCombatShot.End", "No valid damage target found");
+    }
+
+    private void LogShootingDebug(string stage, string details)
+    {
+        if (!_debugShootingLogs)
+        {
+            return;
+        }
+
+        if (Time.unscaledTime < _nextDebugShootingLogTime)
+        {
+            return;
+        }
+
+        _nextDebugShootingLogTime = Time.unscaledTime + Mathf.Max(0f, _debugShootingLogCooldown);
+        string playerName = gameObject != null ? gameObject.name : "Player";
+        Debug.Log($"[ShootingDebug] {playerName} {stage} | {details}");
     }
 
     private void PlayGunshotSound()
@@ -3803,6 +3883,8 @@ public class PlayerController : MonoBehaviour
         {
             _gameplayAudioListener.enabled = !isActive;
         }
+
+        EnsureSingleLocalAudioListener();
     }
 
     private void UpdateZoom()
@@ -5742,6 +5824,40 @@ public class PlayerController : MonoBehaviour
     {
         ConfigureCharacterAudioSource(_footstepAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
         ConfigureCharacterAudioSource(_hurtAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
+    }
+
+    public void EnsureSingleLocalAudioListener()
+    {
+        AudioListener[] audioListeners = GetComponentsInChildren<AudioListener>(true);
+        bool shouldUseSpectateListener = _isSpectating && _spectateCamera != null && _spectateCamera.enabled;
+        bool assignedPrimaryListener = false;
+
+        for (int i = 0; i < audioListeners.Length; i++)
+        {
+            AudioListener listener = audioListeners[i];
+            if (listener == null)
+            {
+                continue;
+            }
+
+            bool shouldEnable = false;
+            if (shouldUseSpectateListener)
+            {
+                shouldEnable = listener == _spectateAudioListener;
+            }
+            else if (_gameplayAudioListener != null)
+            {
+                shouldEnable = listener == _gameplayAudioListener;
+            }
+
+            listener.enabled = shouldEnable;
+            assignedPrimaryListener |= shouldEnable;
+        }
+
+        if (!assignedPrimaryListener && _gameplayAudioListener != null)
+        {
+            _gameplayAudioListener.enabled = true;
+        }
     }
 
     private static void ConfigureCharacterAudioSource(AudioSource audioSource, bool isLocalCharacter, float minDistance, float maxDistance)

@@ -2,10 +2,12 @@ using UnityEngine;
 using Colyseus.Schema;
 using System.Collections.Generic;
 using UnityEngine.UIElements;
+using UnityEngine.InputSystem;
 
 public class NetworkPlayer : MonoBehaviour
 {
     private const float MaxAcceptedServerHitDistance = 1.85f;
+    private const float DebugClickLogCooldown = 0.2f;
 
     private Player playerState;
     private bool isLocal;
@@ -22,6 +24,7 @@ public class NetworkPlayer : MonoBehaviour
     private Animator animator;
     private float _lastProcessedHitTriggerId = -1f;
     private bool _isInitialized;
+    private float _nextDebugClickLogTime;
 
     public bool IsLocalPlayer => isLocal;
 
@@ -42,7 +45,8 @@ public class NetworkPlayer : MonoBehaviour
         if (animator == null) animator = GetComponentInChildren<Animator>();
 
         bool useShootingPresentation = NetworkManager.Instance != null
-            && NetworkManager.Instance.IsMultiplayerShootingPresentationEnabled;
+            && (NetworkManager.Instance.JoinGameUsesShootingMode
+                || NetworkManager.Instance.IsMultiplayerShootingPresentationEnabled);
 
         if (controller != null)
         {
@@ -110,6 +114,83 @@ public class NetworkPlayer : MonoBehaviour
 
         if (isLocal)
         {
+            NetworkManager manager = NetworkManager.Instance;
+            bool fireInputRequested = Mouse.current != null
+                && (Mouse.current.leftButton.isPressed || Mouse.current.leftButton.wasPressedThisFrame);
+            bool useShootingPresentation = manager != null
+                && (manager.JoinGameUsesShootingMode
+                    || manager.IsMultiplayerShootingPresentationEnabled);
+
+            if (!useShootingPresentation
+                && fireInputRequested
+                && controller != null
+                && !controller.IsSpectating())
+            {
+                useShootingPresentation = true;
+                manager?.SetMultiplayerShootingPresentationEnabled(true);
+                controller.SetSimulationControlled(false);
+                controller.SetCombatModeActive(true);
+                anim?.SetShootingModeActive(true);
+                Debug.Log("[JoinShootDebug] Local fire input forced shooting mode on because join flags were false.");
+            }
+
+            if (Mouse.current != null
+                && Mouse.current.leftButton.wasPressedThisFrame
+                && Time.unscaledTime >= _nextDebugClickLogTime)
+            {
+                _nextDebugClickLogTime = Time.unscaledTime + DebugClickLogCooldown;
+                Debug.Log(
+                    $"[JoinShootDebug] NetworkPlayer local click seen | " +
+                    $"name={gameObject.name}, shootingPresentation={useShootingPresentation}, " +
+                    $"controller={(controller != null)}, input={(input != null)}, anim={(anim != null)}, " +
+                    $"combat={(controller != null && controller.IsCombatModeActive)}, " +
+                    $"spectating={(controller != null && controller.IsSpectating())}, " +
+                    $"inputEnabled={(input != null && input.InputEnabled)}, " +
+                    $"mousePressed={Mouse.current.leftButton.isPressed}, mousePressedThisFrame={Mouse.current.leftButton.wasPressedThisFrame}, " +
+                    $"nmNull={(manager == null)}, " +
+                    $"joinShoot={(manager != null && manager.JoinGameUsesShootingMode)}, " +
+                    $"presentationFlag={(manager != null && manager.IsMultiplayerShootingPresentationEnabled)}, " +
+                    $"roomId={(manager != null ? manager.currentRoomId : "null")}, " +
+                    $"localSession={(manager != null ? manager.LocalSessionId : "null")}");
+            }
+
+            if (useShootingPresentation)
+            {
+                if (input != null)
+                {
+                    input.enabled = true;
+                    input.InputEnabled = true;
+                    if (input.Controls != null)
+                    {
+                        input.Controls.PlayerLocomotionMap.Enable();
+                    }
+                }
+
+                if (controller != null && controller.IsSpectating())
+                {
+                    controller.ExitSpectateMode();
+                }
+
+                if (controller != null && !controller.IsCombatModeActive)
+                {
+                    controller.SetCombatModeActive(true);
+                }
+
+                controller?.EnsureSingleLocalAudioListener();
+
+                if (anim != null)
+                {
+                    anim.SetShootingModeActive(true);
+                }
+
+                if (Mouse.current != null
+                    && (Mouse.current.leftButton.isPressed || Mouse.current.leftButton.wasPressedThisFrame)
+                    && controller != null)
+                {
+                    controller.TryFireCombatShotFromExternalInput();
+                }
+            }
+
             if (controller != null && controller.IsSpectating())
             {
                 return;
