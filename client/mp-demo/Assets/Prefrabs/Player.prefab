@@ -444,7 +444,7 @@ MonoBehaviour:
   _muzzleFlashLocalPosition: {x: 0, y: 0, z: 0}
   _muzzleFlashLocalEuler: {x: 0, y: 0, z: 0}
   _muzzleFlashForwardOffset: 0.015
-  _debugShootingLogs: 0
+  _debugShootingLogs: 1
   _debugShootingLogCooldown: 0.2
 --- !u!114 &6108517970698058712
 MonoBehaviour:

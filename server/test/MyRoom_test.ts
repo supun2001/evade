@@ -440,4 +440,49 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(player!.combatHealth, 0);
     assert.strictEqual(player!.hitTriggerId > 0, true);
   });
+
+  it("removes nextbots when combat damage reaches zero", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {});
+    const client = await colyseus.connectTo(room);
+
+    await room.waitForNextPatch();
+
+    const roomAny = room as any;
+    roomAny.currentPhase = "round";
+    roomAny.phaseEndsAt = Date.now() + 30_000;
+    room.state.isGameStarted = true;
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+    player!.isReady = true;
+    player!.isSpectator = false;
+    player!.isEliminated = false;
+
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    nextbot!.isActive = true;
+    roomAny.areNextbotsGloballyActive = true;
+    nextbot!.currentHealth = 50;
+    nextbot!.maxHealth = 50;
+
+    client.send("combatHitNextbot", {
+      id: "nextbot_0",
+      damage: 25,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(nextbot!.isActive, true);
+    assert.strictEqual(nextbot!.currentHealth, 25);
+
+    client.send("combatHitNextbot", {
+      id: "nextbot_0",
+      damage: 25,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(nextbot!.isActive, false);
+    assert.strictEqual(nextbot!.currentHealth, 0);
+  });
 });

@@ -2408,20 +2408,29 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        float shotRange = Mathf.Max(1f, _ak47Range);
         Ray shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
         PlayMuzzleFlashEffect(shotRay.direction);
         PlayBulletParticleEffect(shotRay.direction);
         LogShootingDebug("FireCombatShot.Visuals", $"camera={sourceCamera.gameObject.name}, dir={shotRay.direction}");
+        if (_debugShootingLogs)
+        {
+            Debug.DrawRay(shotRay.origin, shotRay.direction * shotRange, Color.red, 1.5f);
+        }
 
         OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager);
         RaycastHit[] hits = Physics.RaycastAll(
             shotRay,
-            Mathf.Max(1f, _ak47Range),
+            shotRange,
             _ak47HitLayers,
-            QueryTriggerInteraction.Ignore);
+            QueryTriggerInteraction.Collide);
 
         if (hits == null || hits.Length == 0)
         {
+            if (_debugShootingLogs)
+            {
+                Debug.Log($"[CombatRayDebug] Raycast missed | origin={shotRay.origin}, dir={shotRay.direction}, range={shotRange:0.##}, layers={_ak47HitLayers.value}");
+            }
             LogShootingDebug("FireCombatShot.Raycast", "No hits");
             return;
         }
@@ -2513,8 +2522,9 @@ public class PlayerController : MonoBehaviour
             return true;
         }
 
+        float healthBefore = nextbot.CurrentCombatHealth;
         NetworkManager.Instance?.SendCombatHitNextbot(nextbot.NetworkNextbotId, _ak47Damage);
-        Debug.Log($"[CombatRayDebug] Sent nextbot hit | id={nextbot.NetworkNextbotId}, damage={_ak47Damage:0.##}, collider={hitCollider.name}");
+        Debug.Log($"[CombatRayDebug] Sent nextbot hit | id={nextbot.NetworkNextbotId}, damage={_ak47Damage:0.##}, localHealthBefore={healthBefore:0.##}, collider={hitCollider.name}");
         LogShootingDebug("FireCombatShot.Damage", $"Applied {_ak47Damage:0.##} damage to nextbot {nextbot.NetworkNextbotId}");
         return true;
     }
@@ -2546,7 +2556,8 @@ public class PlayerController : MonoBehaviour
             string kind = hitNextbot != null
                 ? $"nextbot:{hitNextbot.NetworkNextbotId}"
                 : (hitPlayer != null ? $"player:{collider.transform.root.name}" : "world");
-            builder.Append($"{i}:{collider.name}@{hits[i].distance:0.00} [{kind}]");
+            string layerName = LayerMask.LayerToName(collider.gameObject.layer);
+            builder.Append($"{i}:{collider.name}({layerName})@{hits[i].distance:0.00} [{kind}]");
         }
 
         if (builder.Length > 0)

@@ -95,6 +95,9 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     [Header("Combat")]
     [SerializeField, Min(1f)] private float _maxCombatHealth = 100f;
+    [SerializeField] private bool _autoCreateCombatHitbox = true;
+    [SerializeField, Min(0.1f)] private float _combatHitboxFallbackHeight = 5f;
+    [SerializeField, Min(0.05f)] private float _combatHitboxFallbackRadius = 1.15f;
 
     [Header("NavMesh")]
     [SerializeField] private float _navMeshSnapDistance = 8f;
@@ -194,6 +197,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Transform _visualTransform;
     private MeshRenderer _rootMeshRenderer;
     private MeshRenderer _visualMeshRenderer;
+    private CapsuleCollider _combatHitboxCollider;
     private NavMeshPath _pathBuffer;
     private float _targetLockedUntil;
     private Transform _pendingSwitchTarget;
@@ -261,6 +265,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _pathBuffer = new NavMeshPath();
         _lockedHeight = transform.position.y;
         EnsureVisualBillboardChild();
+        EnsureCombatHitbox();
         EnsureLoopAudioSource();
         _nextbotColliders = GetComponentsInChildren<Collider>(true);
         _renderers = GetComponentsInChildren<Renderer>(true);
@@ -2975,6 +2980,60 @@ public class NextbotFollowPlayer : MonoBehaviour
             _visualLocalOffset.z);
     }
 
+    private void EnsureCombatHitbox()
+    {
+        if (!_autoCreateCombatHitbox)
+        {
+            return;
+        }
+
+        Transform hitboxTransform = transform.Find("NextbotCombatHitbox");
+        if (hitboxTransform == null)
+        {
+            GameObject hitboxObject = new GameObject("NextbotCombatHitbox");
+            hitboxObject.transform.SetParent(transform, false);
+            hitboxObject.layer = gameObject.layer;
+            hitboxTransform = hitboxObject.transform;
+        }
+
+        hitboxTransform.localRotation = Quaternion.identity;
+        hitboxTransform.localScale = Vector3.one;
+
+        if (!hitboxTransform.TryGetComponent(out _combatHitboxCollider))
+        {
+            _combatHitboxCollider = hitboxTransform.gameObject.AddComponent<CapsuleCollider>();
+        }
+
+        Bounds visualBounds = default;
+        bool hasVisualBounds = _visualMeshRenderer != null && _visualMeshRenderer.enabled;
+        if (hasVisualBounds)
+        {
+            visualBounds = _visualMeshRenderer.bounds;
+        }
+
+        Vector3 localCenter = hasVisualBounds
+            ? transform.InverseTransformPoint(visualBounds.center)
+            : (_visualTransform != null ? _visualTransform.localPosition : Vector3.up * (_combatHitboxFallbackHeight * 0.5f));
+        Vector3 lossyScale = transform.lossyScale;
+        float scaleX = Mathf.Max(0.001f, Mathf.Abs(lossyScale.x));
+        float scaleY = Mathf.Max(0.001f, Mathf.Abs(lossyScale.y));
+        float scaleZ = Mathf.Max(0.001f, Mathf.Abs(lossyScale.z));
+        float localHeight = hasVisualBounds
+            ? Mathf.Max(_combatHitboxFallbackHeight, visualBounds.size.y / scaleY)
+            : _combatHitboxFallbackHeight;
+        float localRadius = hasVisualBounds
+            ? Mathf.Max(_combatHitboxFallbackRadius, Mathf.Max(visualBounds.size.x / scaleX, visualBounds.size.z / scaleZ) * 0.45f)
+            : _combatHitboxFallbackRadius;
+
+        hitboxTransform.localPosition = localCenter;
+        _combatHitboxCollider.center = Vector3.zero;
+        _combatHitboxCollider.direction = 1;
+        _combatHitboxCollider.height = Mathf.Max(localHeight, localRadius * 2f);
+        _combatHitboxCollider.radius = localRadius;
+        _combatHitboxCollider.isTrigger = false;
+        _combatHitboxCollider.enabled = true;
+    }
+
     private Camera ResolveTargetCamera()
     {
         PlayerController[] playerControllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
@@ -3098,6 +3157,13 @@ public class NextbotFollowPlayer : MonoBehaviour
             if (_colliders[i] != null)
             {
                 _colliders[i].enabled = visible;
+
+                // If we want it visible/active, ensure the GameObject itself is active
+                // so the collider is actually registered in the physics world.
+                if (visible && !_colliders[i].gameObject.activeSelf)
+                {
+                    _colliders[i].gameObject.SetActive(true);
+                }
             }
         }
 

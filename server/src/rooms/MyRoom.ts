@@ -357,6 +357,7 @@ export class MyRoom extends Room<MyRoomState> {
   private playerForcedInjuredUntil = new Map<string, number>();
   private playerLastUpdateAt = new Map<string, number>();
   private playerRespawnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private areNextbotsGloballyActive = false;
   private currentPhase: RoundPhase = "waiting";
   private phaseEndsAt = 0;
   private roundIndex = 0;
@@ -921,13 +922,19 @@ export class MyRoom extends Room<MyRoomState> {
     this.recordNextbotTickDiagnostic(now, deltaTime);
     this.updateRoundFlow(now);
     if (!NEXTBOTS_ENABLED) {
-      this.setAllNextbotsActive(false);
+      if (this.areNextbotsGloballyActive) {
+        this.setAllNextbotsActive(false);
+        this.areNextbotsGloballyActive = false;
+      }
       this.clearAllNextbotTargetingState();
       return;
     }
 
     const shouldActivateNextbots = this.state.isGameStarted && this.getReadyPlayerCount() > 0;
-    this.setAllNextbotsActive(shouldActivateNextbots);
+    if (this.areNextbotsGloballyActive !== shouldActivateNextbots) {
+      this.setAllNextbotsActive(shouldActivateNextbots);
+      this.areNextbotsGloballyActive = shouldActivateNextbots;
+    }
 
     if (!shouldActivateNextbots) {
       this.clearAllNextbotTargetingState();
@@ -1090,6 +1097,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private resetNextbotsToSpawnPoints() {
+    this.areNextbotsGloballyActive = false;
     for (let index = 0; index < this.nextbotControllers.length; index++) {
       this.resetSingleNextbotToSpawnPoint(index);
     }
