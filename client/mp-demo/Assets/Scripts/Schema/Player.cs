@@ -158,4 +158,13 @@ public Player() { }
 
 	[Type(47, "number")]
 	public float maxCombatHealth = 100f;
+
+	[Type(48, "number")]
+	public float kills = default(float);
+
+	[Type(49, "number")]
+	public float deaths = default(float);
+
+	[Type(50, "number")]
+	public float assists = default(float);
 	}

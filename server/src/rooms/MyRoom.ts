@@ -168,6 +168,7 @@ type NextbotControllerState = {
   pathTargetX: number;
   pathTargetZ: number;
   pathComputedAt: number;
+  respawnAt: number;
 };
 type PlayerUpdateMessage = Record<string, unknown> | number[];
 type PlayerRoundStats = {
@@ -197,6 +198,9 @@ type RoundResultEntry = {
   bestTimeMs: number;
   downedCount: number;
   revivesDone: number;
+  kills: number;
+  deaths: number;
+  assists: number;
   joinOrder: number;
   rank: number;
 };
@@ -959,6 +963,13 @@ export class MyRoom extends Room<MyRoomState> {
         continue;
       }
 
+      if (!nextbot.isActive && controller.respawnAt > 0 && now >= controller.respawnAt) {
+        controller.respawnAt = 0;
+        this.resetSingleNextbotToSpawnPoint(index);
+        console.log(`[room ${this.roomId}] nextbot ${nextbot.id} respawned`);
+        continue;
+      }
+
       const target = controller.currentTargetSessionId
         ? this.state.players.get(controller.currentTargetSessionId)
         : undefined;
@@ -1049,9 +1060,9 @@ export class MyRoom extends Room<MyRoomState> {
         unreachableTargetSessionId: "",
         unreachableTargetUntil: 0,
         pathWaypoints: [],
-        pathTargetX: spawnPoint.x,
         pathTargetZ: spawnPoint.z,
         pathComputedAt: 0,
+        respawnAt: 0,
       });
     }
 
@@ -1071,7 +1082,7 @@ export class MyRoom extends Room<MyRoomState> {
     nextbot.z = spawnPoint.z;
     nextbot.rotationY = 0;
     nextbot.targetSessionId = "";
-    nextbot.isActive = false;
+    nextbot.isActive = this.areNextbotsGloballyActive;
     nextbot.velocityX = 0;
     nextbot.velocityY = 0;
     nextbot.velocityZ = 0;
@@ -1080,6 +1091,7 @@ export class MyRoom extends Room<MyRoomState> {
     nextbot.maxHealth = NEXTBOT_MAX_COMBAT_HEALTH;
     controller.currentTargetSessionId = "";
     controller.nextInjuryAt = 0;
+    controller.respawnAt = 0;
     controller.groundedY = spawnPoint.y;
     controller.verticalVelocity = 0;
     controller.isAirborne = false;
@@ -1724,7 +1736,7 @@ export class MyRoom extends Room<MyRoomState> {
 
     target.combatHealth = Math.max(0, target.combatHealth - damage);
     if (target.combatHealth <= 0) {
-      this.recordPlayerHazardElimination(target.sessionId, Date.now());
+      this.recordPlayerHazardElimination(target.sessionId, Date.now(), client.sessionId);
     }
   }
 
@@ -1756,6 +1768,7 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     console.log(`[room ${this.roomId}] nextbot ${nextbotId} died from combat hit`);
+    attacker.kills += 1;
     nextbot.isActive = false;
     nextbot.targetSessionId = "";
     nextbot.velocityX = 0;
@@ -1768,6 +1781,7 @@ export class MyRoom extends Room<MyRoomState> {
       controller.currentTargetSessionId = "";
       controller.pathWaypoints = [];
       controller.nextInjuryAt = 0;
+      controller.respawnAt = Date.now() + 5000;
     }
   }
 
@@ -3556,6 +3570,11 @@ export class MyRoom extends Room<MyRoomState> {
         stats.revivesDone = 0;
       }
 
+      player.combatHealth = player.maxCombatHealth > 0 ? player.maxCombatHealth : 100;
+      player.kills = 0;
+      player.deaths = 0;
+      player.assists = 0;
+
       this.clearCarryStateForPlayer(player.sessionId);
       const spawnPosition = this.getPlayerSpawnPosition(player.sessionId);
       player.x = spawnPosition.x;
@@ -3632,7 +3651,7 @@ export class MyRoom extends Room<MyRoomState> {
     }
   }
 
-  private recordPlayerHazardElimination(sessionId: string, now: number) {
+  private recordPlayerHazardElimination(sessionId: string, now: number, attackerSessionId?: string) {
     if (this.currentPhase !== "round") {
       return;
     }
@@ -3647,6 +3666,14 @@ export class MyRoom extends Room<MyRoomState> {
     const player = this.state.players.get(sessionId);
     if (player == null) {
       return;
+    }
+
+    player.deaths += 1;
+    if (attackerSessionId && attackerSessionId !== sessionId) {
+      const attacker = this.state.players.get(attackerSessionId);
+      if (attacker) {
+        attacker.kills += 1;
+      }
     }
 
     this.applyPlayerEliminationState(player, false);
@@ -3708,14 +3735,25 @@ export class MyRoom extends Room<MyRoomState> {
         bestTimeMs: stats.bestTimeMs,
         downedCount: stats.downedCount,
         revivesDone: stats.revivesDone,
+        kills: player.kills,
+        deaths: player.deaths,
+        assists: player.assists,
         joinOrder: stats.joinOrder,
         rank: 0,
       });
     });
 
     entries.sort((a, b) => {
+      if (a.kills !== b.kills) {
+        return b.kills - a.kills;
+      }
+
       if (a.bestTimeMs !== b.bestTimeMs) {
         return b.bestTimeMs - a.bestTimeMs;
+      }
+
+      if (a.deaths !== b.deaths) {
+        return a.deaths - b.deaths;
       }
 
       if (a.downedCount !== b.downedCount) {
@@ -3733,7 +3771,9 @@ export class MyRoom extends Room<MyRoomState> {
       const previous = i > 0 ? entries[i - 1] : undefined;
       const current = entries[i];
       if (previous != null
+        && previous.kills === current.kills
         && previous.bestTimeMs === current.bestTimeMs
+        && previous.deaths === current.deaths
         && previous.downedCount === current.downedCount
         && previous.revivesDone === current.revivesDone) {
         current.rank = previous.rank;

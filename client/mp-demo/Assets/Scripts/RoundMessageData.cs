@@ -27,6 +27,9 @@ public class RoundResultEntryMessageData
     public int bestTimeMs;
     public int downedCount;
     public int revivesDone;
+    public int kills;
+    public int deaths;
+    public int assists;
     public int joinOrder;
     public int rank;
 }

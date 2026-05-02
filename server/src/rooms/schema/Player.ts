@@ -62,4 +62,7 @@ export class Player extends Schema {
     @type("number") shotTriggerId: number = 0;
     @type("number") combatHealth: number = 100;
     @type("number") maxCombatHealth: number = 100;
+    @type("number") kills: number = 0;
+    @type("number") deaths: number = 0;
+    @type("number") assists: number = 0;
 }

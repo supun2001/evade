@@ -505,7 +505,13 @@ public class RoundHudController : MonoBehaviour
 
     private void RebuildTabScoreboardRows()
     {
+        if (_tabScoreboardList == null)
+        {
+            return;
+        }
+
         _tabScoreboardList.Clear();
+        _tabScoreboardList.Add(CreateScoreboardHeaderRow());
 
         if (_networkManager == null)
         {
@@ -543,6 +549,12 @@ public class RoundHudController : MonoBehaviour
 
         rows.Sort((a, b) =>
         {
+            // Primary sort by kills
+            if (a.Player.kills != b.Player.kills)
+            {
+                return b.Player.kills.CompareTo(a.Player.kills);
+            }
+
             int priorityCompare = a.SortPriority.CompareTo(b.SortPriority);
             if (priorityCompare != 0)
             {
@@ -566,6 +578,69 @@ public class RoundHudController : MonoBehaviour
         {
             _tabScoreboardList.Add(CreateTabScoreboardRow(rows[i], i));
         }
+    }
+
+    private VisualElement CreateScoreboardHeaderRow()
+    {
+        VisualElement row = new VisualElement();
+        row.style.flexDirection = FlexDirection.Row;
+        row.style.alignItems = Align.Center;
+        row.style.minHeight = 32f;
+        row.style.paddingLeft = 10f;
+        row.style.paddingRight = 10f;
+        row.style.backgroundColor = new Color(1f, 1f, 1f, 0.05f);
+        row.style.borderBottomWidth = 1f;
+        row.style.borderBottomColor = new Color(1f, 1f, 1f, 0.1f);
+
+        Label nameHeader = new Label("PLAYER");
+        nameHeader.style.flexGrow = 1f;
+        nameHeader.style.fontSize = 14f;
+        nameHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+        nameHeader.style.color = new Color(0.7f, 0.7f, 0.7f);
+        nameHeader.style.marginLeft = 66f; // Space for avatar
+
+        Label killsHeader = new Label("K");
+        killsHeader.style.width = 50f;
+        killsHeader.style.fontSize = 14f;
+        killsHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+        killsHeader.style.unityTextAlign = TextAnchor.MiddleCenter;
+        killsHeader.style.color = new Color(0.7f, 0.7f, 0.7f);
+
+        Label deathsHeader = new Label("D");
+        deathsHeader.style.width = 50f;
+        deathsHeader.style.fontSize = 14f;
+        deathsHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+        deathsHeader.style.unityTextAlign = TextAnchor.MiddleCenter;
+        deathsHeader.style.color = new Color(0.7f, 0.7f, 0.7f);
+
+        Label assistsHeader = new Label("A");
+        assistsHeader.style.width = 50f;
+        assistsHeader.style.fontSize = 14f;
+        assistsHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+        assistsHeader.style.unityTextAlign = TextAnchor.MiddleCenter;
+        assistsHeader.style.color = new Color(0.7f, 0.7f, 0.7f);
+
+        Label stateHeader = new Label("STATUS");
+        stateHeader.style.width = 110f;
+        stateHeader.style.fontSize = 14f;
+        stateHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+        stateHeader.style.unityTextAlign = TextAnchor.MiddleCenter;
+        stateHeader.style.color = new Color(0.7f, 0.7f, 0.7f);
+
+        Label readyHeader = new Label("LOBBY");
+        readyHeader.style.width = 88f;
+        readyHeader.style.fontSize = 14f;
+        readyHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+        readyHeader.style.unityTextAlign = TextAnchor.MiddleRight;
+        readyHeader.style.color = new Color(0.7f, 0.7f, 0.7f);
+
+        row.Add(nameHeader);
+        row.Add(killsHeader);
+        row.Add(deathsHeader);
+        row.Add(assistsHeader);
+        row.Add(stateHeader);
+        row.Add(readyHeader);
+        return row;
     }
 
     private void RefreshTabScoreboardFooter()
@@ -678,6 +753,24 @@ public class RoundHudController : MonoBehaviour
         nameCell.Add(avatar);
         nameCell.Add(nameLabel);
 
+        Label killsLabel = new Label(Mathf.FloorToInt(rowData.Player.kills).ToString());
+        killsLabel.style.width = 50f;
+        killsLabel.style.fontSize = 18f;
+        killsLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        killsLabel.style.color = Color.white;
+
+        Label deathsLabel = new Label(Mathf.FloorToInt(rowData.Player.deaths).ToString());
+        deathsLabel.style.width = 50f;
+        deathsLabel.style.fontSize = 18f;
+        deathsLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        deathsLabel.style.color = new Color(0.9f, 0.9f, 0.9f);
+
+        Label assistsLabel = new Label(Mathf.FloorToInt(rowData.Player.assists).ToString());
+        assistsLabel.style.width = 50f;
+        assistsLabel.style.fontSize = 18f;
+        assistsLabel.style.unityTextAlign = TextAnchor.MiddleCenter;
+        assistsLabel.style.color = new Color(0.8f, 0.8f, 0.8f);
+
         Label stateLabel = new Label(GetPlayerStateText(rowData.Player));
         stateLabel.style.width = 110f;
         stateLabel.style.fontSize = 18f;
@@ -695,6 +788,9 @@ public class RoundHudController : MonoBehaviour
             : new Color(0.7f, 0.7f, 0.7f);
 
         row.Add(nameCell);
+        row.Add(killsLabel);
+        row.Add(deathsLabel);
+        row.Add(assistsLabel);
         row.Add(stateLabel);
         row.Add(readyLabel);
         return row;
@@ -1676,7 +1772,7 @@ public class RoundHudController : MonoBehaviour
             leftLabel.style.fontSize = 18f;
             leftLabel.style.flexGrow = 1f;
 
-            Label rightLabel = new Label($"{FormatTime(entry.bestTimeMs / 1000f)}   D:{entry.downedCount}   R:{entry.revivesDone}");
+            Label rightLabel = new Label($"{FormatTime(entry.bestTimeMs / 1000f)}   K:{entry.kills}   D:{entry.deaths}   A:{entry.assists}");
             rightLabel.style.color = isLocal ? new Color(1f, 0.9f, 0.55f) : new Color(0.92f, 0.92f, 0.92f);
             rightLabel.style.unityFontStyleAndWeight = isLocal ? FontStyle.Bold : FontStyle.Normal;
             rightLabel.style.fontSize = 18f;
