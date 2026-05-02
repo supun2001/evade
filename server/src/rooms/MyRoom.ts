@@ -92,6 +92,9 @@ const MAP_VOTE_DURATION_MS = 20_000;
 const MAP_LOAD_GRACE_MS = 5_000;
 const DEFAULT_ROUND_DURATION_MS = 180_000;
 const PLAYER_SPAWN_ROTATION_Y = 180;
+const PLAYER_MAX_COMBAT_HEALTH = 100;
+const NEXTBOT_MAX_COMBAT_HEALTH = 100;
+const PLAYER_NEXTBOT_RESPAWN_DELAY_MS = 5_000;
 const DEFAULT_MAP_ID = "SampleScene";
 const AVAILABLE_MAPS = [
   { mapId: "SampleScene", sceneName: "Classic", displayName: "Classic", difficulty: "NORMAL" },
@@ -128,6 +131,8 @@ const PLAYER_UPDATE_SPEED_BOOST_MULTIPLIER = 25;
 const PLAYER_UPDATE_SPEED_BOOST_TIME_REMAINING = 26;
 const PLAYER_UPDATE_JUMP_BOOST_MULTIPLIER = 27;
 const PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING = 28;
+const PLAYER_UPDATE_IS_SHOOTING_MODE = 29;
+const PLAYER_UPDATE_SHOT_TRIGGER_ID = 30;
 
 type SpawnPoint = { x: number; y: number; z: number };
 type PredictedTargetPosition = { x: number; z: number; distance: number };
@@ -351,6 +356,7 @@ export class MyRoom extends Room<MyRoomState> {
   private playerRevivedUntil = new Map<string, number>();
   private playerForcedInjuredUntil = new Map<string, number>();
   private playerLastUpdateAt = new Map<string, number>();
+  private playerRespawnTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private currentPhase: RoundPhase = "waiting";
   private phaseEndsAt = 0;
   private roundIndex = 0;
@@ -459,6 +465,8 @@ export class MyRoom extends Room<MyRoomState> {
         player.isCrouching = false;
         player.isWallRunning = false;
         player.wallRunSide = 0;
+        player.isShootingMode = false;
+        player.combatHealth = player.maxCombatHealth > 0 ? player.maxCombatHealth : PLAYER_MAX_COMBAT_HEALTH;
         return;
       }
 
@@ -513,6 +521,8 @@ export class MyRoom extends Room<MyRoomState> {
       player.speedBoostTimeRemaining = Math.max(0, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SPEED_BOOST_TIME_REMAINING, "speedBoostTimeRemaining"), 0.05));
       player.jumpBoostMultiplier = Math.max(1, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_MULTIPLIER, "jumpBoostMultiplier"), 0.05));
       player.jumpBoostTimeRemaining = Math.max(0, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_JUMP_BOOST_TIME_REMAINING, "jumpBoostTimeRemaining"), 0.05));
+      player.isShootingMode = readPlayerUpdateBoolean(playerUpdate, PLAYER_UPDATE_IS_SHOOTING_MODE, "isShootingMode");
+      player.shotTriggerId = Math.max(0, quantizeNumber(readPlayerUpdateNumber(playerUpdate, PLAYER_UPDATE_SHOT_TRIGGER_ID, "shotTriggerId"), 1));
 
       if (keepAuthoritativeInjuredState) {
         player.isHitReacting = false;
@@ -610,6 +620,7 @@ export class MyRoom extends Room<MyRoomState> {
       this.clearCarryStateForPlayer(target.sessionId);
       target.isInjured = false;
       target.isEliminated = false;
+      target.combatHealth = target.maxCombatHealth > 0 ? target.maxCombatHealth : PLAYER_MAX_COMBAT_HEALTH;
       target.isHitReacting = false;
       target.hitReactionTimeRemaining = 0;
       target.hitReactionPitch = 0;
@@ -753,6 +764,14 @@ export class MyRoom extends Room<MyRoomState> {
         hitSourceZ,
         NEXTBOT_REPORTED_HIT_DISTANCE);
     });
+
+    this.onMessage("combatHitPlayer", (client, message) => {
+      this.handleCombatHitPlayer(client, message);
+    });
+
+    this.onMessage("combatHitNextbot", (client, message) => {
+      this.handleCombatHitNextbot(client, message);
+    });
   }
 
   onJoin(client: Client, options: any) {
@@ -798,6 +817,8 @@ export class MyRoom extends Room<MyRoomState> {
     player.speedBoostTimeRemaining = 0;
     player.jumpBoostMultiplier = 1;
     player.jumpBoostTimeRemaining = 0;
+    player.combatHealth = PLAYER_MAX_COMBAT_HEALTH;
+    player.maxCombatHealth = PLAYER_MAX_COMBAT_HEALTH;
 
     //Add player to state
     this.state.players.set(client.sessionId, player);
@@ -831,6 +852,7 @@ export class MyRoom extends Room<MyRoomState> {
 
     //Remove player from state
     this.clearCarryStateForPlayer(client.sessionId);
+    this.clearPlayerRespawnTimer(client.sessionId);
     this.state.players.delete(client.sessionId);
     this.playerLastUpdateAt.delete(client.sessionId);
     this.playerSafeUntil.delete(client.sessionId);
@@ -998,6 +1020,8 @@ export class MyRoom extends Room<MyRoomState> {
       nextbotState.velocityY = 0;
       nextbotState.velocityZ = 0;
       nextbotState.sampleTimeMs = 0;
+      nextbotState.currentHealth = NEXTBOT_MAX_COMBAT_HEALTH;
+      nextbotState.maxHealth = NEXTBOT_MAX_COMBAT_HEALTH;
       this.state.nextbots.set(botId, nextbotState);
 
       const baseSpeed = this.getConfiguredNextbotMoveSpeed(botId);
@@ -1045,6 +1069,8 @@ export class MyRoom extends Room<MyRoomState> {
     nextbot.velocityY = 0;
     nextbot.velocityZ = 0;
     nextbot.sampleTimeMs = 0;
+    nextbot.currentHealth = NEXTBOT_MAX_COMBAT_HEALTH;
+    nextbot.maxHealth = NEXTBOT_MAX_COMBAT_HEALTH;
     controller.currentTargetSessionId = "";
     controller.nextInjuryAt = 0;
     controller.groundedY = spawnPoint.y;
@@ -1075,6 +1101,9 @@ export class MyRoom extends Room<MyRoomState> {
       const nextbot = this.getNextbotState(index);
       if (nextbot != null) {
         nextbot.isActive = isActive;
+        if (isActive) {
+          nextbot.currentHealth = nextbot.maxHealth > 0 ? nextbot.maxHealth : NEXTBOT_MAX_COMBAT_HEALTH;
+        }
         if (!isActive) {
           nextbot.targetSessionId = "";
           nextbot.velocityX = 0;
@@ -1651,18 +1680,164 @@ export class MyRoom extends Room<MyRoomState> {
 
     controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
     this.clearCarryStateForPlayer(target.sessionId);
-    this.recordPlayerDowned(target.sessionId, now);
-    target.isInjured = true;
+    this.applyPlayerEliminationState(target, false);
     target.isHitReacting = false;
     target.hitReactionTimeRemaining = 0;
     target.hitReactionPitch = 0;
     target.hitReactionRoll = 0;
     target.hitReactionSeed = 0;
-    this.playerForcedInjuredUntil.set(target.sessionId, now + PLAYER_INJURY_SYNC_GRACE_MS);
     target.hitTriggerId += 1;
     target.hitSourceX = sourceX;
     target.hitSourceY = sourceY;
     target.hitSourceZ = sourceZ;
+    this.schedulePlayerRespawnAfterNextbotDeath(target.sessionId, PLAYER_NEXTBOT_RESPAWN_DELAY_MS);
+  }
+
+  private handleCombatHitPlayer(client: Client, message: any) {
+    if (this.currentPhase !== "round" || !this.state.isGameStarted) {
+      return;
+    }
+
+    const attacker = this.state.players.get(client.sessionId);
+    if (!attacker || attacker.isSpectator || attacker.isEliminated || !attacker.isReady) {
+      return;
+    }
+
+    const targetSessionId = typeof message?.targetSessionId === "string" ? message.targetSessionId : "";
+    const damage = Math.max(0, this.readFiniteMessageNumber(message?.damage, 0));
+    if (!targetSessionId || damage <= 0 || targetSessionId === client.sessionId) {
+      return;
+    }
+
+    const target = this.state.players.get(targetSessionId);
+    if (!target || target.isSpectator || target.isEliminated || !target.isReady) {
+      return;
+    }
+
+    target.combatHealth = Math.max(0, target.combatHealth - damage);
+    if (target.combatHealth <= 0) {
+      this.recordPlayerHazardElimination(target.sessionId, Date.now());
+    }
+  }
+
+  private handleCombatHitNextbot(client: Client, message: any) {
+    if (this.currentPhase !== "round" || !this.state.isGameStarted) {
+      return;
+    }
+
+    const attacker = this.state.players.get(client.sessionId);
+    if (!attacker || attacker.isSpectator || attacker.isEliminated || !attacker.isReady) {
+      return;
+    }
+
+    const nextbotId = typeof message?.id === "string" ? message.id : "";
+    const damage = Math.max(0, this.readFiniteMessageNumber(message?.damage, 0));
+    if (!nextbotId || damage <= 0) {
+      return;
+    }
+
+    const nextbot = this.state.nextbots.get(nextbotId);
+    if (!nextbot || !nextbot.isActive) {
+      return;
+    }
+
+    nextbot.currentHealth = Math.max(0, nextbot.currentHealth - damage);
+    if (nextbot.currentHealth > 0) {
+      console.log(`[room ${this.roomId}] nextbot ${nextbotId} took ${damage} damage (${nextbot.currentHealth}/${nextbot.maxHealth})`);
+      return;
+    }
+
+    console.log(`[room ${this.roomId}] nextbot ${nextbotId} died from combat hit`);
+    nextbot.isActive = false;
+    nextbot.targetSessionId = "";
+    nextbot.velocityX = 0;
+    nextbot.velocityY = 0;
+    nextbot.velocityZ = 0;
+    nextbot.sampleTimeMs = this.getRoomElapsedTimeMs();
+    const controllerIndex = this.nextbotControllers.findIndex((controller) => controller.id === nextbotId);
+    if (controllerIndex >= 0) {
+      const controller = this.nextbotControllers[controllerIndex];
+      controller.currentTargetSessionId = "";
+      controller.pathWaypoints = [];
+      controller.nextInjuryAt = 0;
+    }
+  }
+
+  private clearPlayerRespawnTimer(sessionId: string) {
+    const timeout = this.playerRespawnTimeouts.get(sessionId);
+    if (timeout != null) {
+      clearTimeout(timeout);
+      this.playerRespawnTimeouts.delete(sessionId);
+    }
+  }
+
+  private schedulePlayerRespawnAfterNextbotDeath(sessionId: string, delayMs: number) {
+    this.clearPlayerRespawnTimer(sessionId);
+
+    const targetClient = this.clients.find((roomClient) => roomClient.sessionId === sessionId);
+    if (targetClient != null) {
+      targetClient.send("playerRespawnCountdown", JSON.stringify({ durationMs: delayMs }));
+    }
+
+    const timeout = setTimeout(() => {
+      this.playerRespawnTimeouts.delete(sessionId);
+      this.respawnPlayerAfterNextbotDeath(sessionId);
+    }, Math.max(0, delayMs));
+    this.playerRespawnTimeouts.set(sessionId, timeout);
+  }
+
+  private respawnPlayerAfterNextbotDeath(sessionId: string) {
+    if (this.currentPhase !== "round" || !this.state.isGameStarted) {
+      return;
+    }
+
+    const player = this.state.players.get(sessionId);
+    if (!player) {
+      return;
+    }
+
+    this.clearCarryStateForPlayer(sessionId);
+    const spawnPosition = this.getPlayerSpawnPosition(sessionId);
+    player.x = spawnPosition.x;
+    player.y = spawnPosition.y;
+    player.z = spawnPosition.z;
+    player.rotationY = PLAYER_SPAWN_ROTATION_Y;
+    player.visualYaw = PLAYER_SPAWN_ROTATION_Y;
+    player.velocityX = 0;
+    player.velocityY = 0;
+    player.velocityZ = 0;
+    player.isInjured = false;
+    player.isEliminated = false;
+    player.isHitReacting = false;
+    player.hitReactionTimeRemaining = 0;
+    player.hitReactionPitch = 0;
+    player.hitReactionRoll = 0;
+    player.hitReactionSeed = 0;
+    player.hitSourceX = 0;
+    player.hitSourceY = 0;
+    player.hitSourceZ = 0;
+    player.isGrounded = true;
+    player.isJumping = false;
+    player.isCrouching = false;
+    player.isWallRunning = false;
+    player.wallRunSide = 0;
+    player.moveInputX = 0;
+    player.moveInputY = 0;
+    player.combatHealth = player.maxCombatHealth > 0 ? player.maxCombatHealth : PLAYER_MAX_COMBAT_HEALTH;
+    const now = Date.now();
+    this.playerSafeUntil.set(sessionId, now + NEXTBOT_START_GRACE_MS);
+    this.playerRevivedUntil.set(sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
+    this.playerForcedInjuredUntil.delete(sessionId);
+
+    const targetClient = this.clients.find((roomClient) => roomClient.sessionId === sessionId);
+    if (targetClient != null) {
+      targetClient.send("roundPlayerReset", JSON.stringify({
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        rotationY: player.rotationY,
+      }));
+    }
   }
 
   private readFiniteMessageNumber(value: unknown, fallback: number) {
@@ -3353,6 +3528,7 @@ export class MyRoom extends Room<MyRoomState> {
       player.wallRunSide = 0;
       player.moveInputX = 0;
       player.moveInputY = 0;
+      player.combatHealth = player.maxCombatHealth > 0 ? player.maxCombatHealth : PLAYER_MAX_COMBAT_HEALTH;
       this.playerSafeUntil.set(player.sessionId, now + this.intermissionDurationMs + NEXTBOT_START_GRACE_MS);
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
       this.playerForcedInjuredUntil.delete(player.sessionId);
@@ -3401,6 +3577,7 @@ export class MyRoom extends Room<MyRoomState> {
       player.wallRunSide = 0;
       player.moveInputX = 0;
       player.moveInputY = 0;
+      player.combatHealth = player.maxCombatHealth > 0 ? player.maxCombatHealth : PLAYER_MAX_COMBAT_HEALTH;
       this.playerSafeUntil.set(player.sessionId, safeUntil);
       this.playerRevivedUntil.set(player.sessionId, now + PLAYER_REVIVE_SYNC_GRACE_MS);
       this.playerForcedInjuredUntil.delete(player.sessionId);
@@ -3469,6 +3646,7 @@ export class MyRoom extends Room<MyRoomState> {
 
   private applyPlayerEliminationState(player: Player, keepInjuredState: boolean) {
     this.clearCarryStateForPlayer(player.sessionId);
+    player.combatHealth = 0;
     player.isEliminated = true;
     player.isInjured = keepInjuredState;
     player.isHitReacting = false;

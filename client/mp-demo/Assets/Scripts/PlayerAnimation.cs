@@ -205,7 +205,19 @@ public class PlayerAnimation : MonoBehaviour
     public bool IsCrouchingActive => _debugForceCrouching || (_useNetworkAnimationState ? _networkIsCrouching : (_playerController != null && _playerController.IsCrouching()));
     public bool IsCarryingActive => _playerController != null && _playerController.IsCarrying();
     public bool IsBeingCarriedActive => _playerController != null && _playerController.IsBeingCarried();
-    private string ActiveLocomotionState => _presentationMode == PresentationMode.Shooting ? SHOOTING_IDLE_RUN_STATE : IDLE_RUN_STATE;
+    public bool IsShootingModeActive => _presentationMode == PresentationMode.Shooting;
+    
+    private string GetActiveLocomotionState(Animator targetAnimator)
+    {
+        if (_presentationMode == PresentationMode.Shooting)
+        {
+            if (targetAnimator.HasState(0, _shootingIdleRunStateHash))
+            {
+                return SHOOTING_IDLE_RUN_STATE;
+            }
+        }
+        return IDLE_RUN_STATE;
+    }
 
     public void PlayShootAnimation()
     {
@@ -496,10 +508,14 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
+        // We want to allow the root animator to receive overrides as well,
+        // as it often drives the third-person model visibility and animations.
+        /*
         if (targetAnimator.gameObject == gameObject)
         {
             return;
         }
+        */
 
         RuntimeAnimatorController desiredController = GetDesiredAnimatorController(targetAnimator);
         if (desiredController == null || targetAnimator.runtimeAnimatorController == desiredController)
@@ -625,7 +641,7 @@ public class PlayerAnimation : MonoBehaviour
         for (int i = 0; i < animators.Length; i++)
         {
             Animator targetAnimator = animators[i];
-            if (targetAnimator == null || targetAnimator.gameObject == gameObject)
+            if (targetAnimator == null)
             {
                 continue;
             }
@@ -687,6 +703,13 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive && !isCrouchRunningActive);
         targetAnimator.SetBool(_shootingModeHash, _presentationMode == PresentationMode.Shooting);
 
+        if (isInjuredActive)
+        {
+            // If we are injured, let the animator handle the state transitions via the IsInjured parameter.
+            // Do not force locomotion states which would override the downed pose.
+            return;
+        }
+
         if (_shootAnimationTimer > 0f
             && _presentationMode == PresentationMode.Shooting
             && targetAnimator.HasState(0, _ak47ShootStateHash))
@@ -740,7 +763,7 @@ public class PlayerAnimation : MonoBehaviour
         if (currentState.IsName(CROUCH_RUNNING_STATE))
         {
             string recoveryState = isGrounded
-                ? ActiveLocomotionState
+                ? GetActiveLocomotionState(targetAnimator)
                 : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
             CrossFadeIfNeeded(targetAnimator, recoveryState, _crouchRunExitTransitionDuration);
             return;
@@ -750,7 +773,7 @@ public class PlayerAnimation : MonoBehaviour
         // so join-mode shooting does not drift back to the default run tree.
         if (isGrounded)
         {
-            CrossFadeIfNeeded(targetAnimator, ActiveLocomotionState, 0.08f);
+            CrossFadeIfNeeded(targetAnimator, GetActiveLocomotionState(targetAnimator), 0.08f);
             return;
         }
 
@@ -1081,7 +1104,7 @@ public class PlayerAnimation : MonoBehaviour
         _wallRunAnimationHoldTimer = 0f;
 
         string recoveryState = isGrounded
-            ? (IsCrouchingActive ? CROUCH_STATE : ActiveLocomotionState)
+            ? (IsCrouchingActive ? CROUCH_STATE : GetActiveLocomotionState(targetAnimator))
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.08f);
@@ -1104,9 +1127,11 @@ public class PlayerAnimation : MonoBehaviour
         {
             return false;
         }
+        
+        string activeLocomotion = GetActiveLocomotionState(targetAnimator);
 
         string recoveryState = isGrounded
-            ? (isCrouchingActive ? CROUCH_STATE : ActiveLocomotionState)
+            ? (isCrouchingActive ? CROUCH_STATE : activeLocomotion)
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.06f);

@@ -23,6 +23,7 @@ public class NetworkPlayer : MonoBehaviour
     private PlayerAnimation anim; 
     private Animator animator;
     private float _lastProcessedHitTriggerId = -1f;
+    private float _lastProcessedShotTriggerId = -1f;
     private bool _isInitialized;
     private float _nextDebugClickLogTime;
 
@@ -33,6 +34,7 @@ public class NetworkPlayer : MonoBehaviour
         playerState = state;
         isLocal = isLocalPlayer;
         _lastProcessedHitTriggerId = state != null ? state.hitTriggerId : 0f;
+        _lastProcessedShotTriggerId = state != null ? state.shotTriggerId : 0f;
         
         controller = GetComponent<PlayerController>();
         input = GetComponent<PlayerLocomotionInput>();
@@ -92,6 +94,11 @@ public class NetworkPlayer : MonoBehaviour
         return !string.IsNullOrEmpty(sessionId);
     }
 
+    public void BeginRespawnCountdown(float durationSeconds)
+    {
+        controller?.BeginRespawnCountdown(durationSeconds);
+    }
+
     private float nextSendTime = 0f;
     public float sendInterval = 0.05f; // 20 times per second
     
@@ -114,6 +121,11 @@ public class NetworkPlayer : MonoBehaviour
 
         if (isLocal)
         {
+            if (controller != null && playerState.maxCombatHealth > 0f)
+            {
+                controller.SetCombatHealth(playerState.combatHealth);
+            }
+
             NetworkManager manager = NetworkManager.Instance;
             bool fireInputRequested = Mouse.current != null
                 && (Mouse.current.leftButton.isPressed || Mouse.current.leftButton.wasPressedThisFrame);
@@ -297,6 +309,9 @@ public class NetworkPlayer : MonoBehaviour
         float speedBoostTimeRemaining = controller != null ? controller.GetSyncedSpeedBoostTimeRemaining() : 0f;
         float jumpBoostMultiplier = controller != null ? controller.GetSyncedJumpBoostMultiplier() : 1f;
         float jumpBoostTimeRemaining = controller != null ? controller.GetSyncedJumpBoostTimeRemaining() : 0f;
+        bool isShootingMode = (anim != null && anim.IsShootingModeActive)
+            || (controller != null && controller.IsCombatModeActive);
+        float shotTriggerId = controller != null ? controller.GetCombatShotTriggerId() : 0f;
 
         if (anim != null)
         {
@@ -341,7 +356,9 @@ public class NetworkPlayer : MonoBehaviour
             speedBoostMultiplier,
             speedBoostTimeRemaining,
             jumpBoostMultiplier,
-            jumpBoostTimeRemaining
+            jumpBoostTimeRemaining,
+            isShootingMode,
+            shotTriggerId
         );
     }
 
@@ -354,6 +371,11 @@ public class NetworkPlayer : MonoBehaviour
 
         if (controller != null)
         {
+            if (playerState.maxCombatHealth > 0f)
+            {
+                controller.SetCombatHealth(playerState.combatHealth);
+            }
+
             controller.EnsureRemoteFullBodyVisible();
         }
 
@@ -366,6 +388,19 @@ public class NetworkPlayer : MonoBehaviour
         {
             if (anim != null)
             {
+                bool remoteShootingMode = playerState.isShootingMode;
+                anim.SetShootingModeActive(remoteShootingMode);
+                if (controller != null && controller.IsCombatModeActive != remoteShootingMode)
+                {
+                    controller.SetCombatModeActive(remoteShootingMode);
+                }
+
+                if (remoteShootingMode && playerState.shotTriggerId > 0f && playerState.shotTriggerId > _lastProcessedShotTriggerId)
+                {
+                    anim.PlayShootAnimation();
+                    _lastProcessedShotTriggerId = playerState.shotTriggerId;
+                }
+
                 anim.ApplyNetworkState(
                     playerState.animInputX,
                     playerState.animInputY,

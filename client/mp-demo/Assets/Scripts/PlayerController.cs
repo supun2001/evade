@@ -260,7 +260,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Vector3 _muzzleFlashLocalEuler = Vector3.zero;
     [SerializeField, Min(0f)] private float _muzzleFlashForwardOffset = 0.015f;
     [Header("Shooting Debug")]
-    [SerializeField] private bool _debugShootingLogs = false;
+    [SerializeField] private bool _debugShootingLogs = true;
     [SerializeField, Min(0f)] private float _debugShootingLogCooldown = 0.2f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
@@ -297,6 +297,8 @@ public class PlayerController : MonoBehaviour
     private Button _pauseGraphicsMediumButton;
     private SliderInt _pauseVolumeSlider;
     private Label _pauseGraphicsValueLabel;
+    private VisualElement _respawnCountdownContainerElement;
+    private Label _respawnCountdownLabelElement;
     private CinemachineBrain _cinemachineBrain;
     private CinemachineCamera _cinemachineCamera;
     private CinemachineThirdPersonFollow _thirdPersonFollow;
@@ -356,6 +358,7 @@ public class PlayerController : MonoBehaviour
     private bool _combatModeActive;
     private bool _isEliminatedState;
     private float _nextAllowedShotTime;
+    private float _shotTriggerId;
     private AudioClip[] _gunshotClips = Array.Empty<AudioClip>();
     private int _lastGunshotClipIndex = -1;
     private readonly System.Collections.Generic.Dictionary<string, EnemyHealthBarView> _enemyHealthBarViews = new();
@@ -365,6 +368,7 @@ public class PlayerController : MonoBehaviour
     private Quaternion _muzzleFlashPrefabLocalRotation = Quaternion.identity;
     private float _nextDebugShootingLogTime;
     private float _nextDebugClickPathLogTime;
+    private float _respawnCountdownEndTime = -1f;
 
     private CameraViewMode _currentViewMode;
     private CameraViewMode _preferredViewMode;
@@ -661,6 +665,11 @@ public class PlayerController : MonoBehaviour
         {
             UpdateSpectateMode();
             return;
+        }
+
+        if (!_isSimulationControlled)
+        {
+            UpdateRespawnCountdownUi();
         }
 
         if (!_playerLocomotionInput.InputEnabled) return;
@@ -1638,6 +1647,7 @@ public class PlayerController : MonoBehaviour
         _pauseGraphicsMediumButton = root.Q<Button>("pause-graphics-medium-button");
         _pauseVolumeSlider = root.Q<SliderInt>("pause-volume-slider");
         _pauseGraphicsValueLabel = root.Q<Label>("pause-graphics-value-label");
+        EnsureRespawnCountdownOverlay(root);
 
         EnsurePickupFadeOverlay(root);
 
@@ -1892,6 +1902,63 @@ public class PlayerController : MonoBehaviour
         UpdateEnemyHealthBars();
     }
 
+    public void BeginRespawnCountdown(float durationSeconds)
+    {
+        _respawnCountdownEndTime = Time.unscaledTime + Mathf.Max(0.1f, durationSeconds);
+        UpdateRespawnCountdownUi();
+    }
+
+    private void ClearRespawnCountdown()
+    {
+        _respawnCountdownEndTime = -1f;
+
+        if (_respawnCountdownContainerElement != null)
+        {
+            _respawnCountdownContainerElement.style.display = DisplayStyle.None;
+        }
+
+        if (_respawnButton != null)
+        {
+            _respawnButton.text = "[R]  Respawn";
+            _respawnButton.SetEnabled(false);
+        }
+    }
+
+    private void UpdateRespawnCountdownUi()
+    {
+        if (_respawnCountdownContainerElement == null || _respawnCountdownLabelElement == null)
+        {
+            CacheHudElements();
+            if (_respawnCountdownContainerElement == null || _respawnCountdownLabelElement == null)
+            {
+                return;
+            }
+        }
+
+        if (_respawnCountdownEndTime <= 0f || !_isEliminatedState)
+        {
+            _respawnCountdownContainerElement.style.display = DisplayStyle.None;
+            if (_respawnButton != null)
+            {
+                _respawnButton.text = "[R]  Respawn";
+                _respawnButton.SetEnabled(false);
+            }
+            return;
+        }
+
+        float remainingSeconds = Mathf.Max(0f, _respawnCountdownEndTime - Time.unscaledTime);
+        int remainingWholeSeconds = Mathf.CeilToInt(remainingSeconds);
+        string countdownText = $"Respawning in {remainingWholeSeconds}";
+        _respawnCountdownContainerElement.style.display = DisplayStyle.Flex;
+        _respawnCountdownLabelElement.text = countdownText;
+
+        if (_respawnButton != null)
+        {
+            _respawnButton.text = countdownText;
+            _respawnButton.SetEnabled(false);
+        }
+    }
+
     private void UpdateEnemyHealthBars()
     {
         if (_enemyHealthOverlayElement == null || _gameplayCamera == null)
@@ -1957,6 +2024,42 @@ public class PlayerController : MonoBehaviour
             view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
         }
 
+        NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < nextbots.Length; i++)
+        {
+            NextbotFollowPlayer nextbot = nextbots[i];
+            if (nextbot == null
+                || !nextbot.IsCombatActive
+                || string.IsNullOrWhiteSpace(nextbot.NetworkNextbotId))
+            {
+                continue;
+            }
+
+            Vector3 worldAnchor = nextbot.transform.position + Vector3.up * 2.4f;
+            if (!TryGetEnemyHealthBarScreenPoint(worldAnchor, out float uiX, out float uiY))
+            {
+                continue;
+            }
+
+            string nextbotKey = $"nextbot:{nextbot.NetworkNextbotId}";
+            activeSessionIds.Add(nextbotKey);
+            EnemyHealthBarView view = GetOrCreateEnemyHealthBar(nextbotKey);
+            if (view == null)
+            {
+                continue;
+            }
+
+            float maxHealth = Mathf.Max(1f, nextbot.MaxCombatHealth);
+            float currentHealth = Mathf.Clamp(nextbot.CurrentCombatHealth, 0f, maxHealth);
+            float normalizedHealth = Mathf.Clamp01(currentHealth / maxHealth);
+            view.Root.style.display = DisplayStyle.Flex;
+            view.Root.style.left = uiX;
+            view.Root.style.top = uiY;
+            view.Label.text = $"{nextbot.CombatDisplayName}  {Mathf.CeilToInt(currentHealth)}";
+            view.Fill.style.width = Length.Percent(normalizedHealth * 100f);
+            view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
+        }
+
         foreach (System.Collections.Generic.KeyValuePair<string, EnemyHealthBarView> pair in _enemyHealthBarViews)
         {
             if (!activeSessionIds.Contains(pair.Key) && pair.Value?.Root != null)
@@ -1964,6 +2067,83 @@ public class PlayerController : MonoBehaviour
                 pair.Value.Root.style.display = DisplayStyle.None;
             }
         }
+    }
+
+    private void EnsureRespawnCountdownOverlay(VisualElement root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        if (_respawnCountdownContainerElement == null)
+        {
+            _respawnCountdownContainerElement = root.Q<VisualElement>("respawn-countdown-container");
+        }
+
+        if (_respawnCountdownContainerElement == null)
+        {
+            _respawnCountdownContainerElement = new VisualElement
+            {
+                name = "respawn-countdown-container",
+                pickingMode = PickingMode.Ignore
+            };
+            _respawnCountdownContainerElement.style.display = DisplayStyle.None;
+            _respawnCountdownContainerElement.style.position = Position.Absolute;
+            _respawnCountdownContainerElement.style.left = Length.Percent(50f);
+            _respawnCountdownContainerElement.style.top = 96f;
+            _respawnCountdownContainerElement.style.translate = new Translate(new Length(-50f, LengthUnit.Percent), 0f);
+            _respawnCountdownContainerElement.style.paddingLeft = 18f;
+            _respawnCountdownContainerElement.style.paddingRight = 18f;
+            _respawnCountdownContainerElement.style.paddingTop = 12f;
+            _respawnCountdownContainerElement.style.paddingBottom = 12f;
+            _respawnCountdownContainerElement.style.backgroundColor = new Color(0.08f, 0.09f, 0.11f, 0.88f);
+            _respawnCountdownContainerElement.style.borderTopLeftRadius = 12f;
+            _respawnCountdownContainerElement.style.borderTopRightRadius = 12f;
+            _respawnCountdownContainerElement.style.borderBottomLeftRadius = 12f;
+            _respawnCountdownContainerElement.style.borderBottomRightRadius = 12f;
+
+            _respawnCountdownLabelElement = new Label
+            {
+                name = "respawn-countdown-label",
+                text = "Respawning in 5"
+            };
+            _respawnCountdownLabelElement.style.color = Color.white;
+            _respawnCountdownLabelElement.style.fontSize = 24f;
+            _respawnCountdownLabelElement.style.unityFontStyleAndWeight = FontStyle.Bold;
+            _respawnCountdownLabelElement.style.unityTextAlign = TextAnchor.MiddleCenter;
+            _respawnCountdownContainerElement.Add(_respawnCountdownLabelElement);
+            root.Add(_respawnCountdownContainerElement);
+            return;
+        }
+
+        if (_respawnCountdownLabelElement == null)
+        {
+            _respawnCountdownLabelElement = _respawnCountdownContainerElement.Q<Label>("respawn-countdown-label");
+        }
+    }
+
+    private bool TryGetEnemyHealthBarScreenPoint(Vector3 worldAnchor, out float uiX, out float uiY)
+    {
+        uiX = 0f;
+        uiY = 0f;
+
+        Vector3 screenPoint = _gameplayCamera.WorldToScreenPoint(worldAnchor);
+        if (screenPoint.z <= 0f)
+        {
+            return false;
+        }
+
+        float rootWidth = _enemyHealthOverlayElement.resolvedStyle.width;
+        float rootHeight = _enemyHealthOverlayElement.resolvedStyle.height;
+        if (rootWidth <= 1f || rootHeight <= 1f)
+        {
+            return false;
+        }
+
+        uiX = screenPoint.x;
+        uiY = rootHeight - screenPoint.y;
+        return !(uiX < -140f || uiX > rootWidth + 140f || uiY < -40f || uiY > rootHeight + 40f);
     }
 
     private EnemyHealthBarView GetOrCreateEnemyHealthBar(string sessionId)
@@ -2217,6 +2397,7 @@ public class PlayerController : MonoBehaviour
     private void FireCombatShot()
     {
         LogShootingDebug("FireCombatShot.Begin", "Shot started");
+        _shotTriggerId += 1f;
         _playerAnimation?.PlayShootAnimation();
         PlayGunshotSound();
 
@@ -2232,13 +2413,7 @@ public class PlayerController : MonoBehaviour
         PlayBulletParticleEffect(shotRay.direction);
         LogShootingDebug("FireCombatShot.Visuals", $"camera={sourceCamera.gameObject.name}, dir={shotRay.direction}");
 
-        if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
-            || !offlineModeManager.IsOfflineModeActive
-            || offlineModeManager.CurrentPresentationMode != OfflineModeManager.OfflinePresentationMode.Shooting)
-        {
-            LogShootingDebug("FireCombatShot.End", "Visual/audio only path (not offline shooting damage mode)");
-            return;
-        }
+        OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager);
         RaycastHit[] hits = Physics.RaycastAll(
             shotRay,
             Mathf.Max(1f, _ak47Range),
@@ -2253,6 +2428,7 @@ public class PlayerController : MonoBehaviour
 
         Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
         LogShootingDebug("FireCombatShot.Raycast", $"Hit count={hits.Length}");
+        LogCombatRaycastHits(hits);
 
         string attackerSessionId = GetComponent<OfflinePlayerIdentity>()?.SessionId ?? string.Empty;
         for (int i = 0; i < hits.Length; i++)
@@ -2263,27 +2439,120 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            PlayerController hitController = hitCollider.GetComponentInParent<PlayerController>();
-            if (hitController == null || hitController == this || hitController.IsEliminatedStateActive)
+            if (TryHandleCombatPlayerHit(hitCollider, offlineModeManager, attackerSessionId))
             {
-                continue;
+                return;
             }
 
-            OfflinePlayerIdentity targetIdentity = hitController.GetComponent<OfflinePlayerIdentity>();
+            if (TryHandleCombatNextbotHit(hitCollider))
+            {
+                return;
+            }
+        }
+
+        LogShootingDebug("FireCombatShot.End", "No valid damage target found");
+    }
+
+    private bool TryHandleCombatPlayerHit(Collider hitCollider, OfflineModeManager offlineModeManager, string attackerSessionId)
+    {
+        PlayerController hitController = hitCollider.GetComponentInParent<PlayerController>();
+        if (hitController == null || hitController == this || hitController.IsEliminatedStateActive)
+        {
+            return false;
+        }
+
+        OfflinePlayerIdentity targetIdentity = hitController.GetComponent<OfflinePlayerIdentity>();
+        if (offlineModeManager != null
+            && offlineModeManager.IsOfflineModeActive
+            && offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting)
+        {
             if (targetIdentity == null
                 || targetIdentity.IsLocalPlayer
                 || string.IsNullOrWhiteSpace(targetIdentity.SessionId)
                 || string.Equals(targetIdentity.SessionId, attackerSessionId, StringComparison.Ordinal))
             {
-                continue;
+                return false;
             }
 
             offlineModeManager.TryApplyCombatDamage(targetIdentity.SessionId, _ak47Damage, attackerSessionId);
             LogShootingDebug("FireCombatShot.Damage", $"Applied {_ak47Damage:0.##} damage to {targetIdentity.SessionId}");
+            return true;
+        }
+
+        NetworkPlayer hitNetworkPlayer = hitController.GetComponent<NetworkPlayer>();
+        if (hitNetworkPlayer == null || hitNetworkPlayer.IsLocalPlayer || !hitNetworkPlayer.TryGetSessionId(out string targetSessionId))
+        {
+            return false;
+        }
+
+        NetworkManager.Instance?.SendCombatHitPlayer(targetSessionId, _ak47Damage);
+        Debug.Log($"[CombatRayDebug] Sent player hit | target={targetSessionId}, damage={_ak47Damage:0.##}, collider={hitCollider.name}");
+        LogShootingDebug("FireCombatShot.Damage", $"Applied {_ak47Damage:0.##} damage to player {targetSessionId}");
+        return true;
+    }
+
+    private bool TryHandleCombatNextbotHit(Collider hitCollider)
+    {
+        NextbotFollowPlayer nextbot = hitCollider.GetComponentInParent<NextbotFollowPlayer>();
+        if (nextbot == null || !nextbot.IsCombatActive)
+        {
+            return false;
+        }
+
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive
+            && offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting)
+        {
+            if (!nextbot.TryApplyOfflineCombatDamage(_ak47Damage))
+            {
+                return false;
+            }
+
+            Debug.Log($"[CombatRayDebug] Offline nextbot hit | id={nextbot.NetworkNextbotId}, damage={_ak47Damage:0.##}, remaining={nextbot.CurrentCombatHealth:0.##}");
+            LogShootingDebug("FireCombatShot.Damage", $"Applied {_ak47Damage:0.##} damage to nextbot {nextbot.NetworkNextbotId}");
+            return true;
+        }
+
+        NetworkManager.Instance?.SendCombatHitNextbot(nextbot.NetworkNextbotId, _ak47Damage);
+        Debug.Log($"[CombatRayDebug] Sent nextbot hit | id={nextbot.NetworkNextbotId}, damage={_ak47Damage:0.##}, collider={hitCollider.name}");
+        LogShootingDebug("FireCombatShot.Damage", $"Applied {_ak47Damage:0.##} damage to nextbot {nextbot.NetworkNextbotId}");
+        return true;
+    }
+
+    private void LogCombatRaycastHits(RaycastHit[] hits)
+    {
+        if (!_debugShootingLogs || hits == null || hits.Length == 0)
+        {
             return;
         }
 
-        LogShootingDebug("FireCombatShot.End", "No valid damage target found");
+        System.Text.StringBuilder builder = new System.Text.StringBuilder();
+        int maxLoggedHits = Mathf.Min(hits.Length, 6);
+        for (int i = 0; i < maxLoggedHits; i++)
+        {
+            Collider collider = hits[i].collider;
+            if (collider == null)
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append(" | ");
+            }
+
+            PlayerController hitPlayer = collider.GetComponentInParent<PlayerController>();
+            NextbotFollowPlayer hitNextbot = collider.GetComponentInParent<NextbotFollowPlayer>();
+            string kind = hitNextbot != null
+                ? $"nextbot:{hitNextbot.NetworkNextbotId}"
+                : (hitPlayer != null ? $"player:{collider.transform.root.name}" : "world");
+            builder.Append($"{i}:{collider.name}@{hits[i].distance:0.00} [{kind}]");
+        }
+
+        if (builder.Length > 0)
+        {
+            Debug.Log($"[CombatRayDebug] Raycast hits | {builder}");
+        }
     }
 
     private void LogShootingDebug(string stage, string details)
@@ -3308,6 +3577,7 @@ public class PlayerController : MonoBehaviour
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         _isEliminatedState = false;
+        ClearRespawnCountdown();
         if (_combatModeActive)
         {
             _currentHealth = _maxHealth;
@@ -3375,6 +3645,7 @@ public class PlayerController : MonoBehaviour
         ApplyNetworkRevive();
         _currentHealth = _maxHealth;
         _isEliminatedState = false;
+        ClearRespawnCountdown();
 
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
@@ -5729,6 +6000,11 @@ public class PlayerController : MonoBehaviour
     public float CurrentHealth => _currentHealth;
     public bool IsCombatModeActive => _combatModeActive;
     public bool IsEliminatedStateActive => _isEliminatedState;
+
+    public float GetCombatShotTriggerId()
+    {
+        return _shotTriggerId;
+    }
 
     public void SetCombatModeActive(bool isActive)
     {

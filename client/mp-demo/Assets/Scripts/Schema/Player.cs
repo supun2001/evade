@@ -146,4 +146,16 @@ public Player() { }
 
 	[Type(43, "boolean")]
 	public bool isSpectator = default(bool);
+
+	[Type(44, "boolean")]
+	public bool isShootingMode = default(bool);
+
+	[Type(45, "number")]
+	public float shotTriggerId = default(float);
+
+	[Type(46, "number")]
+	public float combatHealth = 100f;
+
+	[Type(47, "number")]
+	public float maxCombatHealth = 100f;
 	}

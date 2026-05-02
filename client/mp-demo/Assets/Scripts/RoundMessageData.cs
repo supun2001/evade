@@ -83,3 +83,9 @@ public class MapSelectedMessageData
     public string difficulty;
     public bool isInitial;
 }
+
+[Serializable]
+public class PlayerRespawnCountdownMessageData
+{
+    public int durationMs;
+}

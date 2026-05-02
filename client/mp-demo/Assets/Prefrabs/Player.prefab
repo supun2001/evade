@@ -25,7 +25,7 @@ Transform:
   m_GameObject: {fileID: 1194618258257592837}
   serializedVersion: 2
   m_LocalRotation: {x: 0.00000005960463, y: 0.000000014901158, z: -0.00000011920926, w: 1}
-  m_LocalPosition: {x: -15.675805, y: -1.5837543, z: 0.4260339}
+  m_LocalPosition: {x: -2.177, y: -0.034, z: 0.02}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -58,8 +58,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
-  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
+  m_LocalRotation: {x: -0.000000026462367, y: 0.8741787, z: -0.48560452, w: -0.000000034791217}
+  m_LocalPosition: {x: 0, y: -0.05941777, z: 0.20573585}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -444,6 +444,8 @@ MonoBehaviour:
   _muzzleFlashLocalPosition: {x: 0, y: 0, z: 0}
   _muzzleFlashLocalEuler: {x: 0, y: 0, z: 0}
   _muzzleFlashForwardOffset: 0.015
+  _debugShootingLogs: 0
+  _debugShootingLogCooldown: 0.2
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -927,8 +929,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122106, y: 0.0000000074063085, z: 8.110277e-10, w: 0.9994177}
-  m_LocalPosition: {x: 0, y: 0.023889482, z: -6.05423}
+  m_LocalRotation: {x: -0.000000026462367, y: 0.8741787, z: -0.48560452, w: -0.000000034791217}
+  m_LocalPosition: {x: 0, y: -0.05941777, z: 0.20573585}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:

@@ -65,7 +65,7 @@ public struct FloorHeightSampleConfig
 public class NetworkManager : MonoBehaviour
 {
     private const string HostedServerUrl = "wss://wargrid.games";
-    private const int PlayerUpdateFieldCount = 29;
+    private const int PlayerUpdateFieldCount = 31;
     private const string WalkableLayerName = "Walkable";
     private const string RampLayerName = "Ramp";
     private const string RandomMapId = "random";
@@ -496,7 +496,9 @@ public class NetworkManager : MonoBehaviour
         float speedBoostMultiplier,
         float speedBoostTimeRemaining,
         float jumpBoostMultiplier,
-        float jumpBoostTimeRemaining)
+        float jumpBoostTimeRemaining,
+        bool isShootingMode,
+        float shotTriggerId)
     {
         if (room == null) return;
 
@@ -526,7 +528,9 @@ public class NetworkManager : MonoBehaviour
                 speedBoostMultiplier = speedBoostMultiplier,
                 speedBoostTimeRemaining = speedBoostTimeRemaining,
                 jumpBoostMultiplier = jumpBoostMultiplier,
-                jumpBoostTimeRemaining = jumpBoostTimeRemaining
+                jumpBoostTimeRemaining = jumpBoostTimeRemaining,
+                isShootingMode = isShootingMode,
+                shotTriggerId = shotTriggerId
             });
             return;
         }
@@ -562,6 +566,8 @@ public class NetworkManager : MonoBehaviour
         playerUpdatePayload[26] = speedBoostTimeRemaining;
         playerUpdatePayload[27] = jumpBoostMultiplier;
         playerUpdatePayload[28] = jumpBoostTimeRemaining;
+        playerUpdatePayload[29] = isShootingMode ? 1f : 0f;
+        playerUpdatePayload[30] = shotTriggerId;
 
         _ = room.Send("playerUpdate", playerUpdatePayload);
     }
@@ -760,6 +766,32 @@ public class NetworkManager : MonoBehaviour
             x = hitSourcePosition.x,
             y = hitSourcePosition.y,
             z = hitSourcePosition.z,
+        });
+    }
+
+    public void SendCombatHitPlayer(string targetSessionId, float damage)
+    {
+        if (room == null || !room.Connection.IsOpen || string.IsNullOrWhiteSpace(targetSessionId) || damage <= 0f)
+        {
+            return;
+        }
+
+        room.Send("combatHitPlayer", new {
+            targetSessionId,
+            damage,
+        });
+    }
+
+    public void SendCombatHitNextbot(string nextbotId, float damage)
+    {
+        if (room == null || !room.Connection.IsOpen || string.IsNullOrWhiteSpace(nextbotId) || damage <= 0f)
+        {
+            return;
+        }
+
+        room.Send("combatHitNextbot", new {
+            id = nextbotId,
+            damage,
         });
     }
 
@@ -1398,6 +1430,23 @@ public class NetworkManager : MonoBehaviour
 
             PlayerController controller = localPlayer.GetComponent<PlayerController>();
             controller?.ApplyNetworkRevive();
+        });
+
+        room.OnMessage<string>("playerRespawnCountdown", (json) =>
+        {
+            PlayerRespawnCountdownMessageData payload = ParseJsonMessage<PlayerRespawnCountdownMessageData>(json);
+            if (payload == null
+                || !players.TryGetValue(room.SessionId, out GameObject localPlayer)
+                || localPlayer == null)
+            {
+                return;
+            }
+
+            NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+            if (networkPlayer != null)
+            {
+                networkPlayer.BeginRespawnCountdown(payload.durationMs / 1000f);
+            }
         });
 
         room.OnMessage<string>("roundPlayerReset", (json) =>

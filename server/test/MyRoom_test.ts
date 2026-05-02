@@ -392,7 +392,9 @@ describe("testing your Colyseus app", () => {
 
     await room.waitForNextPatch();
 
-    assert.strictEqual(player!.isInjured, true);
+    assert.strictEqual(player!.isEliminated, true);
+    assert.strictEqual(player!.isInjured, false);
+    assert.strictEqual(player!.combatHealth, 0);
     assert.strictEqual(player!.hitTriggerId > 0, true);
   });
 
@@ -433,7 +435,9 @@ describe("testing your Colyseus app", () => {
 
     await room.waitForNextPatch();
 
-    assert.strictEqual(player!.isInjured, true);
+    assert.strictEqual(player!.isEliminated, true);
+    assert.strictEqual(player!.isInjured, false);
+    assert.strictEqual(player!.combatHealth, 0);
     assert.strictEqual(player!.hitTriggerId > 0, true);
   });
 });

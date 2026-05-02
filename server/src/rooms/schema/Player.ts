@@ -58,4 +58,8 @@ export class Player extends Schema {
     @type("number") jumpBoostMultiplier: number = 1;
     @type("number") jumpBoostTimeRemaining: number = 0;
     @type("boolean") isSpectator: boolean = false;
+    @type("boolean") isShootingMode: boolean = false;
+    @type("number") shotTriggerId: number = 0;
+    @type("number") combatHealth: number = 100;
+    @type("number") maxCombatHealth: number = 100;
 }

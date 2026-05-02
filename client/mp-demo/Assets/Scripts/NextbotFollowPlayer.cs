@@ -93,6 +93,9 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField, Min(0f)] private float _lastSeenTargetLeadDistance = 3f;
     [SerializeField, Min(0f)] private float _lastSeenTargetReachedDistance = 1.1f;
 
+    [Header("Combat")]
+    [SerializeField, Min(1f)] private float _maxCombatHealth = 100f;
+
     [Header("NavMesh")]
     [SerializeField] private float _navMeshSnapDistance = 8f;
     [SerializeField] private string _walkableAreaName = "Walkable";
@@ -239,11 +242,18 @@ public class NextbotFollowPlayer : MonoBehaviour
     private int _roomStateDiagnosticSampleCount;
     private float _nextRoomStateDiagnosticLogTime;
     private Vector3 _remotePresentationVelocity;
+    private float _offlineCombatHealth;
+    private string _displayName = string.Empty;
 
     public string NetworkNextbotId => _networkNextbotId;
+    public string CombatDisplayName => string.IsNullOrWhiteSpace(_displayName) ? _networkNextbotId : _displayName;
+    public float CurrentCombatHealth => GetCurrentCombatHealth();
+    public float MaxCombatHealth => GetMaxCombatHealth();
+    public bool IsCombatActive => GetIsCombatActive();
 
     private void Awake()
     {
+        _offlineCombatHealth = _maxCombatHealth;
         _defaultLoopClip = _loopClip;
         _defaultMoveSpeed = _moveSpeed;
         _characterController = GetComponent<CharacterController>();
@@ -428,6 +438,10 @@ public class NextbotFollowPlayer : MonoBehaviour
     public void SetOfflineNextbotActive(bool isActive)
     {
         _offlineNextbotActive = isActive;
+        if (isActive)
+        {
+            _offlineCombatHealth = _maxCombatHealth;
+        }
 
         if (!_forceOfflineLocalAuthority)
         {
@@ -455,6 +469,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         SetOfflineLocalAuthority(true);
         _offlineNextbotActive = true;
+        _offlineCombatHealth = _maxCombatHealth;
 
         if (_characterController != null)
         {
@@ -480,6 +495,9 @@ public class NextbotFollowPlayer : MonoBehaviour
     public void ApplyRegistryEntry(NextbotRegistryEntry entry)
     {
         EnsureVisualBillboardChild();
+        _displayName = entry != null && !string.IsNullOrWhiteSpace(entry.displayName)
+            ? entry.displayName
+            : _networkNextbotId;
 
         _moveSpeed = entry != null && entry.speed > 0f ? entry.speed : _defaultMoveSpeed;
         _loopClip = entry != null && entry.loopClip != null ? entry.loopClip : _defaultLoopClip;
@@ -537,6 +555,22 @@ public class NextbotFollowPlayer : MonoBehaviour
                 material.SetColor("_Color", tint);
             }
         }
+    }
+
+    public bool TryApplyOfflineCombatDamage(float damage)
+    {
+        if (!_forceOfflineLocalAuthority || !_offlineNextbotActive || damage <= 0f)
+        {
+            return false;
+        }
+
+        _offlineCombatHealth = Mathf.Max(0f, _offlineCombatHealth - damage);
+        if (_offlineCombatHealth <= 0f)
+        {
+            SetOfflineNextbotActive(false);
+        }
+
+        return true;
     }
 
     private void SetRoomStateAuthorityActive(bool isActive)
@@ -1118,6 +1152,57 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return roomState.nextbots.TryGetValue(_networkNextbotId, out nextbotState) && nextbotState != null;
+    }
+
+    private bool GetIsCombatActive()
+    {
+        if (_forceOfflineLocalAuthority)
+        {
+            return _offlineNextbotActive;
+        }
+
+        MyRoomState roomState = GetRoomState();
+        return roomState != null
+            && TryGetAssignedNextbotState(roomState, out NextbotState nextbotState)
+            && nextbotState != null
+            && nextbotState.isActive;
+    }
+
+    private float GetCurrentCombatHealth()
+    {
+        if (_forceOfflineLocalAuthority)
+        {
+            return _offlineCombatHealth;
+        }
+
+        MyRoomState roomState = GetRoomState();
+        if (roomState != null
+            && TryGetAssignedNextbotState(roomState, out NextbotState nextbotState)
+            && nextbotState != null)
+        {
+            return nextbotState.currentHealth;
+        }
+
+        return _maxCombatHealth;
+    }
+
+    private float GetMaxCombatHealth()
+    {
+        if (_forceOfflineLocalAuthority)
+        {
+            return _maxCombatHealth;
+        }
+
+        MyRoomState roomState = GetRoomState();
+        if (roomState != null
+            && TryGetAssignedNextbotState(roomState, out NextbotState nextbotState)
+            && nextbotState != null
+            && nextbotState.maxHealth > 0f)
+        {
+            return nextbotState.maxHealth;
+        }
+
+        return _maxCombatHealth;
     }
 
     private void RefreshTargetIfNeeded()
