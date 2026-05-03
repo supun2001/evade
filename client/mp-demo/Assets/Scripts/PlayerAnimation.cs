@@ -698,6 +698,7 @@ public class PlayerAnimation : MonoBehaviour
 
     private void ApplyAnimationState(Animator targetAnimator, float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)
     {
+        // Procedural animation state handler
         if (targetAnimator == null)
         {
             return;
@@ -734,23 +735,30 @@ public class PlayerAnimation : MonoBehaviour
         if (_shootAnimationTimer > 0f && _presentationMode == PresentationMode.Shooting)
         {
             bool isMoving = Mathf.Abs(inputX) > 0.05f || Mathf.Abs(inputY) > 0.05f;
-            if (isMoving && targetAnimator.HasState(0, _ak47RunningShootStateHash))
+            bool wallRunning = _useNetworkAnimationState ? _networkIsWallRunning : (_playerController != null && _playerController.IsWallRunning());
+
+            // If we are wall running, we prefer to stay in the wall run pose to avoid "twicking" 
+            // and instead rely on procedural recoil for the shooting feel.
+            if (!wallRunning)
             {
-                CrossFadeIfNeeded(targetAnimator, AK47_RUNNING_SHOOT_STATE, _shootAnimationTransitionDuration);
-                return;
-            }
-            else if (targetAnimator.HasState(0, _ak47ShootStateHash))
-            {
-                CrossFadeIfNeeded(targetAnimator, "Base Layer.ak47_shooting", _shootAnimationTransitionDuration);
-                return;
-            }
-            else if (targetAnimator.HasState(0, _ak47ShootArmsStateHash))
-            {
-                CrossFadeIfNeeded(targetAnimator, AK47_SHOOT_ARMS_STATE, _shootAnimationTransitionDuration);
-                return;
+                if (isMoving && targetAnimator.HasState(0, _ak47RunningShootStateHash))
+                {
+                    CrossFadeIfNeeded(targetAnimator, AK47_RUNNING_SHOOT_STATE, _shootAnimationTransitionDuration);
+                    return;
+                }
+                else if (targetAnimator.HasState(0, _ak47ShootStateHash))
+                {
+                    CrossFadeIfNeeded(targetAnimator, "Base Layer.ak47_shooting", _shootAnimationTransitionDuration);
+                    return;
+                }
+                else if (targetAnimator.HasState(0, _ak47ShootArmsStateHash))
+                {
+                    CrossFadeIfNeeded(targetAnimator, AK47_SHOOT_ARMS_STATE, _shootAnimationTransitionDuration);
+                    return;
+                }
             }
         }
-
+        
         if (isBeingCarriedActive)
         {
             CrossFadeIfNeeded(targetAnimator, CARRYING_ME_STATE, 0.08f);

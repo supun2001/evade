@@ -204,6 +204,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _armWallHideCheckRadius = 0.22f;
     [SerializeField] private float _armWallHideDistance = 0.14f;
 
+    [Header("Procedural Arm Recoil")]
+    [SerializeField] private float _armRecoilKick = 0.05f;
+    [SerializeField] private float _armRecoilTilt = 4f;
+    [SerializeField] private float _armRecoilDecay = 15f;
+    private float _currentArmRecoil = 0f;
+
     [Header("Camera Visibility")]
     [SerializeField] private float _minimumGameplayFarClipPlane = 2000f;
     [SerializeField] private bool _disableGameplayOcclusionCulling = true;
@@ -1105,6 +1111,10 @@ public class PlayerController : MonoBehaviour
         UpdateSprintCameraBob();
         UpdateFirstPersonWallRunCameraPose(_cameraTransform.localRotation);
         ResolveCameraWallCollision();
+        
+        // Update procedural recoil decay
+        _currentArmRecoil = Mathf.MoveTowards(_currentArmRecoil, 0f, _armRecoilDecay * Time.deltaTime);
+
         SyncFirstPersonOnlyRootsToGameplayCamera();
         UpdateSprintArmPose();
         UpdateArmWallClipVisibility();
@@ -2400,6 +2410,7 @@ public class PlayerController : MonoBehaviour
         LogShootingDebug("FireCombatShot.Begin", "Shot started");
         _shotTriggerId += 1f;
         _playerAnimation?.PlayShootAnimation();
+        _currentArmRecoil = Mathf.Min(_currentArmRecoil + _armRecoilKick, _armRecoilKick * 2f);
         PlayGunshotSound();
 
         Camera sourceCamera = _gameplayCamera != null ? _gameplayCamera : _playerCamera;
@@ -4662,6 +4673,13 @@ public class PlayerController : MonoBehaviour
             // Calculate desired local state
             Vector3 targetLocalPos = _firstPersonOnlyRootLocalPositions[i] + basePositionOffset;
             Quaternion targetLocalRot = _firstPersonOnlyRootLocalRotations[i] * baseRotationOffset;
+
+            // Apply procedural arm recoil
+            if (_currentArmRecoil > 0.001f)
+            {
+                targetLocalPos += Vector3.back * _currentArmRecoil;
+                targetLocalRot = Quaternion.Euler(-_currentArmRecoil * _armRecoilTilt, 0f, 0f) * targetLocalRot;
+            }
 
             // Apply wall retreat and tilt to the arms specifically
             if (_currentViewMode == CameraViewMode.FirstPerson && _firstPersonWallRetreat > 0.001f)
