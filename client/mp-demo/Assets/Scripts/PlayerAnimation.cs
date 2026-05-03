@@ -19,6 +19,7 @@ public class PlayerAnimation : MonoBehaviour
     [SerializeField] private AnimationClip _shootingBackwardClip;
     [SerializeField] private AnimationClip _shootingLeftClip;
     [SerializeField] private AnimationClip _shootingRightClip;
+    [SerializeField] private AnimationClip _shootingShootClip;
     [SerializeField] private AnimationClip _shootingJumpStartClip;
     [SerializeField] private AnimationClip _shootingFallingClip;
     [SerializeField] private AnimationClip _shootingInAirClip;
@@ -70,6 +71,7 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _ak47RunningShootStateHash = Animator.StringToHash("Base Layer.ak47_runningShoot");
     private static readonly int _ak47WallRunLeftStateHash = Animator.StringToHash("Base Layer.ak47_walRunLeft_arms");
     private static readonly int _ak47WallRunRightStateHash = Animator.StringToHash("Base Layer.ak47_walRunRight_arms");
+    private static readonly int _ak47ShootArmsStateHash = Animator.StringToHash("Base Layer.ak47_shooting_arms");
     private const string WALL_SLIDE_LEFT_STATE = "Base Layer.WallSlideLeft";
     private const string WALL_SLIDE_RIGHT_STATE = "Base Layer.WallSlideRight";
     private const string FALLING_STATE = "Base Layer.Falling";
@@ -82,6 +84,7 @@ public class PlayerAnimation : MonoBehaviour
     private const string CARRYING_IDLE_STATE = "Base Layer.CarryingIdle";
     private const string CARRYING_RUN_STATE = "Base Layer.CarryingRun";
     private const string AK47_RUNNING_SHOOT_STATE = "Base Layer.ak47_runningShoot";
+    private const string AK47_SHOOT_ARMS_STATE = "Base Layer.ak47_shooting_arms";
     private const string AK47_WALL_RUN_LEFT_STATE = "Base Layer.ak47_walRunLeft_arms";
     private const string AK47_WALL_RUN_RIGHT_STATE = "Base Layer.ak47_walRunRight_arms";
 
@@ -645,6 +648,8 @@ public class PlayerAnimation : MonoBehaviour
             "wallslideright" => _shootingWallRunRightClip,
             "ak47_walrunleft_arms" => _shootingWallRunLeftClip,
             "ak47_walrunright_arms" => _shootingWallRunRightClip,
+            "ak47_shooting" => _shootingShootClip,
+            "ak47_shooting_arms" => _shootingShootClip,
             _ => null,
         };
     }
@@ -737,6 +742,11 @@ public class PlayerAnimation : MonoBehaviour
             else if (targetAnimator.HasState(0, _ak47ShootStateHash))
             {
                 CrossFadeIfNeeded(targetAnimator, "Base Layer.ak47_shooting", _shootAnimationTransitionDuration);
+                return;
+            }
+            else if (targetAnimator.HasState(0, _ak47ShootArmsStateHash))
+            {
+                CrossFadeIfNeeded(targetAnimator, AK47_SHOOT_ARMS_STATE, _shootAnimationTransitionDuration);
                 return;
             }
         }

@@ -187,6 +187,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _firstPersonWallRunCameraRoll = 12f;
     [SerializeField] private float _firstPersonWallRunCameraBlend = 10f;
     [SerializeField] private float _firstPersonWallRunCameraRotationBlend = 14f;
+    [SerializeField] private float _firstPersonWallRetreatTilt = 22f;
     [SerializeField] private float _firstPersonNearClipPlane = 0.01f;
     [SerializeField] private float _cameraTransitionDuration = 0.3f;
     [SerializeField] private string[] _firstPersonHiddenBoneNames = { "head", "torso" };
@@ -195,13 +196,13 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private LayerMask _cameraCollisionLayers = ~0;
     [SerializeField] private float _thirdPersonCameraCollisionRadius = 0.2f;
     [SerializeField] private float _thirdPersonCameraCollisionPadding = 0.08f;
-    [SerializeField] private float _firstPersonWallCheckDistance = 0.45f;
-    [SerializeField] private float _firstPersonWallRetreatDistance = 0.22f;
-    [SerializeField] private float _firstPersonWallRetreatSmooth = 14f;
-    [SerializeField] private float _firstPersonWallHideDistance = 0.12f;
+    [SerializeField] private float _firstPersonWallCheckDistance = 0.7f;
+    [SerializeField] private float _firstPersonWallRetreatDistance = 0.45f;
+    [SerializeField] private float _firstPersonWallRetreatSmooth = 16f;
+    [SerializeField] private float _firstPersonWallHideDistance = 0.28f;
     [SerializeField] private float _firstPersonWallMaxSurfaceUp = 0.35f;
-    [SerializeField] private float _armWallHideCheckRadius = 0.16f;
-    [SerializeField] private float _armWallHideDistance = 0.08f;
+    [SerializeField] private float _armWallHideCheckRadius = 0.22f;
+    [SerializeField] private float _armWallHideDistance = 0.14f;
 
     [Header("Camera Visibility")]
     [SerializeField] private float _minimumGameplayFarClipPlane = 2000f;
@@ -4322,7 +4323,7 @@ public class PlayerController : MonoBehaviour
                 _gameplayCameraTransform.position,
                 _gameplayCameraTransform.forward,
                 _firstPersonWallCheckDistance,
-                0f,
+                0.12f,
                 out RaycastHit hit))
         {
             bool isWallLikeSurface = Mathf.Abs(hit.normal.y) <= _firstPersonWallMaxSurfaceUp;
@@ -4338,8 +4339,9 @@ public class PlayerController : MonoBehaviour
         float retreatBlend = 1f - Mathf.Exp(-_firstPersonWallRetreatSmooth * Time.deltaTime);
         _firstPersonWallRetreat = Mathf.Lerp(_firstPersonWallRetreat, targetRetreat, retreatBlend);
 
-        Vector3 baseLocalPosition = _gameplayCameraTransform.localPosition;
-        _gameplayCameraTransform.localPosition = baseLocalPosition + Vector3.back * _firstPersonWallRetreat;
+        // Instead of moving the camera back (which can be overridden or cause FOV issues),
+        // we'll let SyncFirstPersonOnlyRootsToGameplayCamera handle the visual retreat of the arms.
+        // We only hide the arms if the retreat is very high.
         SetFirstPersonWallClipHidden(_firstPersonWallRetreat > _firstPersonWallHideDistance);
     }
 
@@ -4652,6 +4654,17 @@ public class PlayerController : MonoBehaviour
             // Calculate desired local state
             Vector3 targetLocalPos = _firstPersonOnlyRootLocalPositions[i] + basePositionOffset;
             Quaternion targetLocalRot = _firstPersonOnlyRootLocalRotations[i] * baseRotationOffset;
+
+            // Apply wall retreat and tilt to the arms specifically
+            if (_currentViewMode == CameraViewMode.FirstPerson && _firstPersonWallRetreat > 0.001f)
+            {
+                float retreatNormalized = Mathf.Clamp01(_firstPersonWallRetreat / _firstPersonWallRetreatDistance);
+                targetLocalPos += Vector3.back * _firstPersonWallRetreat;
+                
+                // Tilt the arms up and slightly inward to simulate hitting a wall
+                float tiltAngle = retreatNormalized * _firstPersonWallRetreatTilt;
+                targetLocalRot = Quaternion.Euler(-tiltAngle, -tiltAngle * 0.2f, 0f) * targetLocalRot;
+            }
 
             // Only apply if the difference is significant to avoid "micro-vibrations"
             // caused by floating point competition with Animators or Cinemachine.
