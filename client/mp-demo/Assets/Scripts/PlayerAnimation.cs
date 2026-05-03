@@ -211,12 +211,10 @@ public class PlayerAnimation : MonoBehaviour
     
     private string GetActiveLocomotionState(Animator targetAnimator)
     {
-        if (_presentationMode == PresentationMode.Shooting)
+        // Always prefer the shooting locomotion state to ensure AK47 animations are used by default
+        if (targetAnimator.HasState(0, _shootingIdleRunStateHash))
         {
-            if (targetAnimator.HasState(0, _shootingIdleRunStateHash))
-            {
-                return SHOOTING_IDLE_RUN_STATE;
-            }
+            return SHOOTING_IDLE_RUN_STATE;
         }
         return IDLE_RUN_STATE;
     }
