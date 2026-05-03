@@ -28,6 +28,32 @@ AnimatorState:
   m_MirrorParameter: 
   m_CycleOffsetParameter: 
   m_TimeParameter: 
+--- !u!1102 &-7121708495319578598
+AnimatorState:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ak47_idle_arms
+  m_Speed: 1
+  m_CycleOffset: 0
+  m_Transitions: []
+  m_StateMachineBehaviours: []
+  m_Position: {x: 50, y: 50, z: 0}
+  m_IKOnFeet: 0
+  m_WriteDefaultValues: 1
+  m_Mirror: 0
+  m_SpeedParameterActive: 0
+  m_MirrorParameterActive: 0
+  m_CycleOffsetParameterActive: 0
+  m_TimeParameterActive: 0
+  m_Motion: {fileID: 7400000, guid: ab86dfa0db2184865b07b5c2c76112cc, type: 2}
+  m_Tag: 
+  m_SpeedParameter: 
+  m_MirrorParameter: 
+  m_CycleOffsetParameter: 
+  m_TimeParameter: 
 --- !u!1102 &-7067280742536172005
 AnimatorState:
   serializedVersion: 6
@@ -390,7 +416,7 @@ BlendTree:
   m_Name: Blend Tree
   m_Childs:
   - serializedVersion: 2
-    m_Motion: {fileID: 7400000, guid: 415844d1f4bd44e2daccf2423588aafc, type: 2}
+    m_Motion: {fileID: 7400000, guid: ab86dfa0db2184865b07b5c2c76112cc, type: 2}
     m_Threshold: 0
     m_Position: {x: 0, y: 0}
     m_TimeScale: 1
@@ -640,6 +666,9 @@ AnimatorStateMachine:
   - serializedVersion: 1
     m_State: {fileID: 762022887041559084}
     m_Position: {x: 1470, y: 1190, z: 0}
+  - serializedVersion: 1
+    m_State: {fileID: -7121708495319578598}
+    m_Position: {x: 1505, y: 1255, z: 0}
   m_ChildStateMachines: []
   m_AnyStateTransitions:
   - {fileID: 4000000000000000008}
