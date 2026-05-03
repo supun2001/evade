@@ -210,6 +210,11 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _armRecoilDecay = 15f;
     private float _currentArmRecoil = 0f;
 
+    [Header("Bullet Trail Tuning")]
+    [SerializeField] private float _bulletTrailStartSize = 0.05f;
+    [SerializeField] private float _bulletTrailEndSize = 0.01f;
+    [SerializeField] private bool _applyProceduralTrailSize = true;
+
     [Header("Camera Visibility")]
     [SerializeField] private float _minimumGameplayFarClipPlane = 2000f;
     [SerializeField] private bool _disableGameplayOcclusionCulling = true;
@@ -2739,6 +2744,31 @@ public class PlayerController : MonoBehaviour
             shape.randomDirectionAmount = 0f;
             shape.randomPositionAmount = 0f;
             shape.sphericalDirectionAmount = 0f;
+
+            if (_applyProceduralTrailSize)
+            {
+                // Adjust Trail module if enabled
+                var trails = particleSystem.trails;
+                if (trails.enabled)
+                {
+                    AnimationCurve widthCurve = new AnimationCurve(
+                        new Keyframe(0f, _bulletTrailStartSize),
+                        new Keyframe(1f, _bulletTrailEndSize)
+                    );
+                    trails.widthOverTrail = new ParticleSystem.MinMaxCurve(1f, widthCurve);
+                }
+
+                // Adjust Size Over Lifetime module if enabled
+                var sizeOverLifetime = particleSystem.sizeOverLifetime;
+                if (sizeOverLifetime.enabled)
+                {
+                    AnimationCurve sizeCurve = new AnimationCurve(
+                        new Keyframe(0f, 1f),
+                        new Keyframe(1f, _bulletTrailEndSize / Mathf.Max(0.001f, _bulletTrailStartSize))
+                    );
+                    sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, sizeCurve);
+                }
+            }
         }
 
         particleSystem.Clear(true);
