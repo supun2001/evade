@@ -1055,7 +1055,7 @@ public class PlayerController : MonoBehaviour
             UpdateDownedVisualRootPosition();
             _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, 0f, 0f);
             UpdateSprintCameraBob();
-            UpdateFirstPersonWallRunCameraPose();
+            UpdateFirstPersonWallRunCameraPose(_cameraTransform.localRotation);
             ResolveCameraWallCollision();
             SyncFirstPersonOnlyRootsToGameplayCamera();
             UpdateSprintArmPose();
@@ -1103,7 +1103,7 @@ public class PlayerController : MonoBehaviour
         }
         _cameraTransform.localRotation = Quaternion.Euler(_cameraRotation.y, cameraYawOffset, 0f);
         UpdateSprintCameraBob();
-        UpdateFirstPersonWallRunCameraPose();
+        UpdateFirstPersonWallRunCameraPose(_cameraTransform.localRotation);
         ResolveCameraWallCollision();
         SyncFirstPersonOnlyRootsToGameplayCamera();
         UpdateSprintArmPose();
@@ -4253,7 +4253,7 @@ public class PlayerController : MonoBehaviour
         return _firstPersonCameraLocalPosition + _firstPersonCrouchCameraOffset * _firstPersonCrouchCameraWeight;
     }
 
-    private void UpdateFirstPersonWallRunCameraPose()
+    private void UpdateFirstPersonWallRunCameraPose(Quaternion baseRotation)
     {
         if (_gameplayCameraTransform == null || _cameraTransitionCoroutine != null)
         {
@@ -4275,18 +4275,26 @@ public class PlayerController : MonoBehaviour
             if (_currentViewMode == CameraViewMode.FirstPerson)
             {
                 float resetBlend = 1f - Mathf.Exp(-_firstPersonWallRunCameraRotationBlend * Time.deltaTime);
-                _gameplayCameraTransform.localRotation = Quaternion.Slerp(_gameplayCameraTransform.localRotation, Quaternion.identity, resetBlend);
+                _gameplayCameraTransform.localRotation = Quaternion.Slerp(_gameplayCameraTransform.localRotation, baseRotation, resetBlend);
             }
             return;
         }
 
         float side = useWallRunPose ? _wallRunSide : (_lastWallRunCameraSide == 0 ? 1f : _lastWallRunCameraSide);
+        
+        // For a left wall (side = -1), we want the camera to lean right (negative Z rotation).
+        // For a right wall (side = 1), we want the camera to lean left (positive Z rotation).
+        float targetRoll = side * _firstPersonWallRunCameraRoll;
+        
+        // Offset the camera position away from the wall
         float cameraSide = -side;
         Vector3 sideOffset = new Vector3(_firstPersonWallRunCameraOffset.x * cameraSide, _firstPersonWallRunCameraOffset.y, _firstPersonWallRunCameraOffset.z);
-        _gameplayCameraTransform.localPosition += sideOffset * _firstPersonWallRunCameraWeight;
+        _gameplayCameraTransform.localPosition = GetFirstPersonTargetLocalPosition() + (sideOffset * _firstPersonWallRunCameraWeight);
 
-        float targetRoll = -_firstPersonWallRunCameraRoll * cameraSide;
-        Quaternion targetRotation = Quaternion.Euler(0f, 0f, targetRoll);
+        // Apply roll while preserving base pitch and yaw
+        Quaternion rollRotation = Quaternion.Euler(0f, 0f, targetRoll);
+        Quaternion targetRotation = baseRotation * rollRotation;
+        
         float rotationBlend = 1f - Mathf.Exp(-_firstPersonWallRunCameraRotationBlend * Time.deltaTime);
         _gameplayCameraTransform.localRotation = Quaternion.Slerp(
             _gameplayCameraTransform.localRotation,
