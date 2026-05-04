@@ -4648,7 +4648,9 @@ public class PlayerController : MonoBehaviour
         // Handle explicit roots if assigned
         if (_firstPersonArmRoot != null)
         {
-            _firstPersonArmRoot.SetActive(firstPerson);
+            // For remote players (simulation controlled), always show arms/gun
+            // For local players, only show in first person
+            _firstPersonArmRoot.SetActive(firstPerson || _isSimulationControlled);
         }
 
         if (_thirdPersonBodyRoot != null)
@@ -5344,6 +5346,15 @@ public class PlayerController : MonoBehaviour
 
         SetLocalRenderMode(false);
         SetFirstPersonWallClipHidden(false);
+    }
+
+    public void ApplyRemoteCameraRotation(Vector2 rotation)
+    {
+        // rotation.x is Yaw (handled by root transform), rotation.y is Pitch
+        if (_playerCamera != null)
+        {
+            _playerCamera.transform.localRotation = Quaternion.Euler(rotation.y, 0f, 0f);
+        }
     }
 
     public float GetVisualYaw()
@@ -6231,10 +6242,10 @@ public class PlayerController : MonoBehaviour
     {
         EnsureRemoteFullBodyVisible();
 
-        // For remote players, always show the body and hide the FPS arms
+        // For remote players, show both arms/gun and body as requested
         if (_firstPersonArmRoot != null)
         {
-            _firstPersonArmRoot.SetActive(false);
+            _firstPersonArmRoot.SetActive(true);
         }
 
         if (_thirdPersonBodyRoot != null)
@@ -6248,7 +6259,12 @@ public class PlayerController : MonoBehaviour
         {
             if (cameras[i] != null)
             {
-                cameras[i].gameObject.SetActive(false);
+                // Disable camera component but keep GameObject active so child arms/guns remain visible
+                cameras[i].enabled = false;
+                if (!cameras[i].gameObject.activeSelf)
+                {
+                    cameras[i].gameObject.SetActive(true);
+                }
             }
         }
 

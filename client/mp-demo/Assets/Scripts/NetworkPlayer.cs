@@ -389,6 +389,7 @@ public class NetworkPlayer : MonoBehaviour
             }
 
             controller.EnsureRemoteFullBodyVisible();
+            controller.ApplyRemoteCameraRotation(new Vector2(playerState.cameraRotationX, playerState.cameraRotationY));
         }
 
         _remoteVelocity = new Vector3(playerState.velocityX, playerState.velocityY, playerState.velocityZ);
