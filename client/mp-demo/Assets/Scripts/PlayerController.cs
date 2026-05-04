@@ -26,6 +26,7 @@ public class PlayerController : MonoBehaviour
     }
 
     #region Class Variables
+    private Vector3 _eliminationPosition;
     [Header("Components")]
     [SerializeField] private CharacterController _characterController;
     [SerializeField] private Camera _playerCamera;
@@ -62,7 +63,7 @@ public class PlayerController : MonoBehaviour
 
     [Header("Nextbot Hit Reaction")]
     [SerializeField] private float _nextbotHitReactionDuration = 3f;
-    [SerializeField] private float _nextbotHitShoveForce = 8f;
+    [SerializeField] private float _nextbotHitShoveForce = 1.5f;
     [SerializeField] private float _nextbotHitUpwardForce = 4f;
     [SerializeField, Range(0f, 1f)] private float _nextbotHitRandomness = 0.55f;
     [SerializeField, Range(0f, 1f)] private float _nextbotHitTumble = 0.65f;
@@ -254,10 +255,10 @@ public class PlayerController : MonoBehaviour
 
     [Header("Shooting Mode")]
     [SerializeField, Min(1f)] private float _maxHealth = 100f;
-    [SerializeField, Min(1f)] private float _ak47Damage = 25f;
+    [SerializeField] private float _ak47Damage = 35f;
     [SerializeField, Min(0.01f)] private float _ak47FireInterval = 0.12f;
     [SerializeField, Min(1f)] private float _ak47Range = 220f;
-    [SerializeField] private LayerMask _ak47HitLayers = Physics.DefaultRaycastLayers;
+    [SerializeField] private LayerMask _ak47HitLayers = -1; // Hit everything by default
     [SerializeField] private string _gunshotResourceFolder = "SFX/Gunshots";
     [SerializeField, Range(0f, 1f)] private float _gunshotVolume = 0.9f;
     [SerializeField] private Transform _shotEffectSpawnPoint;
@@ -511,6 +512,7 @@ public class PlayerController : MonoBehaviour
 
     #region Setup
     private void Awake() {
+        gameObject.tag = "Player";
         // Check for duplicate PlayerController scripts to prevent shaking/double movement
         PlayerController[] controllers = GetComponents<PlayerController>();
         if (controllers.Length > 1)
@@ -684,7 +686,19 @@ public class PlayerController : MonoBehaviour
             UpdateRespawnCountdownUi();
         }
 
-        if (!_playerLocomotionInput.InputEnabled) return;
+        if (!_playerLocomotionInput.InputEnabled) 
+        {
+            if (_isEliminatedState)
+            {
+                // Force ghosting state every frame to ensure no pushing
+                if (_characterController != null && _characterController.enabled) _characterController.enabled = false;
+                EnsureGhostingState();
+                
+                // Freeze position to prevent any displacement
+                transform.position = _eliminationPosition;
+            }
+            return;
+        }
 
         UpdateForcedCameraViewState();
         UpdateCrouchState();
@@ -737,7 +751,10 @@ public class PlayerController : MonoBehaviour
         Vector3 finalVelocity = _horizontalVelocity;
         finalVelocity.y = _verticalVelocity;
 
-        _characterController.Move(finalVelocity * Time.deltaTime);
+        if (_characterController.enabled)
+        {
+            _characterController.Move(finalVelocity * Time.deltaTime);
+        }
         RefreshGroundProbeState();
         UpdateFootstepAudio();
     }
@@ -3630,15 +3647,35 @@ public class PlayerController : MonoBehaviour
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         _isEliminatedState = false;
+        _isHitReacting = false;
+        _nextbotHitReactionTimer = 0f;
+        _nextbotHitImpactVelocity = Vector3.zero;
         ClearRespawnCountdown();
         if (_combatModeActive)
         {
             _currentHealth = _maxHealth;
         }
 
+        if (_characterController != null)
+        {
+            _characterController.enabled = true;
+            RestoreGhostingState();
+        }
+
+        // Restore renderers
+        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < allRenderers.Length; i++)
+        {
+            if (allRenderers[i] != null) allRenderers[i].enabled = true;
+        }
+
         if (!_isSimulationControlled && _playerLocomotionInput != null)
         {
             _playerLocomotionInput.InputEnabled = true;
+            if (_isSpectating)
+            {
+                ExitSpectateMode();
+            }
         }
 
         SetDebugInjuredState(false);
@@ -3678,9 +3715,30 @@ public class PlayerController : MonoBehaviour
             _playerLocomotionInput.InputEnabled = false;
         }
 
-        SetDebugInjuredState(true);
+        if (_characterController != null)
+        {
+            _characterController.enabled = false;
+        }
+        
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
+        _eliminationPosition = transform.position;
+        
+        EnsureGhostingState();
+
+        // Hide all renderers immediately
+        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < allRenderers.Length; i++)
+        {
+            if (allRenderers[i] != null) allRenderers[i].enabled = false;
+        }
+
+        // Enter spectate mode immediately
+        if (!_isSimulationControlled)
+        {
+            EnterSpectateMode();
+        }
+
         _jumpedThisFrame = false;
         _isCrouching = false;
         _isWallRunning = false;
@@ -3688,8 +3746,6 @@ public class PlayerController : MonoBehaviour
         _wallRunNormal = Vector3.zero;
         _wallRunContactHoldTimer = 0f;
         _wallRunSprintGraceTimer = 0f;
-        UpdateDownedCollisionShape();
-        UpdateDownedVisualRootPosition();
         UpdateForcedCameraViewState(forceImmediate: true);
     }
 
@@ -3719,7 +3775,7 @@ public class PlayerController : MonoBehaviour
             bool wasEnabled = _characterController.enabled;
             _characterController.enabled = false;
             targetTransform.SetPositionAndRotation(worldPosition, targetRotation);
-            _characterController.enabled = wasEnabled;
+            _characterController.enabled = true;
         }
         else
         {
@@ -5498,7 +5554,10 @@ public class PlayerController : MonoBehaviour
 
         Vector3 finalVelocity = _horizontalVelocity + _nextbotHitImpactVelocity;
         finalVelocity.y = _verticalVelocity;
-        _characterController.Move(finalVelocity * deltaTime);
+        if (_characterController.enabled)
+        {
+            _characterController.Move(finalVelocity * deltaTime);
+        }
 
         if (_nextbotHitReactionTimer <= 0f)
         {
@@ -5575,6 +5634,12 @@ public class PlayerController : MonoBehaviour
 
         PlayPlayerGotHitSound();
         _isHitReacting = true;
+        
+        if (!_isSimulationControlled)
+        {
+            ApplyNetworkEliminated();
+        }
+
         _nextbotHitReactionTimer = _nextbotHitReactionDuration;
         _nextbotHitReactionSeed = UnityEngine.Random.Range(0f, 10000f);
         _nextbotHitReactionPitch = GetSeededRange(_nextbotHitReactionSeed, 211f, NextbotHitVisualPitch * 0.7f, NextbotHitVisualPitch);
@@ -5994,6 +6059,11 @@ public class PlayerController : MonoBehaviour
         return _isSpectating;
     }
 
+    public bool IsEliminated()
+    {
+        return _isEliminatedState;
+    }
+
     public void EnterSpectateMode()
     {
         _isSpectating = true;
@@ -6013,6 +6083,11 @@ public class PlayerController : MonoBehaviour
         UpdateSpectateCameraFollow(forceSnap: true);
         UnityEngine.Cursor.lockState = CursorLockMode.Locked;
         UnityEngine.Cursor.visible = false;
+        
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SendSpectatorState(true);
+        }
     }
 
     public void ExitSpectateMode()
@@ -6034,6 +6109,11 @@ public class PlayerController : MonoBehaviour
         SetLocalSpectatorBodyVisible(true);
         SetCameraView(_preferredViewMode, true);
         UpdateForcedCameraViewState(forceImmediate: true);
+
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SendSpectatorState(false);
+        }
     }
 
     public bool DidJumpThisFrame()
@@ -6053,7 +6133,7 @@ public class PlayerController : MonoBehaviour
 
     public bool IsInjuredOrHitReacting()
     {
-        return _isHitReacting || IsInjured();
+        return _isHitReacting || IsInjured() || _isEliminatedState;
     }
 
     public bool IsAwaitingAuthoritativeNextbotHit()
@@ -7238,8 +7318,97 @@ public class PlayerController : MonoBehaviour
         _wallRunContactHoldTimer = 0f;
     }
 
+    private void OnControllerColliderHit(ControllerColliderHit hit)
+    {
+        if (_isEliminatedState) return;
+
+        // Check if we hit a nextbot
+        NextbotFollowPlayer nextbot = hit.gameObject.GetComponent<NextbotFollowPlayer>();
+        if (nextbot == null)
+        {
+            nextbot = hit.gameObject.GetComponentInParent<NextbotFollowPlayer>();
+        }
+
+        if (nextbot != null)
+        {
+            // We physically touched a nextbot! 
+            // Report it immediately to ensure we die and stop being pushed.
+            nextbot.ReportHitOnLocalPlayer();
+            
+            // Also trigger local reaction for instant feedback
+            TriggerNextbotHit(hit.point);
+        }
+    }
+
     private bool IsZooming()
     {
         return Mouse.current != null && Mouse.current.rightButton.isPressed;
+    }
+
+    private int _originalLayer = -1;
+    private void EnsureGhostingState()
+    {
+        if (_originalLayer == -1) _originalLayer = gameObject.layer;
+        gameObject.layer = 2; // Ignore Raycast
+        
+        Collider[] allColliders = GetComponentsInChildren<Collider>(true);
+        NextbotFollowPlayer[] allNextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsSortMode.None);
+
+        for (int i = 0; i < allColliders.Length; i++)
+        {
+            if (allColliders[i] == null) continue;
+            
+            if (allColliders[i].enabled)
+            {
+                allColliders[i].enabled = false;
+            }
+
+            // Explicitly ignore collision with every nextbot in the scene
+            for (int j = 0; j < allNextbots.Length; j++)
+            {
+                if (allNextbots[j] == null) continue;
+                Collider nextbotCollider = allNextbots[j].GetComponent<Collider>();
+                if (nextbotCollider != null)
+                {
+                    Physics.IgnoreCollision(allColliders[i], nextbotCollider, true);
+                }
+            }
+        }
+        
+        Rigidbody[] allRigidbodies = GetComponentsInChildren<Rigidbody>(true);
+        for (int i = 0; i < allRigidbodies.Length; i++)
+        {
+            if (allRigidbodies[i] != null && !allRigidbodies[i].isKinematic)
+            {
+                allRigidbodies[i].isKinematic = true;
+                allRigidbodies[i].linearVelocity = Vector3.zero;
+                allRigidbodies[i].angularVelocity = Vector3.zero;
+            }
+        }
+    }
+
+    private void RestoreGhostingState()
+    {
+        if (_originalLayer != -1) gameObject.layer = _originalLayer;
+        
+        // Re-enable character controller
+        if (_characterController != null) _characterController.enabled = true;
+
+        // Restore collision with every nextbot in the scene
+        Collider[] allColliders = GetComponentsInChildren<Collider>(true);
+        NextbotFollowPlayer[] allNextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsSortMode.None);
+        for (int i = 0; i < allColliders.Length; i++)
+        {
+            if (allColliders[i] == null) continue;
+            for (int j = 0; j < allNextbots.Length; j++)
+            {
+                if (allNextbots[j] == null) continue;
+                Collider nextbotCollider = allNextbots[j].GetComponent<Collider>();
+                if (nextbotCollider != null)
+                {
+                    Physics.IgnoreCollision(allColliders[i], nextbotCollider, false);
+                }
+            }
+        }
     }
 }

@@ -13,7 +13,7 @@ public class OfflineModeManager : MonoBehaviour
 
     private const float InteractionDistance = 6f;
     private const float NextbotStartGraceSeconds = 3.5f;
-    private const int PlayerMaxDownsBeforeElimination = 3;
+    [SerializeField] private int _playerMaxDownsBeforeElimination = 1;
     private const int MaxRescuersPerDownedPlayer = 1;
     private const float PlayerSpawnRotationY = 180f;
     private const string WaitingPhase = "waiting";
@@ -1454,7 +1454,7 @@ public class OfflineModeManager : MonoBehaviour
         state.CurrentLifeStartUnscaledTime = -1f;
         state.WasDowned = true;
 
-        if (state.DownedCount >= PlayerMaxDownsBeforeElimination)
+        if (state.DownedCount >= _playerMaxDownsBeforeElimination)
         {
             state.IsEliminated = true;
             state.Controller?.ApplyNetworkEliminated();

@@ -139,8 +139,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private LayerMask _solidObstacleLayers = 0;
 
     [Header("Hit")]
-    [SerializeField] private float _hitDistance = 1.6f;
-    [SerializeField] private float _hitCooldown = 1.25f;
+    [SerializeField] private float _hitDistance = 2.2f;
+    [SerializeField] private float _hitCooldown = 0.2f;
 
     [Header("Billboard")]
     [SerializeField] private bool _faceTargetPlayer = false;
@@ -798,6 +798,12 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
         {
             _navMeshAgent.nextPosition = transform.position;
+        }
+
+        if (_target != null)
+        {
+            float distanceToTarget = Vector3.Distance(transform.position, _target.position);
+            TryHitTarget(distanceToTarget);
         }
 
         return true;
@@ -2582,11 +2588,27 @@ public class NextbotFollowPlayer : MonoBehaviour
         return navMeshStopsAtEdge && agentStalled;
     }
 
+    public void ReportHitOnLocalPlayer()
+    {
+        if (Time.time < _nextHitTime) return;
+        _nextHitTime = Time.time + _hitCooldown;
+        
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.SendNextbotHit(_networkNextbotId, transform.position);
+        }
+    }
+
     private void TryHitTarget(float distanceToTarget)
     {
         if (_roomStateAuthorityActive && !ShouldUseMapLocalNavMeshPresentation())
         {
-            return;
+            // If we are following the server exactly, we should only report hits
+            // if the server expects the client to do so.
+            if (_targetController == null || _targetController.IsSimulationControlled())
+            {
+                return;
+            }
         }
 
         if (_target == null || Time.time < _nextHitTime || distanceToTarget > _hitDistance)

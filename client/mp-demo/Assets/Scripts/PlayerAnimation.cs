@@ -718,7 +718,7 @@ public class PlayerAnimation : MonoBehaviour
         targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
         bool isCarryingActive = IsCarryingActive;
         bool isBeingCarriedActive = IsBeingCarriedActive;
-        bool isInjuredActive = IsInjuredActive && !isCarryingActive && !isBeingCarriedActive;
+        bool isInjuredActive = IsInjuredActive && !isCarryingActive && !isBeingCarriedActive && !(_playerController != null && _playerController.IsEliminated());
         bool isCrouchingActive = IsCrouchingActive && !isCarryingActive && !isBeingCarriedActive;
         bool isCrouchRunningActive = !_useNetworkAnimationState && _playerController != null && _playerController.IsCrouchRunAnimationActive();
         targetAnimator.SetBool(_injuredHash, isInjuredActive);
@@ -743,18 +743,15 @@ public class PlayerAnimation : MonoBehaviour
             {
                 if (isMoving && targetAnimator.HasState(0, _ak47RunningShootStateHash))
                 {
-                    CrossFadeIfNeeded(targetAnimator, AK47_RUNNING_SHOOT_STATE, _shootAnimationTransitionDuration);
-                    return;
+                    CrossFadeIfNeeded(targetAnimator, AK47_RUNNING_SHOOT_STATE, 0.1f);
                 }
                 else if (targetAnimator.HasState(0, _ak47ShootStateHash))
                 {
-                    CrossFadeIfNeeded(targetAnimator, "Base Layer.ak47_shooting", _shootAnimationTransitionDuration);
-                    return;
+                    CrossFadeIfNeeded(targetAnimator, "Base Layer.ak47_shooting", 0.1f);
                 }
                 else if (targetAnimator.HasState(0, _ak47ShootArmsStateHash))
                 {
-                    CrossFadeIfNeeded(targetAnimator, AK47_SHOOT_ARMS_STATE, _shootAnimationTransitionDuration);
-                    return;
+                    CrossFadeIfNeeded(targetAnimator, AK47_SHOOT_ARMS_STATE, 0.1f);
                 }
             }
         }

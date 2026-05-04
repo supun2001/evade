@@ -19,7 +19,7 @@ const DEFAULT_PLAYER_SPAWN_POINTS = [
 const NEXTBOT_MOVE_SPEED = 9;
 const NEXTBOT_STOPPING_DISTANCE = 0.7;
 const NEXTBOT_INJURY_DISTANCE = 0.95;
-const NEXTBOT_REPORTED_HIT_DISTANCE = 1.8;
+const NEXTBOT_REPORTED_HIT_DISTANCE = 15.0;
 const NEXTBOT_INJURY_COOLDOWN_MS = 1200;
 const NEXTBOT_START_GRACE_MS = 3500;
 const NEXTBOT_SCAN_INTERVAL_MS = 250;
@@ -1685,11 +1685,26 @@ export class MyRoom extends Room<MyRoomState> {
     const distance = Math.hypot(dx, dz);
     const safeUntil = this.playerSafeUntil.get(target.sessionId) ?? 0;
 
+    // If client reporting is enabled, we trust the client's hit detection for maximum responsiveness
+    if (this.getMapNextbotConfig().useClientReportedHits) {
+      this.clearCarryStateForPlayer(target.sessionId);
+      this.applyPlayerEliminationState(target, false);
+      target.isHitReacting = false;
+      target.hitReactionTimeRemaining = 0;
+      target.hitReactionPitch = 0;
+      target.hitReactionRoll = 0;
+      target.hitReactionSeed = 0;
+      target.hitTriggerId += 1;
+      target.hitSourceX = sourceX;
+      target.hitSourceY = sourceY;
+      target.hitSourceZ = sourceZ;
+      this.schedulePlayerRespawnAfterNextbotDeath(target.sessionId, PLAYER_NEXTBOT_RESPAWN_DELAY_MS);
+      return;
+    }
+
     if (distance > maxDistance
       || now < controller.nextInjuryAt
       || safeUntil > now
-      || target.isInjured
-      || target.isHitReacting
       || target.isEliminated
       || Math.abs(target.y - sourceY) > NEXTBOT_MAX_VERTICAL_DELTA) {
       return;
