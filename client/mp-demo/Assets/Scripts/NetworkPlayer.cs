@@ -111,6 +111,7 @@ public class NetworkPlayer : MonoBehaviour
     private static readonly int GroundedHash = Animator.StringToHash("IsGrounded");
     private static readonly int JumpHash = Animator.StringToHash("IsJumping");
     private static readonly int VerticalSpeedHash = Animator.StringToHash("VerticalSpeed");
+    private float _lastKillsCount = 0f;
 
     private void Update()
     {
@@ -451,12 +452,15 @@ public class NetworkPlayer : MonoBehaviour
                 playerState.hitReactionTimeRemaining,
                 playerState.hitReactionPitch,
                 playerState.hitReactionRoll,
-                playerState.hitReactionSeed);
+                playerState.hitReactionSeed,
+                playerState.hitTriggerId,
+                new Vector3(playerState.hitSourceX, playerState.hitSourceY, playerState.hitSourceZ));
 
-            if (!playerState.isHitReacting)
+            if (isLocal && playerState.kills > _lastKillsCount)
             {
-                controller.ApplyRemoteVisualYaw(playerState.visualYaw);
+                controller.PlayGetKillSound();
             }
+            _lastKillsCount = playerState.kills;
 
             if (playerState.isBeingCarried && controller.TryGetCarriedFollowPose(out Vector3 carriedTargetPosition, out Quaternion carriedTargetRotation))
             {

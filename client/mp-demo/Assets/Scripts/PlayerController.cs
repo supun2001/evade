@@ -251,7 +251,11 @@ public class PlayerController : MonoBehaviour
 
     [Header("Hit Audio")]
     [SerializeField] private AudioClip _playerGotHitClip;
-    [SerializeField, Range(0f, 1f)] private float _playerGotHitVolume = 1f;
+    [SerializeField] private AudioClip _eliminationHitClip;
+    [SerializeField] private AudioClip _getKillClip;
+    [SerializeField, Range(0f, 1f)] private float _playerGotHitVolume = 0.8f;
+    [SerializeField, Range(0f, 1f)] private float _eliminationHitVolume = 1.0f;
+    [SerializeField, Range(0f, 1f)] private float _getKillVolume = 1.0f;
 
     [Header("Shooting Mode")]
     [SerializeField, Min(1f)] private float _maxHealth = 100f;
@@ -496,6 +500,7 @@ public class PlayerController : MonoBehaviour
     private float NextbotHitLegYawRange => Mathf.Lerp(4f, 16f, _nextbotHitLimbFlail);
     private float NextbotHitLegRollRange => Mathf.Lerp(6f, 22f, _nextbotHitLimbFlail);
     private float _lastAppliedRemoteHitReactionSeed = float.NaN;
+    private float _lastAppliedHitTriggerId = 0f;
     private int _rampLayer = -1;
     private float _lastRampTouchTime = float.NegativeInfinity;
     private bool _groundProbeGrounded;
@@ -950,23 +955,6 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        _isHitReacting = false;
-        _nextbotHitReactionTimer = 0f;
-        _nextbotHitReactionPitch = 0f;
-        _nextbotHitReactionRoll = 0f;
-        _nextbotHitAngularVelocityPitch = 0f;
-        _nextbotHitAngularVelocityRoll = 0f;
-        _nextbotHitImpactVelocity = Vector3.zero;
-        _nextbotHitImpactTimer = 0f;
-        _nextbotHitReactionSeed = 0f;
-        _lastAppliedRemoteHitReactionSeed = float.NaN;
-        _runHeldTime = 0f;
-        _isCrouching = false;
-        _isWallRunning = false;
-        _wallRunSide = 0;
-        _wallRunNormal = Vector3.zero;
-        _wallRunContactHoldTimer = 0f;
-        _wallRunSprintGraceTimer = 0f;
         _playerAnimation.SetInjured(injured);
         ClearHitReactionTiltPreservingVisualYaw();
 
@@ -3726,6 +3714,8 @@ public class PlayerController : MonoBehaviour
         
         EnsureGhostingState();
 
+        PlayEliminationHitSound();
+
         // Hide all renderers immediately
         Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
         for (int i = 0; i < allRenderers.Length; i++)
@@ -5413,10 +5403,18 @@ public class PlayerController : MonoBehaviour
         float reactionTimeRemaining,
         float reactionPitch,
         float reactionRoll,
-        float reactionSeed)
+        float reactionSeed,
+        float hitTriggerId,
+        Vector3 hitSource)
     {
         if (isHitReacting)
         {
+            if (_lastAppliedHitTriggerId != hitTriggerId)
+            {
+                PlayPlayerGotHitSound();
+                _lastAppliedHitTriggerId = hitTriggerId;
+            }
+
             if (!Mathf.Approximately(_lastAppliedRemoteHitReactionSeed, reactionSeed))
             {
                 SeedNextbotHitReactionLimbTargets(reactionSeed);
@@ -6520,6 +6518,40 @@ public class PlayerController : MonoBehaviour
         _hurtAudioSource.volume = Mathf.Clamp01(_playerGotHitVolume);
         _hurtAudioSource.pitch = 1f;
         _hurtAudioSource.PlayOneShot(_playerGotHitClip);
+    }
+
+    public void PlayEliminationHitSound()
+    {
+        if (_eliminationHitClip == null)
+        {
+            _eliminationHitClip = Resources.Load<AudioClip>("SFX/hit");
+        }
+
+        if (_eliminationHitClip == null || _hurtAudioSource == null)
+        {
+            return;
+        }
+
+        _hurtAudioSource.Stop();
+        _hurtAudioSource.volume = Mathf.Clamp01(_eliminationHitVolume);
+        _hurtAudioSource.pitch = 1f;
+        _hurtAudioSource.PlayOneShot(_eliminationHitClip);
+    }
+
+    public void PlayGetKillSound()
+    {
+        if (_getKillClip == null)
+        {
+            _getKillClip = Resources.Load<AudioClip>("SFX/GetKill");
+        }
+
+        if (_getKillClip == null || _pickupAudioSource == null)
+        {
+            return;
+        }
+
+        // Use pickup source for kill sounds so it doesn't interrupt hurt sounds
+        _pickupAudioSource.PlayOneShot(_getKillClip, _getKillVolume);
     }
 
     private float GetActiveSpeedBoostMultiplier()

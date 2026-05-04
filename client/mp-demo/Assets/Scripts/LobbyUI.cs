@@ -920,7 +920,12 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        OnStartClicked();
+        // Skip map selection and start immediately with a random map
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.UseServerRandomMap();
+        }
+        StartSelectedMapJoin();
     }
 
     private void HandleClassicMapButtonClicked()
