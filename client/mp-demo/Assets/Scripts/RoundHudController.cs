@@ -1683,6 +1683,11 @@ public class RoundHudController : MonoBehaviour
             return new Color(0.19f, 0.34f, 0.18f, 0.92f);
         }
 
+        if (string.Equals(mapId, "boomBoom", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.42f, 0.18f, 0.12f, 0.92f);
+        }
+
         return new Color(0.16f, 0.27f, 0.19f, 0.92f);
     }
 
@@ -1711,6 +1716,11 @@ public class RoundHudController : MonoBehaviour
         if (string.Equals(mapId, "vilage", StringComparison.OrdinalIgnoreCase))
         {
             return new Color(0.55f, 0.9f, 0.48f);
+        }
+
+        if (string.Equals(mapId, "boomBoom", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(1f, 0.58f, 0.38f);
         }
 
         return new Color(0.47f, 0.93f, 0.54f);

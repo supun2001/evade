@@ -38,6 +38,10 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _injuredMoveSpeed = 1.75f;
     [SerializeField] private float _crouchMoveSpeed = 2f;
     [SerializeField, Min(0.01f)] private float _crouchRunHoldDuration = 3f;
+
+    [Header("Collision")]
+    [SerializeField] private LayerMask _movementCollisionLayers = ~0;
+    [SerializeField, Min(0f)] private float _movementCollisionPadding = 0.03f;
     [SerializeField, Range(0f, 1f)] private float _crouchRunAnimationExitSpeedRatio = 0.2f;
     [SerializeField, Min(0f)] private float _crouchRunEnterMinSpeed = 4f;
     public float autoSprintDelay = 5f;
@@ -795,10 +799,7 @@ public class PlayerController : MonoBehaviour
         Vector3 finalVelocity = _horizontalVelocity;
         finalVelocity.y = _verticalVelocity;
 
-        if (_characterController.enabled)
-        {
-            _characterController.Move(finalVelocity * Time.deltaTime);
-        }
+        MoveCharacterControllerSafely(finalVelocity * Time.deltaTime);
         RefreshGroundProbeState();
         UpdateFootstepAudio();
     }
@@ -5992,10 +5993,7 @@ public class PlayerController : MonoBehaviour
 
         Vector3 finalVelocity = _horizontalVelocity + _nextbotHitImpactVelocity;
         finalVelocity.y = _verticalVelocity;
-        if (_characterController.enabled)
-        {
-            _characterController.Move(finalVelocity * deltaTime);
-        }
+        MoveCharacterControllerSafely(finalVelocity * deltaTime);
 
         if (_nextbotHitReactionTimer <= 0f)
         {
@@ -6381,6 +6379,90 @@ public class PlayerController : MonoBehaviour
             _groundProbeGrounded = true;
             return;
         }
+    }
+
+    private void MoveCharacterControllerSafely(Vector3 desiredDisplacement)
+    {
+        if (_characterController == null || !_characterController.enabled)
+        {
+            return;
+        }
+
+        Vector3 safeDisplacement = ResolveSafeCharacterDisplacement(desiredDisplacement);
+        _characterController.Move(safeDisplacement);
+    }
+
+    private Vector3 ResolveSafeCharacterDisplacement(Vector3 desiredDisplacement)
+    {
+        if (_transform == null)
+        {
+            return desiredDisplacement;
+        }
+
+        float desiredDistance = desiredDisplacement.magnitude;
+        if (desiredDistance <= 0.0001f)
+        {
+            return desiredDisplacement;
+        }
+
+        Vector3 direction = desiredDisplacement / desiredDistance;
+        GetCharacterControllerCapsule(out Vector3 capsuleBottom, out Vector3 capsuleTop, out float capsuleRadius);
+
+        RaycastHit[] hits = Physics.CapsuleCastAll(
+            capsuleBottom,
+            capsuleTop,
+            capsuleRadius,
+            direction,
+            desiredDistance + _movementCollisionPadding,
+            _movementCollisionLayers,
+            QueryTriggerInteraction.Ignore);
+
+        if (hits == null || hits.Length == 0)
+        {
+            return desiredDisplacement;
+        }
+
+        Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+        for (int i = 0; i < hits.Length; i++)
+        {
+            RaycastHit hit = hits[i];
+            if (!IsValidMovementCollisionHit(hit))
+            {
+                continue;
+            }
+
+            float safeDistance = Mathf.Max(0f, hit.distance - _movementCollisionPadding);
+            return direction * Mathf.Min(safeDistance, desiredDistance);
+        }
+
+        return desiredDisplacement;
+    }
+
+    private void GetCharacterControllerCapsule(out Vector3 capsuleBottom, out Vector3 capsuleTop, out float capsuleRadius)
+    {
+        Vector3 center = _transform.position + _characterController.center;
+        capsuleRadius = Mathf.Max(0.01f, _characterController.radius - _movementCollisionPadding);
+        float halfHeight = Mathf.Max(capsuleRadius, (_characterController.height * 0.5f) - _movementCollisionPadding);
+        float cylinderHalfHeight = Mathf.Max(0f, halfHeight - capsuleRadius);
+        Vector3 upOffset = Vector3.up * cylinderHalfHeight;
+        capsuleBottom = center - upOffset;
+        capsuleTop = center + upOffset;
+    }
+
+    private bool IsValidMovementCollisionHit(RaycastHit hit)
+    {
+        if (hit.collider == null)
+        {
+            return false;
+        }
+
+        Transform hitTransform = hit.collider.transform;
+        if (hitTransform == null)
+        {
+            return false;
+        }
+
+        return !hitTransform.IsChildOf(_transform) && !IsCarryLinkedTransform(hitTransform);
     }
 
     private bool IsValidGroundProbeHit(RaycastHit hit)

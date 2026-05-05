@@ -150,6 +150,7 @@
                     <ui:Button name="map-parkour-button" text="PARKOUR" style="height: 58px; color: rgb(238, 248, 255); background-color: rgba(40, 88, 130, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                     <ui:Button name="map-vitaminb-button" text="VITAMIN B" style="height: 58px; color: rgb(240, 230, 255); background-color: rgba(140, 80, 200, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                     <ui:Button name="map-village-button" text="VILLAGE" style="height: 58px; color: rgb(244, 255, 236); background-color: rgba(72, 120, 70, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
+                    <ui:Button name="map-boomboom-button" text="BOOM BOOM" style="height: 58px; color: rgb(255, 240, 232); background-color: rgba(168, 74, 46, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>

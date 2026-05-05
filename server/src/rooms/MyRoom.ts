@@ -113,6 +113,7 @@ const AVAILABLE_MAPS = [
   { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
   { mapId: "Vitamin_B", sceneName: "Vitamin_B", displayName: "Vitamin B", difficulty: "NORMAL" },
   { mapId: "vilage", sceneName: "Village", displayName: "Village", difficulty: "NORMAL" },
+  { mapId: "boomBoom", sceneName: "Boom Boom", displayName: "Boom Boom", difficulty: "HARD" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;

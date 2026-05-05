@@ -81,6 +81,8 @@ public class NetworkManager : MonoBehaviour
     private const string VitaminBMapSceneName = "Vitamin_B";
     private const string VillageMapId = "vilage";
     private const string VillageMapSceneName = "Village";
+    private const string BoomBoomMapId = "boomBoom";
+    private const string BoomBoomMapSceneName = "Boom Boom";
     private const float MinServerObstacleThickness = 0.25f;
     private const float MinServerObstacleMajorSpan = 1.25f;
     private const float MinServerObstacleFootprintArea = 1.0f;
@@ -277,7 +279,8 @@ public class NetworkManager : MonoBehaviour
             || string.Equals(mapId, BrutilistVoidMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mapId, VillageMapId, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(mapId, VillageMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, BoomBoomMapId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSceneNameForMapId(string mapId)
@@ -305,6 +308,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, VillageMapId, StringComparison.OrdinalIgnoreCase))
         {
             return VillageMapSceneName;
+        }
+
+        if (string.Equals(mapId, BoomBoomMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return BoomBoomMapSceneName;
         }
 
         return ClassicMapSceneName;
@@ -335,6 +343,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, VillageMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return VillageMapId;
+        }
+
+        if (string.Equals(sceneName, BoomBoomMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return BoomBoomMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
@@ -2016,6 +2029,7 @@ public class NetworkManager : MonoBehaviour
         List<NextbotSpawnPointConfig> discoveredNextbotSpawns = new List<NextbotSpawnPointConfig>();
         List<PlayerSpawnPointConfig> discoveredPlayerSpawns = new List<PlayerSpawnPointConfig>();
         List<NextbotPatrolPointConfig> discoveredPatrolSpawns = new List<NextbotPatrolPointConfig>();
+        Transform playerSpawnRoot = FindNamedRootTransform("PlayerSpawnPoints");
         Transform patrolRoot = FindNamedRootTransform("PatrolPoints");
 
         // Search for transforms by name since the config structs aren't components themselves.
@@ -2030,6 +2044,13 @@ public class NetworkManager : MonoBehaviour
                 discoveredNextbotSpawns.Add(new NextbotSpawnPointConfig { anchor = t, position = t.position });
             }
             else if (name.IndexOf("Player Spawn", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discoveredPlayerSpawns.Add(new PlayerSpawnPointConfig { anchor = t, position = t.position });
+            }
+            else if (playerSpawnRoot != null
+                && t != playerSpawnRoot
+                && t.IsChildOf(playerSpawnRoot)
+                && t.name.StartsWith("Point", StringComparison.OrdinalIgnoreCase))
             {
                 discoveredPlayerSpawns.Add(new PlayerSpawnPointConfig { anchor = t, position = t.position });
             }
