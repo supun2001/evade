@@ -4785,10 +4785,14 @@ public class PlayerController : MonoBehaviour
             // For remote players, always show body. For local, only in third person and not spectating.
             _thirdPersonBodyRoot.SetActive(_isSimulationControlled || (!firstPerson && !_isSpectating));
             
-            // Apply rotation offset to ensure the model faces the correct way
-            if (!firstPerson && !_isSpectating)
+            // Apply the third-person visual correction only for the local player.
+            if (!_isSimulationControlled && !firstPerson && !_isSpectating)
             {
                 _thirdPersonBodyRoot.transform.localRotation = Quaternion.Euler(_thirdPersonBodyRotationOffset);
+            }
+            else if (_isSimulationControlled)
+            {
+                _thirdPersonBodyRoot.transform.localRotation = Quaternion.identity;
             }
         }
 
@@ -6494,7 +6498,7 @@ public class PlayerController : MonoBehaviour
         if (_thirdPersonBodyRoot != null)
         {
             _thirdPersonBodyRoot.SetActive(true);
-            _thirdPersonBodyRoot.transform.localRotation = Quaternion.Euler(_thirdPersonBodyRotationOffset);
+            _thirdPersonBodyRoot.transform.localRotation = Quaternion.identity;
         }
 
         Camera[] cameras = GetComponentsInChildren<Camera>(true);
