@@ -125,6 +125,7 @@ public class NetworkPlayer : MonoBehaviour
 
         if (isLocal)
         {
+            bool wasControllerEliminated = controller != null && controller.IsEliminatedStateActive;
             if (controller != null && playerState.maxCombatHealth > 0f)
             {
                 controller.SetCombatHealth(playerState.combatHealth);
@@ -140,7 +141,8 @@ public class NetworkPlayer : MonoBehaviour
             if (!useShootingPresentation
                 && fireInputRequested
                 && controller != null
-                && !controller.IsSpectating())
+                && !controller.IsSpectating()
+                && !playerState.isEliminated)
             {
                 useShootingPresentation = true;
                 manager?.SetMultiplayerShootingPresentationEnabled(true);
@@ -170,7 +172,7 @@ public class NetworkPlayer : MonoBehaviour
                     $"localSession={(manager != null ? manager.LocalSessionId : "null")}");
             }
 
-            if (useShootingPresentation)
+            if (useShootingPresentation && !playerState.isEliminated)
             {
                 if (input != null)
                 {
@@ -184,7 +186,7 @@ public class NetworkPlayer : MonoBehaviour
 
                 if (controller != null && controller.IsSpectating())
                 {
-                    controller.ExitSpectateMode();
+                    controller.ExitSpectateMode(!wasControllerEliminated);
                 }
 
                 if (controller != null && !controller.IsCombatModeActive)
@@ -207,22 +209,6 @@ public class NetworkPlayer : MonoBehaviour
                 }
             }
 
-            if (isLocal)
-            {
-                if (playerState != null && controller != null)
-                {
-                    if (playerState.maxCombatHealth > 0f)
-                    {
-                        controller.SetCombatHealth(playerState.combatHealth);
-                    }
-                }
-            }
-
-            if (controller != null && controller.IsSpectating())
-            {
-                return;
-            }
-
             if (playerState.isEliminated && controller != null)
             {
                 controller.ApplyNetworkEliminated();
@@ -234,10 +220,15 @@ public class NetworkPlayer : MonoBehaviour
             else if (!playerState.isInjured
                 && !playerState.isEliminated
                 && controller != null
-                && controller.IsInjuredOrHitReacting()
+                && (wasControllerEliminated || controller.IsInjuredOrHitReacting())
                 && !controller.IsAwaitingAuthoritativeNextbotHit())
             {
                 controller.ApplyNetworkRevive();
+            }
+
+            if (controller != null && controller.IsSpectating())
+            {
+                return;
             }
 
             HandleServerHitTrigger();
@@ -386,12 +377,29 @@ public class NetworkPlayer : MonoBehaviour
 
         if (controller != null)
         {
+            bool wasControllerEliminated = controller.IsEliminatedStateActive;
             if (playerState.maxCombatHealth > 0f)
             {
                 controller.SetCombatHealth(playerState.combatHealth);
             }
 
-            controller.EnsureRemoteFullBodyVisible();
+            if (playerState.isEliminated)
+            {
+                if (!wasControllerEliminated)
+                {
+                    controller.ApplyNetworkEliminated();
+                }
+            }
+            else
+            {
+                if (wasControllerEliminated)
+                {
+                    controller.ApplyNetworkRevive();
+                }
+
+                controller.EnsureRemoteFullBodyVisible();
+            }
+
             controller.ApplyRemoteCameraRotation(new Vector2(playerState.cameraRotationX, playerState.cameraRotationY));
         }
 
@@ -423,7 +431,7 @@ public class NetworkPlayer : MonoBehaviour
                     playerState.isGrounded,
                     playerState.isJumping,
                     playerState.velocityY,
-                    playerState.isInjured || playerState.isEliminated,
+                    playerState.isInjured && !playerState.isEliminated,
                     playerState.isCrouching,
                     playerState.isWallRunning,
                     Mathf.RoundToInt(playerState.wallRunSide));
@@ -446,19 +454,22 @@ public class NetworkPlayer : MonoBehaviour
                 playerState.carriedPlayerSessionId,
                 playerState.carrierSessionId);
 
-            controller.ApplyRemoteVisualState(
-                new Vector2(playerState.moveInputX, playerState.moveInputY),
-                playerState.isInjured || playerState.isEliminated,
-                playerState.isCrouching);
+            if (!playerState.isEliminated)
+            {
+                controller.ApplyRemoteVisualState(
+                    new Vector2(playerState.moveInputX, playerState.moveInputY),
+                    playerState.isInjured,
+                    playerState.isCrouching);
 
-            controller.ApplyRemoteHitReactionState(
-                playerState.isHitReacting,
-                playerState.hitReactionTimeRemaining,
-                playerState.hitReactionPitch,
-                playerState.hitReactionRoll,
-                playerState.hitReactionSeed,
-                playerState.hitTriggerId,
-                new Vector3(playerState.hitSourceX, playerState.hitSourceY, playerState.hitSourceZ));
+                controller.ApplyRemoteHitReactionState(
+                    playerState.isHitReacting,
+                    playerState.hitReactionTimeRemaining,
+                    playerState.hitReactionPitch,
+                    playerState.hitReactionRoll,
+                    playerState.hitReactionSeed,
+                    playerState.hitTriggerId,
+                    new Vector3(playerState.hitSourceX, playerState.hitSourceY, playerState.hitSourceZ));
+            }
 
             if (isLocal && playerState.kills > _lastKillsCount)
             {

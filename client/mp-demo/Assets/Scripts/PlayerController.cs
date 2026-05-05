@@ -283,6 +283,13 @@ public class PlayerController : MonoBehaviour
     [Header("Remote Arms Debug")]
     [SerializeField] private bool _debugRemoteArmMountLogs = true;
     [SerializeField, Min(0f)] private float _debugRemoteArmMountLogCooldown = 0.25f;
+    [Header("Elimination Toss")]
+    [SerializeField] private float _eliminationTossDuration = 0.55f;
+    [SerializeField] private float _eliminationHideDelay = 0.45f;
+    [SerializeField] private float _eliminationTossHorizontalSpeed = 2.4f;
+    [SerializeField] private float _eliminationTossUpwardSpeed = 2.8f;
+    [SerializeField] private float _eliminationTossGravity = 10f;
+    [SerializeField] private float _eliminationTossSpinSpeed = 220f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
@@ -394,6 +401,11 @@ public class PlayerController : MonoBehaviour
     private float _nextDebugClickPathLogTime;
     private float _nextDebugRemoteArmMountLogTime;
     private float _respawnCountdownEndTime = -1f;
+    private bool _isEliminationTossActive;
+    private bool _eliminationBodyHidden;
+    private float _eliminationTossTimer;
+    private Vector3 _eliminationTossVelocity = Vector3.zero;
+    private float _eliminationTossRoll;
 
     private CameraViewMode _currentViewMode;
     private CameraViewMode _preferredViewMode;
@@ -684,6 +696,7 @@ public class PlayerController : MonoBehaviour
     #region Update
     private void Update() {
         _jumpedThisFrame = false;
+        UpdateEliminationToss();
 
         if (Mouse.current != null
             && Mouse.current.leftButton.wasPressedThisFrame
@@ -1162,6 +1175,11 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateSimulationVisuals()
     {
+        if (_isEliminatedState)
+        {
+            return;
+        }
+
         Vector2 lookInput = _playerLocomotionInput != null ? _playerLocomotionInput.LookInput : Vector2.zero;
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, -lookLimitV, lookLimitV);
@@ -3828,10 +3846,86 @@ public class PlayerController : MonoBehaviour
         return false;
     }
 
+    private void UpdateEliminationToss()
+    {
+        if (!_isEliminationTossActive || _injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        float deltaTime = Time.deltaTime;
+        if (deltaTime <= 0f)
+        {
+            return;
+        }
+
+        _eliminationTossTimer += deltaTime;
+        _eliminationTossVelocity += Vector3.down * _eliminationTossGravity * deltaTime;
+
+        Vector3 localOffset = _injuredVisualRoot.localPosition - _injuredVisualRootBaseLocalPosition;
+        localOffset += _transform.InverseTransformDirection(_eliminationTossVelocity * deltaTime);
+        _injuredVisualRoot.localPosition = _injuredVisualRootBaseLocalPosition + localOffset;
+
+        _eliminationTossRoll += _eliminationTossSpinSpeed * deltaTime;
+        Quaternion baseRotation = Quaternion.Euler(0f, 180f, 0f) * _injuredVisualRootBaseLocalRotation;
+        _injuredVisualRoot.localRotation = baseRotation * Quaternion.Euler(-18f, 0f, _eliminationTossRoll);
+
+        if (!_eliminationBodyHidden && _eliminationTossTimer >= _eliminationHideDelay)
+        {
+            SetAllCharacterRenderersVisible(false);
+            _eliminationBodyHidden = true;
+        }
+
+        if (_eliminationTossTimer >= _eliminationTossDuration)
+        {
+            _isEliminationTossActive = false;
+        }
+    }
+
+    private void BeginEliminationToss()
+    {
+        CacheInjuredVisualRoot();
+        SetDebugInjuredState(false);
+        ResetInjuredVisualRootRotation();
+        ResetNextbotHitReactionLimbPose();
+
+        Vector3 tossDirection = _transform.forward + (_transform.right * UnityEngine.Random.Range(-0.35f, 0.35f));
+        tossDirection.y = 0f;
+        if (tossDirection.sqrMagnitude <= 0.0001f)
+        {
+            tossDirection = Vector3.forward;
+        }
+
+        tossDirection.Normalize();
+        _eliminationTossVelocity = tossDirection * _eliminationTossHorizontalSpeed + Vector3.up * _eliminationTossUpwardSpeed;
+        _eliminationTossRoll = UnityEngine.Random.Range(-24f, 24f);
+        _eliminationTossTimer = 0f;
+        _eliminationBodyHidden = false;
+        _isEliminationTossActive = true;
+        SetAllCharacterRenderersVisible(true);
+    }
+
+    private void SetAllCharacterRenderersVisible(bool visible)
+    {
+        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < allRenderers.Length; i++)
+        {
+            if (allRenderers[i] != null)
+            {
+                allRenderers[i].enabled = visible;
+            }
+        }
+    }
+
     public void ApplyNetworkRevive()
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         _isEliminatedState = false;
+        _isEliminationTossActive = false;
+        _eliminationBodyHidden = false;
+        _eliminationTossTimer = 0f;
+        _eliminationTossVelocity = Vector3.zero;
+        _eliminationTossRoll = 0f;
         _isHitReacting = false;
         _nextbotHitReactionTimer = 0f;
         _nextbotHitImpactVelocity = Vector3.zero;
@@ -3848,19 +3942,26 @@ public class PlayerController : MonoBehaviour
         }
 
         // Restore renderers
-        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
-        for (int i = 0; i < allRenderers.Length; i++)
-        {
-            if (allRenderers[i] != null) allRenderers[i].enabled = true;
-        }
+        SetAllCharacterRenderersVisible(true);
 
         if (!_isSimulationControlled && _playerLocomotionInput != null)
         {
+            _playerLocomotionInput.enabled = true;
             _playerLocomotionInput.InputEnabled = true;
+            if (_playerLocomotionInput.Controls != null)
+            {
+                _playerLocomotionInput.Controls.PlayerLocomotionMap.Enable();
+            }
             if (_isSpectating)
             {
-                ExitSpectateMode();
+                ExitSpectateMode(false);
             }
+        }
+
+        if (!_isSimulationControlled && _characterController != null)
+        {
+            _characterController.enabled = true;
+            RestoreGhostingState();
         }
 
         SetDebugInjuredState(false);
@@ -3893,9 +3994,16 @@ public class PlayerController : MonoBehaviour
 
     public void ApplyNetworkEliminated()
     {
+        if (_isEliminatedState)
+        {
+            UpdateSimulationCombatHitboxState();
+            return;
+        }
+
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         _isEliminatedState = true;
         _currentHealth = 0f;
+        _isHitReacting = false;
         if (!_isSimulationControlled && _playerLocomotionInput != null)
         {
             _playerLocomotionInput.InputEnabled = false;
@@ -3913,13 +4021,7 @@ public class PlayerController : MonoBehaviour
         EnsureGhostingState();
 
         PlayEliminationHitSound();
-
-        // Hide all renderers immediately
-        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
-        for (int i = 0; i < allRenderers.Length; i++)
-        {
-            if (allRenderers[i] != null) allRenderers[i].enabled = false;
-        }
+        BeginEliminationToss();
 
         // Enter spectate mode immediately
         if (!_isSimulationControlled)
@@ -3973,6 +4075,16 @@ public class PlayerController : MonoBehaviour
 
         _playerRotationY = rotationY;
         UpdateForcedCameraViewState(forceImmediate: true);
+
+        if (!_isSimulationControlled && _playerLocomotionInput != null)
+        {
+            _playerLocomotionInput.enabled = true;
+            _playerLocomotionInput.InputEnabled = true;
+            if (_playerLocomotionInput.Controls != null)
+            {
+                _playerLocomotionInput.Controls.PlayerLocomotionMap.Enable();
+            }
+        }
     }
 
     public bool IsCarrying()
@@ -5599,6 +5711,11 @@ public class PlayerController : MonoBehaviour
 
     public void ApplyRemoteVisualState(Vector2 movementInput, bool injured, bool crouching)
     {
+        if (_isEliminatedState)
+        {
+            return;
+        }
+
         EnsureRemoteFullBodyVisible();
 
         if (_isBeingCarried)
@@ -5621,6 +5738,11 @@ public class PlayerController : MonoBehaviour
 
     public void EnsureRemoteFullBodyVisible()
     {
+        if (_isEliminatedState)
+        {
+            return;
+        }
+
         if (_playerAnimation != null && _playerAnimation.VisualRootTransform != null)
         {
             GameObject visualRootObject = _playerAnimation.VisualRootTransform.gameObject;
@@ -6407,7 +6529,7 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    public void ExitSpectateMode()
+    public void ExitSpectateMode(bool applyAuthoritativeReset = true)
     {
         if (!_isSpectating)
         {
@@ -6419,7 +6541,7 @@ public class PlayerController : MonoBehaviour
         _spectateTargetKey = null;
         _nextSpectateRefreshTime = 0f;
         SetSpectateCameraActive(false);
-        if (_networkPlayer != null)
+        if (applyAuthoritativeReset && _networkPlayer != null)
         {
             _networkPlayer.ApplyAuthoritativeRoundReset();
         }

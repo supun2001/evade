@@ -2036,6 +2036,24 @@ export class MyRoom extends Room<MyRoomState> {
     }
   }
 
+  private clearNextbotTargetingForPlayer(sessionId: string) {
+    for (let index = 0; index < this.nextbotControllers.length; index++) {
+      const controller = this.nextbotControllers[index];
+      if (controller.currentTargetSessionId !== sessionId) {
+        continue;
+      }
+
+      controller.currentTargetSessionId = "";
+      controller.blockedMoveStartedAt = 0;
+      controller.pathWaypoints = [];
+
+      const nextbot = this.getNextbotState(index);
+      if (nextbot != null) {
+        nextbot.targetSessionId = "";
+      }
+    }
+  }
+
   private getPlayerSpawnPosition(sessionId: string) {
     const spawnPoints = this.playerSpawnPoints.length > 0 ? this.playerSpawnPoints : DEFAULT_PLAYER_SPAWN_POINTS;
     const normalizedIndex = this.getStableSpawnIndex(sessionId, spawnPoints.length);
@@ -3725,6 +3743,7 @@ export class MyRoom extends Room<MyRoomState> {
 
   private applyPlayerEliminationState(player: Player, keepInjuredState: boolean) {
     this.clearCarryStateForPlayer(player.sessionId);
+    this.clearNextbotTargetingForPlayer(player.sessionId);
     player.combatHealth = 0;
     player.isEliminated = true;
     player.isInjured = keepInjuredState;
