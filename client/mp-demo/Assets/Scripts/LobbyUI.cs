@@ -553,9 +553,18 @@ public class LobbyUI : MonoBehaviour
 
         // Ensure movement is enabled
         SetLocalPlayerInput(true);
-        SetLocalPlayerCombatMode(
-            NetworkManager.Instance != null
-            && NetworkManager.Instance.IsMultiplayerShootingPresentationEnabled);
+        bool shouldUseCombatMode = false;
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive)
+        {
+            shouldUseCombatMode = offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting;
+        }
+        else if (NetworkManager.Instance != null)
+        {
+            shouldUseCombatMode = NetworkManager.Instance.IsMultiplayerShootingPresentationEnabled;
+        }
+
+        SetLocalPlayerCombatMode(shouldUseCombatMode);
     }
 
     private void CacheMenuUi()
@@ -2158,6 +2167,13 @@ public class LobbyUI : MonoBehaviour
 
     private static GameObject FindLocalPlayerObject()
     {
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive
+            && offlineModeManager.TryGetLocalPlayerObject(out GameObject offlineLocalPlayer))
+        {
+            return offlineLocalPlayer;
+        }
+
         GameObject localPlayer = GameObject.Find("LocalPlayer");
         if (localPlayer != null)
         {

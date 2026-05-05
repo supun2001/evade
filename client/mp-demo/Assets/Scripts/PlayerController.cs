@@ -267,9 +267,13 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _ak47Damage = 35f;
     [SerializeField, Min(0.01f)] private float _ak47FireInterval = 0.12f;
     [SerializeField, Min(1f)] private float _ak47Range = 220f;
+    [SerializeField, Min(1)] private int _ak47MagazineSize = 30;
+    [SerializeField, Min(0.01f)] private float _ak47ReloadDuration = 1.45f;
     [SerializeField] private LayerMask _ak47HitLayers = -1; // Hit everything by default
     [SerializeField] private string _gunshotResourceFolder = "SFX/Gunshots";
+    [SerializeField] private string _reloadSfxResourcePath = "SFX/Reload";
     [SerializeField, Range(0f, 1f)] private float _gunshotVolume = 0.9f;
+    [SerializeField, Range(0f, 1f)] private float _reloadVolume = 0.95f;
     [SerializeField] private Transform _shotEffectSpawnPoint;
     [SerializeField] private string _bulletVfxResourcePath = "VFX/Bullet";
     [SerializeField] private string _ak47AttachPointName = "AK47 Attach point";
@@ -308,6 +312,7 @@ public class PlayerController : MonoBehaviour
     private Label _speedLabel;
     private Label _animationDebugLabel;
     private Label _localHealthLabelElement;
+    private Label _ammoLabelElement;
     private VisualElement _crosshairDotElement;
     private VisualElement _localHealthContainerElement;
     private VisualElement _localHealthFillElement;
@@ -339,6 +344,7 @@ public class PlayerController : MonoBehaviour
     private AudioSource _pickupAudioSource;
     private AudioSource _hurtAudioSource;
     private AudioSource _gunshotAudioSource;
+    private AudioSource _reloadAudioSource;
     private AudioListener _gameplayAudioListener;
     private AudioListener _spectateAudioListener;
     private Coroutine _pickupAudioStopCoroutine;
@@ -393,8 +399,12 @@ public class PlayerController : MonoBehaviour
     private bool _combatModeActive;
     private bool _isEliminatedState;
     private float _nextAllowedShotTime;
+    private int _currentMagazineAmmo;
+    private bool _isReloading;
+    private float _reloadCompleteTime = -1f;
     private float _shotTriggerId;
     private AudioClip[] _gunshotClips = Array.Empty<AudioClip>();
+    private AudioClip _reloadClip;
     private int _lastGunshotClipIndex = -1;
     private readonly System.Collections.Generic.Dictionary<string, EnemyHealthBarView> _enemyHealthBarViews = new();
     private GameObject _bulletVfxPrefab;
@@ -670,7 +680,16 @@ public class PlayerController : MonoBehaviour
         _gunshotAudioSource.dopplerLevel = 0f;
         _gunshotAudioSource.volume = _gunshotVolume;
 
+        _reloadAudioSource = gameObject.AddComponent<AudioSource>();
+        _reloadAudioSource.playOnAwake = false;
+        _reloadAudioSource.loop = false;
+        _reloadAudioSource.spatialBlend = 0f;
+        _reloadAudioSource.dopplerLevel = 0f;
+        _reloadAudioSource.volume = _reloadVolume;
+
         _gunshotClips = Resources.LoadAll<AudioClip>(_gunshotResourceFolder) ?? Array.Empty<AudioClip>();
+        _reloadClip = Resources.Load<AudioClip>(_reloadSfxResourcePath);
+        _currentMagazineAmmo = Mathf.Max(1, _ak47MagazineSize);
         _currentHealth = _maxHealth;
 
         SetLocalCharacterAudio(true);
@@ -727,11 +746,19 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        bool allowOfflineSimulationControl = _isSimulationControlled
+            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive;
+
         if (_isSimulationControlled)
         {
             UpdateRespawnCountdownUi();
-            // Skip physics and movement for simulation controlled players (handled by NetworkPlayer)
-            return;
+            // Remote/networked simulated players are driven by NetworkPlayer, but offline-mode bots
+            // still need to run their local movement/combat loop on this client.
+            if (!allowOfflineSimulationControl)
+            {
+                return;
+            }
         }
 
         if (!_playerLocomotionInput.InputEnabled) 
@@ -751,6 +778,7 @@ public class PlayerController : MonoBehaviour
         UpdateForcedCameraViewState();
         UpdateCrouchState();
         UpdateDownedCollisionShape();
+        UpdateReloadState();
         if (!_isSimulationControlled)
         {
             UpdateSpeedHud();
@@ -775,6 +803,7 @@ public class PlayerController : MonoBehaviour
 
         if (!_isSimulationControlled)
         {
+            HandleCombatReloadInput();
             HandleCombatInput();
         }
 
@@ -1103,7 +1132,11 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (_isSimulationControlled)
+        bool allowOfflineSimulationControl = _isSimulationControlled
+            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive;
+
+        if (_isSimulationControlled && !allowOfflineSimulationControl)
         {
             UpdateSimulationVisuals();
             return;
@@ -1126,7 +1159,7 @@ public class PlayerController : MonoBehaviour
         Vector2 lookInput = _playerLocomotionInput.LookInput;
         float minPitch = _currentViewMode == CameraViewMode.FirstPerson ? -_firstPersonLookUpLimit : -lookLimitV;
         float maxPitch = _currentViewMode == CameraViewMode.FirstPerson ? _firstPersonLookDownLimit : lookLimitV;
-        bool lookBackHeld = !_isSimulationControlled && Keyboard.current != null && Keyboard.current.rKey.isPressed;
+        bool lookBackHeld = !_combatModeActive && !_isSimulationControlled && Keyboard.current != null && Keyboard.current.rKey.isPressed;
         
         _cameraRotation.x += lookSenseH * lookInput.x;
         _cameraRotation.y = Mathf.Clamp(_cameraRotation.y - lookSenseV * lookInput.y, minPitch, maxPitch);
@@ -1865,6 +1898,7 @@ public class PlayerController : MonoBehaviour
         _animationDebugLabel = root.Q<Label>("animation-debug-label");
         _localHealthContainerElement = root.Q<VisualElement>("local-health-container");
         _localHealthLabelElement = root.Q<Label>("local-health-label");
+        _ammoLabelElement = root.Q<Label>("ammo-label");
         _localHealthFillElement = root.Q<VisualElement>("local-health-fill");
         _enemyHealthOverlayElement = root.Q<VisualElement>("enemy-health-overlay");
         _crosshairDotElement = root.Q<VisualElement>("crosshair-dot");
@@ -2116,6 +2150,10 @@ public class PlayerController : MonoBehaviour
         bool showCombatHud = _combatModeActive && !_isSpectating;
         _localHealthContainerElement.style.display = showCombatHud ? DisplayStyle.Flex : DisplayStyle.None;
         _enemyHealthOverlayElement.style.display = showCombatHud ? DisplayStyle.Flex : DisplayStyle.None;
+        if (_ammoLabelElement != null)
+        {
+            _ammoLabelElement.style.display = showCombatHud ? DisplayStyle.Flex : DisplayStyle.None;
+        }
 
         if (!showCombatHud)
         {
@@ -2134,6 +2172,13 @@ public class PlayerController : MonoBehaviour
         {
             _localHealthFillElement.style.width = Length.Percent(normalizedHealth * 100f);
             _localHealthFillElement.style.backgroundColor = GetHealthColor(normalizedHealth);
+        }
+
+        if (_ammoLabelElement != null)
+        {
+            _ammoLabelElement.text = _isReloading
+                ? "RELOADING"
+                : $"{Mathf.Max(0, _currentMagazineAmmo):00} / {Mathf.Max(1, _ak47MagazineSize):00}";
         }
 
         UpdateEnemyHealthBars();
@@ -2589,7 +2634,7 @@ public class PlayerController : MonoBehaviour
 
     public void TryFireCombatShotFromExternalInput()
     {
-        if (!CanProcessCombatShot(out string blockReason))
+        if (!CanProcessCombatShot(out string blockReason, requirePointerFireInput: false))
         {
             LogShootingDebug("ExternalFire.Blocked", blockReason);
             return;
@@ -2600,30 +2645,42 @@ public class PlayerController : MonoBehaviour
         _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
     }
 
-    private bool CanProcessCombatShot(out string blockReason)
+    private bool CanProcessCombatShot(out string blockReason, bool requirePointerFireInput = true)
     {
         if (!_combatModeActive
             || _isPauseMenuOpen
             || _isSpectating
             || _isEliminatedState
+            || _isReloading
             || IsInjuredOrHitReacting()
             || _isBeingCarried
             || _isCarryingPlayer
-            || Mouse.current == null)
+            || (requirePointerFireInput && Mouse.current == null))
         {
             blockReason =
                 $"combat={_combatModeActive}, pause={_isPauseMenuOpen}, spectate={_isSpectating}, " +
-                $"eliminated={_isEliminatedState}, injured={IsInjuredOrHitReacting()}, carried={_isBeingCarried}, " +
-                $"carrying={_isCarryingPlayer}, mouseNull={Mouse.current == null}";
+                $"eliminated={_isEliminatedState}, reloading={_isReloading}, injured={IsInjuredOrHitReacting()}, carried={_isBeingCarried}, " +
+                $"carrying={_isCarryingPlayer}, mouseNull={Mouse.current == null}, requirePointer={requirePointerFireInput}";
             return false;
         }
 
-        bool fireHeld = Mouse.current.leftButton.isPressed || Mouse.current.leftButton.wasPressedThisFrame;
+        if (_currentMagazineAmmo <= 0)
+        {
+            TryStartReload("empty");
+            blockReason = $"ammo={_currentMagazineAmmo}";
+            return false;
+        }
+
+        bool fireHeld = !requirePointerFireInput
+            || (Mouse.current != null
+                && (Mouse.current.leftButton.isPressed || Mouse.current.leftButton.wasPressedThisFrame));
         if (Time.time < _nextAllowedShotTime || !fireHeld)
         {
             blockReason =
                 $"cooldownRemaining={Mathf.Max(0f, _nextAllowedShotTime - Time.time):0.000}, " +
-                $"leftPressed={Mouse.current.leftButton.isPressed}, leftPressedThisFrame={Mouse.current.leftButton.wasPressedThisFrame}";
+                $"leftPressed={(Mouse.current != null && Mouse.current.leftButton.isPressed)}, " +
+                $"leftPressedThisFrame={(Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)}, " +
+                $"requirePointer={requirePointerFireInput}";
             return false;
         }
 
@@ -2634,6 +2691,7 @@ public class PlayerController : MonoBehaviour
     private void FireCombatShot()
     {
         LogShootingDebug("FireCombatShot.Begin", "Shot started");
+        _currentMagazineAmmo = Mathf.Max(0, _currentMagazineAmmo - 1);
         _shotTriggerId += 1f;
         _playerAnimation?.PlayShootAnimation();
         _currentArmRecoil = Mathf.Min(_currentArmRecoil + _armRecoilKick, _armRecoilKick * 2f);
@@ -2698,6 +2756,63 @@ public class PlayerController : MonoBehaviour
         }
 
         LogShootingDebug("FireCombatShot.End", "No valid damage target found");
+    }
+
+    private void HandleCombatReloadInput()
+    {
+        if (!_combatModeActive || _isPauseMenuOpen || _isSpectating || Keyboard.current == null)
+        {
+            return;
+        }
+
+        if (_isEliminatedState || IsInjuredOrHitReacting() || _isBeingCarried || _isCarryingPlayer)
+        {
+            return;
+        }
+
+        if (Keyboard.current.rKey.wasPressedThisFrame)
+        {
+            TryStartReload("manual");
+            return;
+        }
+
+        if (!_isReloading && _currentMagazineAmmo <= 0)
+        {
+            TryStartReload("empty");
+        }
+    }
+
+    private void UpdateReloadState()
+    {
+        if (!_isReloading || Time.time < _reloadCompleteTime)
+        {
+            return;
+        }
+
+        CompleteReload();
+    }
+
+    private bool TryStartReload(string reason)
+    {
+        if (_isReloading || _currentMagazineAmmo >= Mathf.Max(1, _ak47MagazineSize))
+        {
+            return false;
+        }
+
+        _isReloading = true;
+        _reloadCompleteTime = Time.time + Mathf.Max(0.01f, _ak47ReloadDuration);
+        _nextAllowedShotTime = _reloadCompleteTime;
+        PlayReloadSound();
+        LogShootingDebug("Reload.Start", $"reason={reason}, ammo={_currentMagazineAmmo}");
+        return true;
+    }
+
+    private void CompleteReload()
+    {
+        _isReloading = false;
+        _reloadCompleteTime = -1f;
+        _currentMagazineAmmo = Mathf.Max(1, _ak47MagazineSize);
+        LogShootingDebug("Reload.End", $"ammo={_currentMagazineAmmo}");
     }
 
     private bool TryHandleCombatPlayerHit(Collider hitCollider, OfflineModeManager offlineModeManager, string attackerSessionId)
@@ -2842,6 +2957,17 @@ public class PlayerController : MonoBehaviour
         }
 
         _gunshotAudioSource.PlayOneShot(clip, _gunshotVolume);
+    }
+
+    private void PlayReloadSound()
+    {
+        if (_reloadAudioSource == null || _reloadClip == null)
+        {
+            return;
+        }
+
+        _reloadAudioSource.Stop();
+        _reloadAudioSource.PlayOneShot(_reloadClip, _reloadVolume);
     }
 
     private void PlayBulletParticleEffect(Vector3 shotDirection)
@@ -3921,6 +4047,8 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkRevive()
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        _isPauseMenuOpen = false;
+        SetPauseMenuDisplay(false);
         _isEliminatedState = false;
         _isEliminationTossActive = false;
         _eliminationBodyHidden = false;
@@ -4044,6 +4172,13 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkRoundReset(Vector3 worldPosition, float rotationY)
     {
         ApplyNetworkRevive();
+        _isPauseMenuOpen = false;
+        SetPauseMenuDisplay(false);
+        if (_isSpectating)
+        {
+            ExitSpectateMode(false);
+        }
+
         _currentHealth = _maxHealth;
         _isEliminatedState = false;
         ClearRespawnCountdown();
@@ -5458,7 +5593,7 @@ public class PlayerController : MonoBehaviour
     private float GetMouseDrivenVisualYaw()
     {
         float cameraYawOffset = _cameraRotation.x;
-        bool lookBackHeld = Keyboard.current != null && Keyboard.current.rKey.isPressed;
+        bool lookBackHeld = !_combatModeActive && Keyboard.current != null && Keyboard.current.rKey.isPressed;
         if (lookBackHeld)
         {
             cameraYawOffset += 180f;
@@ -6693,10 +6828,22 @@ public class PlayerController : MonoBehaviour
     {
         _combatModeActive = isActive;
         _nextAllowedShotTime = 0f;
+        _isReloading = false;
+        _reloadCompleteTime = -1f;
+        _currentMagazineAmmo = Mathf.Max(1, _ak47MagazineSize);
         _currentHealth = _maxHealth;
         _isEliminatedState = false;
+        _isPauseMenuOpen = false;
+        SetPauseMenuDisplay(false);
+        _isSpectating = false;
+        _spectateModeSyncedToServer = false;
+        _spectateTargets.Clear();
+        _spectateTargetKey = null;
+        _nextSpectateRefreshTime = 0f;
+        SetSpectateCameraActive(false);
+        SetLocalSpectatorBodyVisible(true);
 
-        if (!_isSimulationControlled && _playerLocomotionInput != null)
+        if (_playerLocomotionInput != null)
         {
             _playerLocomotionInput.InputEnabled = true;
         }
@@ -6727,6 +6874,9 @@ public class PlayerController : MonoBehaviour
     {
         _isSimulationControlled = isSimulationControlled;
         SetLocalCharacterAudio(!isSimulationControlled);
+        bool allowOfflineSimulationControl = isSimulationControlled
+            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive;
 
         if (_debugRemoteArmMountLogs)
         {
@@ -6749,7 +6899,7 @@ public class PlayerController : MonoBehaviour
 
         if (_characterController != null)
         {
-            _characterController.enabled = !isSimulationControlled;
+            _characterController.enabled = !isSimulationControlled || allowOfflineSimulationControl;
         }
 
         UpdateSimulationCombatHitboxState();
@@ -6845,6 +6995,8 @@ public class PlayerController : MonoBehaviour
     {
         ConfigureCharacterAudioSource(_footstepAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
         ConfigureCharacterAudioSource(_hurtAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
+        ConfigureCharacterAudioSource(_gunshotAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
+        ConfigureCharacterAudioSource(_reloadAudioSource, isLocalCharacter, _remoteFootstepMinDistance, _remoteFootstepMaxDistance);
     }
 
     public void EnsureSingleLocalAudioListener()
@@ -7847,7 +7999,7 @@ public class PlayerController : MonoBehaviour
         {
             movementBasisYaw += _cameraRotation.x;
 
-            bool lookBackHeld = Keyboard.current != null && Keyboard.current.rKey.isPressed;
+            bool lookBackHeld = !_combatModeActive && Keyboard.current != null && Keyboard.current.rKey.isPressed;
             if (lookBackHeld)
             {
                 movementBasisYaw += 180f;

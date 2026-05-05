@@ -4,6 +4,12 @@ using UnityEngine.AI;
 [DefaultExecutionOrder(-3)]
 public class OfflinePlayerBotBrain : MonoBehaviour
 {
+    [Header("Combat")]
+    [SerializeField] private float _combatEngageDistance = 26f;
+    [SerializeField] private float _combatDesiredDistance = 11f;
+    [SerializeField] private float _combatStrafeDistance = 4f;
+    [SerializeField] private float _combatFireAngle = 14f;
+    [SerializeField] private LayerMask _combatSightLayers = ~0;
     [SerializeField] private float _rescueDistance = 2.5f;
     [SerializeField] private float _evadeDistance = 18f;
     [SerializeField] private float _jumpCheckDistance = 1.3f;
@@ -164,11 +170,30 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         bool hasThreat = OfflineModeManager.Instance.TryGetNearestThreat(origin, out Transform threatTransform, out float threatDistance);
+        bool isShootingMode = OfflineModeManager.Instance.IsOfflineRoundActive
+            && OfflineModeManager.Instance.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting;
+        Transform combatTarget = null;
+        PlayerController combatTargetController = null;
+        float combatTargetDistance = float.PositiveInfinity;
+        if (isShootingMode
+            && OfflineModeManager.Instance.TryGetNearestActivePlayer(_identity.SessionId, origin, out Transform nearestPlayerTransform, out float nearestPlayerDistance)
+            && nearestPlayerTransform != null)
+        {
+            combatTarget = nearestPlayerTransform;
+            combatTargetController = nearestPlayerTransform.GetComponent<PlayerController>();
+            if (combatTargetController == null)
+            {
+                combatTargetController = nearestPlayerTransform.GetComponentInParent<PlayerController>();
+            }
+
+            combatTargetDistance = nearestPlayerDistance;
+        }
+
         bool hasDownedTarget = false;
         OfflinePlayerIdentity downedIdentity = null;
         PlayerController downedController = null;
         float downedDistance = float.PositiveInfinity;
-        if (!_controller.IsCarrying())
+        if (!_controller.IsCarrying() && !isShootingMode)
         {
             hasDownedTarget = OfflineModeManager.Instance.TryGetAssignedDownedPlayer(
                 _identity.SessionId,
@@ -183,6 +208,9 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             hasThreat,
             threatTransform,
             threatDistance,
+            isShootingMode,
+            combatTarget,
+            combatTargetDistance,
             hasDownedTarget,
             downedIdentity,
             downedController,
@@ -206,6 +234,11 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
         Vector2 movementInput = BuildMovementInput(toDestination);
         Vector2 lookInput = BuildLookInput(toDestination);
+        if (isShootingMode && combatTarget != null)
+        {
+            lookInput = BuildLookInput(combatTarget.position - origin);
+        }
+
         if (isHoldingRevive
             && hasDownedTarget
             && downedController != null
@@ -250,6 +283,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         _locomotionInput.ApplySimulatedInput(movementInput, lookInput, jumpHeld, jumpPressed, crouchHeld, crouchPressedThisFrame);
+        TryHandleCombatFire(isShootingMode, combatTarget, combatTargetController, combatTargetDistance);
     }
 
     private Vector3 DetermineDestination(
@@ -257,11 +291,20 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         bool hasThreat,
         Transform threatTransform,
         float threatDistance,
+        bool isShootingMode,
+        Transform combatTarget,
+        float combatTargetDistance,
         bool hasDownedTarget,
         OfflinePlayerIdentity downedIdentity,
         PlayerController downedController,
         float downedDistance)
     {
+        if (isShootingMode && combatTarget != null)
+        {
+            ReleaseCurrentPatrolAssignment();
+            return DetermineCombatDestination(origin, combatTarget, combatTargetDistance);
+        }
+
         if (_controller.IsCarrying())
         {
             ReleaseCurrentPatrolAssignment();
@@ -332,6 +375,38 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         return origin + (_wanderTarget - origin) * _personalityWanderRadiusScale;
+    }
+
+    private Vector3 DetermineCombatDestination(Vector3 origin, Transform combatTarget, float combatTargetDistance)
+    {
+        if (combatTarget == null)
+        {
+            return origin;
+        }
+
+        Vector3 targetPosition = combatTarget.position;
+        Vector3 toTarget = targetPosition - origin;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude <= 0.001f)
+        {
+            return origin;
+        }
+
+        Vector3 targetDirection = toTarget.normalized;
+        Vector3 strafeDirection = Quaternion.Euler(0f, ((_botIndex & 1) == 0 ? 1f : -1f) * 90f, 0f) * targetDirection;
+        float preferredDistance = Mathf.Max(4f, _combatDesiredDistance * _personalityAggression);
+
+        if (combatTargetDistance > preferredDistance + 2f)
+        {
+            return targetPosition - targetDirection * preferredDistance + strafeDirection * _combatStrafeDistance;
+        }
+
+        if (combatTargetDistance < preferredDistance * 0.6f)
+        {
+            return origin - targetDirection * (_combatStrafeDistance * 0.75f) + strafeDirection * _combatStrafeDistance;
+        }
+
+        return origin + strafeDirection * _combatStrafeDistance;
     }
 
     private Vector3 DetermineCarryingDestination(Vector3 origin, bool hasThreat, Transform threatTransform, float threatDistance)
@@ -501,13 +576,23 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             _path = new NavMeshPath();
         }
 
-        if (!NavMesh.SamplePosition(origin, out NavMeshHit originHit, 4f, NavMesh.AllAreas)
-            || !NavMesh.SamplePosition(destination, out NavMeshHit destinationHit, 8f, NavMesh.AllAreas)
-            || !NavMesh.CalculatePath(originHit.position, destinationHit.position, NavMesh.AllAreas, _path)
+        if (!NavMesh.SamplePosition(origin, out NavMeshHit originHit, 4f, NavMesh.AllAreas))
+        {
+            return NavMesh.SamplePosition(origin, out originHit, 16f, NavMesh.AllAreas)
+                ? originHit.position
+                : destination;
+        }
+
+        if (!NavMesh.SamplePosition(destination, out NavMeshHit destinationHit, 8f, NavMesh.AllAreas))
+        {
+            return destination;
+        }
+
+        if (!NavMesh.CalculatePath(originHit.position, destinationHit.position, NavMesh.AllAreas, _path)
             || _path.corners == null
             || _path.corners.Length < 2)
         {
-            return destination;
+            return destinationHit.position;
         }
 
         int cornerIndex = 1;
@@ -896,6 +981,78 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         float blend = 1f - Mathf.Exp(-_lookInputSharpness * Time.deltaTime);
         _smoothedLookInput = Vector2.Lerp(_smoothedLookInput, targetInput, blend);
         return _smoothedLookInput;
+    }
+
+    private void TryHandleCombatFire(bool isShootingMode, Transform combatTarget, PlayerController combatTargetController, float combatTargetDistance)
+    {
+        if (!isShootingMode
+            || _controller == null
+            || !_controller.IsCombatModeActive
+            || _controller.IsInjuredOrHitReacting()
+            || _controller.IsBeingCarried()
+            || _controller.IsCarrying()
+            || combatTarget == null
+            || combatTargetController == null
+            || !combatTargetController.enabled
+            || combatTargetController.IsInjuredOrHitReacting()
+            || combatTargetController.IsEliminatedStateActive
+            || combatTargetDistance > _combatEngageDistance)
+        {
+            return;
+        }
+
+        Vector3 toTarget = combatTarget.position - transform.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude <= 0.001f)
+        {
+            return;
+        }
+
+        float aimAngle = Vector3.Angle(transform.forward, toTarget.normalized);
+        if (aimAngle > _combatFireAngle || !HasCombatLineOfSight(combatTargetController))
+        {
+            return;
+        }
+
+        _controller.TryFireCombatShotFromExternalInput();
+    }
+
+    private bool HasCombatLineOfSight(PlayerController targetController)
+    {
+        if (targetController == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = transform.position + Vector3.up * 1.4f;
+        Vector3 target = targetController.transform.position + Vector3.up * 1.2f;
+        Vector3 direction = target - origin;
+        float distance = direction.magnitude;
+        if (distance <= 0.001f)
+        {
+            return true;
+        }
+
+        RaycastHit[] hits = Physics.RaycastAll(origin, direction / distance, distance, _combatSightLayers, QueryTriggerInteraction.Ignore);
+        if (hits == null || hits.Length == 0)
+        {
+            return true;
+        }
+
+        System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider hitCollider = hits[i].collider;
+            if (hitCollider == null || hitCollider.transform.IsChildOf(transform))
+            {
+                continue;
+            }
+
+            PlayerController hitController = hitCollider.GetComponentInParent<PlayerController>();
+            return hitController == targetController;
+        }
+
+        return true;
     }
 
     private static float GetPlanarDistance(Vector3 a, Vector3 b)

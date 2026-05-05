@@ -13,6 +13,7 @@ public class OfflineModeManager : MonoBehaviour
 
     private const float InteractionDistance = 6f;
     private const float NextbotStartGraceSeconds = 3.5f;
+    private const float MinimumPlayerSpawnSeparation = 1.5f;
     [SerializeField] private int _playerMaxDownsBeforeElimination = 1;
     private const int MaxRescuersPerDownedPlayer = 1;
     private const float PlayerSpawnRotationY = 180f;
@@ -130,6 +131,12 @@ public class OfflineModeManager : MonoBehaviour
         return IsOfflineModeActive;
     }
 
+    public bool TryGetLocalPlayerObject(out GameObject playerObject)
+    {
+        playerObject = null;
+        return _offlinePlayers.TryGetValue("offline_local", out playerObject) && playerObject != null;
+    }
+
     private void RespawnAllPlayers()
     {
         NetworkManager networkManager = NetworkManager.Instance;
@@ -148,6 +155,7 @@ public class OfflineModeManager : MonoBehaviour
         _nextbotSpawnPositions.Clear();
         _nextbotSpawnPositions.AddRange(networkManager.GetConfiguredNextbotSpawnPositions());
         BuildOfflinePatrolPositions(networkManager);
+        List<Vector3> reservedSpawnPositions = new List<Vector3>();
 
         SpawnOfflinePlayer(
             sessionId: "offline_local",
@@ -155,7 +163,8 @@ public class OfflineModeManager : MonoBehaviour
             skinIndex: _localSkinIndex,
             spawnIndex: 0,
             isLocalPlayer: true,
-            botIndex: -1);
+            botIndex: -1,
+            reservedSpawnPositions: reservedSpawnPositions);
 
         int botCount = Mathf.Max(0, _offlineTotalPlayerCount - 1);
         for (int botIndex = 0; botIndex < botCount; botIndex++)
@@ -168,7 +177,8 @@ public class OfflineModeManager : MonoBehaviour
                 skinIndex: botSkinIndex,
                 spawnIndex: spawnIndex,
                 isLocalPlayer: false,
-                botIndex: botIndex);
+                botIndex: botIndex,
+                reservedSpawnPositions: reservedSpawnPositions);
         }
 
         if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
@@ -1299,6 +1309,7 @@ public class OfflineModeManager : MonoBehaviour
     {
         _rescueAssignments.Clear();
         _patrolAssignments.Clear();
+        List<Vector3> reservedSpawnPositions = new List<Vector3>();
 
         foreach (KeyValuePair<string, OfflinePlayerRoundState> pair in _offlinePlayerStates)
         {
@@ -1313,8 +1324,8 @@ public class OfflineModeManager : MonoBehaviour
             PlayerController controller = state.Controller != null
                 ? state.Controller
                 : state.PlayerObject.GetComponent<PlayerController>();
-            Vector3 resetPosition = roundStarted ? state.PlayerObject.transform.position : ResolveSpawnPosition(state.SpawnIndex);
-            float resetYaw = roundStarted ? state.PlayerObject.transform.eulerAngles.y : PlayerSpawnRotationY;
+            Vector3 resetPosition = ResolveSpawnPosition(state.SpawnIndex, reservedSpawnPositions);
+            float resetYaw = PlayerSpawnRotationY;
             if (controller != null)
             {
                 controller.ApplyNetworkRoundReset(resetPosition, resetYaw);
@@ -1328,6 +1339,12 @@ public class OfflineModeManager : MonoBehaviour
             PlayerLocomotionInput locomotionInput = state.LocomotionInput != null
                 ? state.LocomotionInput
                 : state.PlayerObject.GetComponent<PlayerLocomotionInput>();
+            if (locomotionInput != null)
+            {
+                bool isLocalOfflinePlayer = string.Equals(pair.Key, "offline_local", System.StringComparison.Ordinal);
+                locomotionInput.InputEnabled = true;
+                locomotionInput.SetSimulatedInputEnabled(!isLocalOfflinePlayer);
+            }
             locomotionInput?.ResetSimulationState();
             state.LocomotionInput = locomotionInput;
 
@@ -1875,10 +1892,11 @@ public class OfflineModeManager : MonoBehaviour
         int skinIndex,
         int spawnIndex,
         bool isLocalPlayer,
-        int botIndex)
+        int botIndex,
+        List<Vector3> reservedSpawnPositions)
     {
         NetworkManager networkManager = NetworkManager.Instance;
-        Vector3 spawnPosition = ResolveSpawnPosition(spawnIndex);
+        Vector3 spawnPosition = ResolveSpawnPosition(spawnIndex, reservedSpawnPositions);
         GameObject playerObject = Instantiate(networkManager.PlayerPrefab, spawnPosition, Quaternion.Euler(0f, PlayerSpawnRotationY, 0f));
         playerObject.name = isLocalPlayer ? "LocalPlayer" : $"OfflinePlayer_{displayName}";
 
@@ -2024,7 +2042,7 @@ public class OfflineModeManager : MonoBehaviour
         return Mathf.Abs(localSkinIndex + botIndex + 1) % skinCount;
     }
 
-    private Vector3 ResolveSpawnPosition(int spawnIndex)
+    private Vector3 ResolveSpawnPosition(int spawnIndex, List<Vector3> reservedSpawnPositions = null)
     {
         if (_spawnPositions.Count == 0)
         {
@@ -2032,15 +2050,86 @@ public class OfflineModeManager : MonoBehaviour
         }
 
         Vector3 basePosition = _spawnPositions[Mathf.Abs(spawnIndex) % _spawnPositions.Count];
+        if (spawnIndex > 0 && _patrolPositions.Count > 0)
+        {
+            Vector3 patrolSpawnPosition = _patrolPositions[PositiveModulo(spawnIndex * 7, _patrolPositions.Count)];
+            if (GetPlanarDistance(patrolSpawnPosition, basePosition) >= Mathf.Max(2f, _spawnRingRadius))
+            {
+                Vector3 resolvedPatrolSpawnPosition = TrySampleNavMeshPosition(patrolSpawnPosition, out Vector3 sampledPatrolSpawnPosition)
+                    ? sampledPatrolSpawnPosition
+                    : patrolSpawnPosition;
+                return ResolveAvailableSpawnPosition(resolvedPatrolSpawnPosition, reservedSpawnPositions);
+            }
+        }
+
         int ringIndex = Mathf.Max(0, spawnIndex / Mathf.Max(1, _spawnPositions.Count));
         if (ringIndex == 0)
         {
-            return basePosition;
+            Vector3 resolvedBasePosition = TrySampleNavMeshPosition(basePosition, out Vector3 navMeshBasePosition)
+                ? navMeshBasePosition
+                : basePosition;
+            return ResolveAvailableSpawnPosition(resolvedBasePosition, reservedSpawnPositions);
         }
 
         float angle = (spawnIndex * 137.5f) * Mathf.Deg2Rad;
         Vector3 offset = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * (_spawnRingRadius * ringIndex);
-        return basePosition + offset;
+        Vector3 candidatePosition = basePosition + offset;
+        Vector3 resolvedCandidatePosition = TrySampleNavMeshPosition(candidatePosition, out Vector3 navMeshPosition)
+            ? navMeshPosition
+            : candidatePosition;
+        return ResolveAvailableSpawnPosition(resolvedCandidatePosition, reservedSpawnPositions);
+    }
+
+    private Vector3 ResolveAvailableSpawnPosition(Vector3 preferredPosition, List<Vector3> reservedSpawnPositions)
+    {
+        if (reservedSpawnPositions == null)
+        {
+            return preferredPosition;
+        }
+
+        Vector3 resolvedPosition = preferredPosition;
+        if (IsSpawnPositionReserved(resolvedPosition, reservedSpawnPositions))
+        {
+            resolvedPosition = FindUnreservedSpawnPosition(preferredPosition, reservedSpawnPositions);
+        }
+
+        reservedSpawnPositions.Add(resolvedPosition);
+        return resolvedPosition;
+    }
+
+    private Vector3 FindUnreservedSpawnPosition(Vector3 origin, List<Vector3> reservedSpawnPositions)
+    {
+        for (int ring = 1; ring <= 6; ring++)
+        {
+            float radius = MinimumPlayerSpawnSeparation * ring;
+            for (int sampleIndex = 0; sampleIndex < 12; sampleIndex++)
+            {
+                float angle = ((360f / 12f) * sampleIndex + ring * 17f) * Mathf.Deg2Rad;
+                Vector3 candidate = origin + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+                Vector3 resolvedCandidate = TrySampleNavMeshPosition(candidate, out Vector3 sampledCandidate)
+                    ? sampledCandidate
+                    : candidate;
+                if (!IsSpawnPositionReserved(resolvedCandidate, reservedSpawnPositions))
+                {
+                    return resolvedCandidate;
+                }
+            }
+        }
+
+        return origin;
+    }
+
+    private bool IsSpawnPositionReserved(Vector3 candidate, List<Vector3> reservedSpawnPositions)
+    {
+        for (int i = 0; i < reservedSpawnPositions.Count; i++)
+        {
+            if (GetPlanarDistance(candidate, reservedSpawnPositions[i]) < MinimumPlayerSpawnSeparation)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool TryGetSessionId(GameObject playerObject, out string sessionId)

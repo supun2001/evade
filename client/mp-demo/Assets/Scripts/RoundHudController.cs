@@ -66,6 +66,7 @@ public class RoundHudController : MonoBehaviour
     private readonly Dictionary<string, Label> _mapVoteResultPercentLabels = new Dictionary<string, Label>();
     private readonly Dictionary<string, VisualElement> _mapVoteResultFillBars = new Dictionary<string, VisualElement>();
     private readonly Dictionary<string, Label> _mapVoteResultCountLabels = new Dictionary<string, Label>();
+    private readonly Dictionary<string, Texture2D> _mapVoteIconCache = new Dictionary<string, Texture2D>();
 
     private RoundPhaseMessageData _currentPhase;
     private float _phaseEndsAtUnscaledTime;
@@ -1276,12 +1277,7 @@ public class RoundHudController : MonoBehaviour
         icon.style.top = 0f;
         icon.style.bottom = 0f;
         icon.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
-        Texture2D iconTexture = Resources.Load<Texture2D>($"UI/{candidate.mapId}_map_icon");
-        if (iconTexture == null && !string.IsNullOrWhiteSpace(candidate.displayName))
-        {
-            iconTexture = Resources.Load<Texture2D>($"UI/{candidate.displayName}_map_icon");
-        }
-
+        Texture2D iconTexture = GetMapVoteIconTexture(candidate);
         if (iconTexture != null)
         {
             icon.style.backgroundImage = new StyleBackground(iconTexture);
@@ -1307,6 +1303,133 @@ public class RoundHudController : MonoBehaviour
         card.Add(votedLabel);
         card.Add(nameLabel);
         return card;
+    }
+
+    private Texture2D GetMapVoteIconTexture(MapVoteCandidateMessageData candidate)
+    {
+        if (candidate == null)
+        {
+            return null;
+        }
+
+        string cacheKey = $"{candidate.mapId}|{candidate.displayName}|{candidate.sceneName}";
+        if (_mapVoteIconCache.TryGetValue(cacheKey, out Texture2D cachedTexture))
+        {
+            return cachedTexture;
+        }
+
+        foreach (string resourcePath in BuildMapVoteIconResourceCandidates(candidate))
+        {
+            if (string.IsNullOrWhiteSpace(resourcePath))
+            {
+                continue;
+            }
+
+            Texture2D iconTexture = Resources.Load<Texture2D>(resourcePath);
+            if (iconTexture != null)
+            {
+                _mapVoteIconCache[cacheKey] = iconTexture;
+                return iconTexture;
+            }
+        }
+
+        _mapVoteIconCache[cacheKey] = null;
+        return null;
+    }
+
+    private static IEnumerable<string> BuildMapVoteIconResourceCandidates(MapVoteCandidateMessageData candidate)
+    {
+        HashSet<string> seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string baseName in BuildMapVoteIconNameCandidates(candidate))
+        {
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                continue;
+            }
+
+            string[] variants =
+            {
+                $"UI/{baseName}_map_icon",
+                $"UI/{baseName}",
+                $"UI/{baseName.Replace(\"_\", \" \")}",
+                $"UI/{baseName.Replace(\" \", \"_\")}",
+                $"UI/{baseName.Replace(\"-\", \" \")}",
+            };
+
+            for (int i = 0; i < variants.Length; i++)
+            {
+                if (seenPaths.Add(variants[i]))
+                {
+                    yield return variants[i];
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> BuildMapVoteIconNameCandidates(MapVoteCandidateMessageData candidate)
+    {
+        HashSet<string> seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string[] rawNames =
+        {
+            candidate.mapId,
+            candidate.displayName,
+            candidate.sceneName,
+            GetCanonicalMapIconName(candidate.mapId),
+            GetCanonicalMapIconName(candidate.displayName),
+            GetCanonicalMapIconName(candidate.sceneName),
+        };
+
+        for (int i = 0; i < rawNames.Length; i++)
+        {
+            string rawName = rawNames[i];
+            if (string.IsNullOrWhiteSpace(rawName))
+            {
+                continue;
+            }
+
+            string trimmed = rawName.Trim();
+            if (seenNames.Add(trimmed))
+            {
+                yield return trimmed;
+            }
+        }
+    }
+
+    private static string GetCanonicalMapIconName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        if (string.Equals(value, "SampleScene", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Classic";
+        }
+
+        if (string.Equals(value, "brutilistVoid", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "BrutalistVoid", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Brutalist Void";
+        }
+
+        if (string.Equals(value, "Vitamin_B", StringComparison.OrdinalIgnoreCase))
+        {
+            return "vitamin B";
+        }
+
+        if (string.Equals(value, "vilage", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Village";
+        }
+
+        if (string.Equals(value, "boomBoom", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Boom boom";
+        }
+
+        return value;
     }
 
     private void HandleMapVoteClicked(string mapId)
