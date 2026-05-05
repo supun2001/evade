@@ -82,8 +82,10 @@ public class NetworkManager : MonoBehaviour
     private const string VillageMapId = "vilage";
     private const string VillageMapSceneName = "Village";
     private const float MinServerObstacleThickness = 0.25f;
+    private const float MinServerObstacleMajorSpan = 1.25f;
+    private const float MinServerObstacleFootprintArea = 1.0f;
     private const int MaxServerFloorSamples = 384;
-    private const int MaxServerObstacles = 384;
+    private const int MaxServerObstacles = 4096;
     private const float MaxServerObstacleEnclosingSpan = 45f;
     private static bool s_multiplayerShootingPresentationEnabled;
     private static bool s_joinGameUsesShootingMode;
@@ -984,25 +986,32 @@ public class NetworkManager : MonoBehaviour
 
     private static List<object> BuildSerializedObstacleBounds()
     {
-        List<object> serializedObstacles = new List<object>();
+        List<Bounds> obstacleBounds = new List<Bounds>();
         Collider[] colliders = FindObjectsByType<Collider>(FindObjectsSortMode.None);
         int walkableLayer = LayerMask.NameToLayer("Walkable");
         int rampLayer = LayerMask.NameToLayer("Ramp");
 
         for (int i = 0; i < colliders.Length; i++)
         {
-            if (serializedObstacles.Count >= MaxServerObstacles)
-            {
-                break;
-            }
-
             Collider collider = colliders[i];
             if (!ShouldIncludeServerObstacle(collider, walkableLayer, rampLayer))
             {
                 continue;
             }
 
-            Bounds bounds = ExpandThinServerObstacleBounds(collider.bounds);
+            obstacleBounds.Add(ExpandThinServerObstacleBounds(collider.bounds));
+        }
+
+        if (obstacleBounds.Count > MaxServerObstacles)
+        {
+            Debug.LogWarning($"NetworkManager: obstacle export truncated from {obstacleBounds.Count} to {MaxServerObstacles} colliders for scene {SceneManager.GetActiveScene().name}.");
+        }
+
+        int serializedCount = Mathf.Min(obstacleBounds.Count, MaxServerObstacles);
+        List<object> serializedObstacles = new List<object>(serializedCount);
+        for (int i = 0; i < serializedCount; i++)
+        {
+            Bounds bounds = obstacleBounds[i];
             serializedObstacles.Add(new Dictionary<string, object>
             {
                 ["minX"] = bounds.min.x,
@@ -1057,6 +1066,14 @@ public class NetworkManager : MonoBehaviour
         Bounds bounds = collider.bounds;
         bool hasHorizontalBlockerExtent = bounds.size.x > 0.1f || bounds.size.z > 0.1f;
         if (!hasHorizontalBlockerExtent || bounds.size.y <= 0.25f)
+        {
+            return false;
+        }
+
+        float majorSpan = Mathf.Max(bounds.size.x, bounds.size.z);
+        float footprintArea = bounds.size.x * bounds.size.z;
+        bool isSmallClutter = majorSpan < MinServerObstacleMajorSpan && footprintArea < MinServerObstacleFootprintArea;
+        if (isSmallClutter)
         {
             return false;
         }
