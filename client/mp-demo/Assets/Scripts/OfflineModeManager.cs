@@ -1145,7 +1145,7 @@ public class OfflineModeManager : MonoBehaviour
         ResetOfflineNextbots(active: false);
 
         // Generate candidates
-        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B" };
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B", "vilage" };
         List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
 
         // Shuffle and pick 3
@@ -1259,6 +1259,7 @@ public class OfflineModeManager : MonoBehaviour
             case "brutilistVoid": return "Brutilist Void";
             case "parkour": return "Parkour";
             case "Vitamin_B": return "Vitamin B";
+            case "vilage": return "Village";
             default: return mapId;
         }
     }
@@ -1272,6 +1273,7 @@ public class OfflineModeManager : MonoBehaviour
             case "brutilistVoid": return "HARD";
             case "parkour": return "HARD";
             case "Vitamin_B": return "NORMAL";
+            case "vilage": return "NORMAL";
             default: return "NORMAL";
         }
     }
@@ -1285,6 +1287,7 @@ public class OfflineModeManager : MonoBehaviour
             case "brutilistVoid": return "BrutalistVoid";
             case "parkour": return "parkour";
             case "Vitamin_B": return "Vitamin_B";
+            case "vilage": return "Village";
             default: return mapId;
         }
     }

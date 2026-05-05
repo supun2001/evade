@@ -75,6 +75,7 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _mapBrutilistVoidButton;
     private UIToolkitButton _mapParkourButton;
     private UIToolkitButton _mapVitaminBButton;
+    private UIToolkitButton _mapVillageButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
@@ -139,6 +140,8 @@ public class LobbyUI : MonoBehaviour
     private const string ParkourMapId = "parkour";
     private const string VitaminBMapSceneName = "Vitamin_B";
     private const string VitaminBMapId = "Vitamin_B";
+    private const string VillageMapSceneName = "Village";
+    private const string VillageMapId = "vilage";
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
@@ -594,6 +597,7 @@ public class LobbyUI : MonoBehaviour
         _mapBrutilistVoidButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-brutilistvoid-button");
         _mapParkourButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-parkour-button");
         _mapVitaminBButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-vitaminb-button");
+        _mapVillageButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-village-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
@@ -783,6 +787,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapVitaminBButton.clicked += HandleVitaminBMapButtonClicked;
         }
+        if (_mapVillageButton != null)
+        {
+            _mapVillageButton.clicked += HandleVillageMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked += HandleMapSelectionCloseButtonClicked;
@@ -916,6 +924,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapVitaminBButton.clicked -= HandleVitaminBMapButtonClicked;
         }
+        if (_mapVillageButton != null)
+        {
+            _mapVillageButton.clicked -= HandleVillageMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked -= HandleMapSelectionCloseButtonClicked;
@@ -973,6 +985,11 @@ public class LobbyUI : MonoBehaviour
     private void HandleVitaminBMapButtonClicked()
     {
         BeginJoinForMap(VitaminBMapSceneName, VitaminBMapId);
+    }
+
+    private void HandleVillageMapButtonClicked()
+    {
+        BeginJoinForMap(VillageMapSceneName, VillageMapId);
     }
 
     private void HandleBrutilistVoidMapButtonClicked()
@@ -1539,6 +1556,7 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_mapBrutilistVoidButton, "Join the Brutilist Void map");
         SetMenuButtonDescription(_mapParkourButton, "Join the Parkour map");
         SetMenuButtonDescription(_mapVitaminBButton, "Join the Vitamin B map");
+        SetMenuButtonDescription(_mapVillageButton, "Join the Village map");
 
         _pendingHoverLabelText = DefaultMenuHoverText;
     }
@@ -1577,6 +1595,7 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_mapBrutilistVoidButton);
         RegisterHoverButton(_mapParkourButton);
         RegisterHoverButton(_mapVitaminBButton);
+        RegisterHoverButton(_mapVillageButton);
     }
 
     private void UnbindHoverEffects()

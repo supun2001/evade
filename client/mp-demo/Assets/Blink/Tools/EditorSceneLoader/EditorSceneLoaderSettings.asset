@@ -23,3 +23,5 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: a88a920fa294f4137878aeb3381337fa, type: 3}
   - displayName: Vitamin B
     scene: {fileID: 102900000, guid: 3d4449e7fe6d241daa23dc8403e256d3, type: 3}
+  - displayName: Village
+    scene: {fileID: 102900000, guid: a3fa4bf3be5b244cfb8d409f29399a06, type: 3}

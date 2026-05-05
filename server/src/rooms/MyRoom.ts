@@ -112,6 +112,7 @@ const AVAILABLE_MAPS = [
   { mapId: "brutilistVoid", sceneName: "BrutalistVoid", displayName: "Brutilist Void", difficulty: "HARD" },
   { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
   { mapId: "Vitamin_B", sceneName: "Vitamin_B", displayName: "Vitamin B", difficulty: "NORMAL" },
+  { mapId: "vilage", sceneName: "Village", displayName: "Village", difficulty: "NORMAL" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;

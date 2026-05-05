@@ -79,6 +79,8 @@ public class NetworkManager : MonoBehaviour
     private const string ParkourMapSceneName = "parkour";
     private const string VitaminBMapId = "Vitamin_B";
     private const string VitaminBMapSceneName = "Vitamin_B";
+    private const string VillageMapId = "vilage";
+    private const string VillageMapSceneName = "Village";
     private const float MinServerObstacleThickness = 0.25f;
     private const int MaxServerFloorSamples = 384;
     private const int MaxServerObstacles = 384;
@@ -272,7 +274,8 @@ public class NetworkManager : MonoBehaviour
             || string.Equals(mapId, BackroomMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, BrutilistVoidMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, VillageMapId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSceneNameForMapId(string mapId)
@@ -295,6 +298,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase))
         {
             return VitaminBMapSceneName;
+        }
+
+        if (string.Equals(mapId, VillageMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return VillageMapSceneName;
         }
 
         return ClassicMapSceneName;
@@ -320,6 +328,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, VitaminBMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return VitaminBMapId;
+        }
+
+        if (string.Equals(sceneName, VillageMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return VillageMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
