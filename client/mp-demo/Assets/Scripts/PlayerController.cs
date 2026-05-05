@@ -425,6 +425,8 @@ public class PlayerController : MonoBehaviour
     private Transform _leftArmTransform;
     private Transform _rightArmTransform;
     private Transform _remoteArmPointTransform;
+    private Quaternion _remoteArmPointOriginalLocalRotation = Quaternion.identity;
+    private bool _hasCachedRemoteArmPointOriginalRotation;
     private Transform _firstPersonArmRootOriginalParent;
     private Vector3 _firstPersonArmRootOriginalLocalPosition;
     private Quaternion _firstPersonArmRootOriginalLocalRotation = Quaternion.identity;
@@ -466,10 +468,13 @@ public class PlayerController : MonoBehaviour
     private bool _hudEventsBound;
     private bool _isTemporaryThirdPersonForced;
     private bool _isSimulationControlled;
+    private bool _spectateModeSyncedToServer;
+    private CapsuleCollider _simulationCombatHitbox;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
     private const string INJURED_VISUAL_ROOT_NAME = "player";
     private const string INJURED_VISUAL_PIVOT_NAME = "InjuredVisualPivot";
+    private const string SIMULATION_COMBAT_HITBOX_NAME = "SimulationCombatHitbox";
     private const float NEXTBOT_HIT_HORIZONTAL_DAMPING = 10f;
     private const float NEXTBOT_HIT_IMPACT_DURATION = 0.18f;
     private const float NEXTBOT_HIT_IMPACT_DAMPING = 22f;
@@ -615,6 +620,8 @@ public class PlayerController : MonoBehaviour
             _defaultCharacterControllerCenter = _characterController.center;
             RegisterPlayerCollisionIgnore();
         }
+
+        EnsureSimulationCombatHitbox();
 
         _footstepAudioSource = GetComponent<AudioSource>();
         if (_footstepAudioSource == null)
@@ -1443,8 +1450,84 @@ public class PlayerController : MonoBehaviour
                 && string.Equals(candidate.name, _remoteArmPointName, StringComparison.OrdinalIgnoreCase))
             {
                 _remoteArmPointTransform = candidate;
+                if (!_hasCachedRemoteArmPointOriginalRotation)
+                {
+                    _remoteArmPointOriginalLocalRotation = candidate.localRotation;
+                    _hasCachedRemoteArmPointOriginalRotation = true;
+                }
                 return;
             }
+        }
+    }
+
+    private void EnsureSimulationCombatHitbox()
+    {
+        if (_simulationCombatHitbox == null)
+        {
+            CapsuleCollider[] colliders = GetComponents<CapsuleCollider>();
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                CapsuleCollider candidate = colliders[i];
+                if (candidate != null && string.Equals(candidate.name, SIMULATION_COMBAT_HITBOX_NAME, StringComparison.Ordinal))
+                {
+                    _simulationCombatHitbox = candidate;
+                    break;
+                }
+            }
+        }
+
+        if (_simulationCombatHitbox == null)
+        {
+            _simulationCombatHitbox = gameObject.AddComponent<CapsuleCollider>();
+            _simulationCombatHitbox.name = SIMULATION_COMBAT_HITBOX_NAME;
+        }
+
+        _simulationCombatHitbox.isTrigger = true;
+        SyncSimulationCombatHitboxShape();
+        _simulationCombatHitbox.enabled = _isSimulationControlled && !_isEliminatedState;
+    }
+
+    private void SyncSimulationCombatHitboxShape()
+    {
+        if (_simulationCombatHitbox == null)
+        {
+            return;
+        }
+
+        float height = _defaultCharacterControllerHeight;
+        float radius = _defaultCharacterControllerRadius;
+        Vector3 center = _defaultCharacterControllerCenter;
+
+        if (_characterController != null)
+        {
+            height = _characterController.height;
+            radius = _characterController.radius;
+            center = _characterController.center;
+        }
+
+        if (height <= 0.001f)
+        {
+            height = 2f;
+        }
+
+        if (radius <= 0.001f)
+        {
+            radius = 0.5f;
+        }
+
+        _simulationCombatHitbox.direction = 1;
+        _simulationCombatHitbox.center = center;
+        _simulationCombatHitbox.radius = radius;
+        _simulationCombatHitbox.height = Mathf.Max(height, radius * 2f);
+    }
+
+    private void UpdateSimulationCombatHitboxState()
+    {
+        EnsureSimulationCombatHitbox();
+        if (_simulationCombatHitbox != null)
+        {
+            SyncSimulationCombatHitboxShape();
+            _simulationCombatHitbox.enabled = _isSimulationControlled && !_isEliminatedState;
         }
     }
 
@@ -3785,6 +3868,7 @@ public class PlayerController : MonoBehaviour
         UpdateDownedCollisionShape();
         UpdateDownedVisualRootPosition();
         UpdateForcedCameraViewState(forceImmediate: true);
+        UpdateSimulationCombatHitboxState();
     }
 
     public void ApplyNetworkInjured()
@@ -3840,7 +3924,7 @@ public class PlayerController : MonoBehaviour
         // Enter spectate mode immediately
         if (!_isSimulationControlled)
         {
-            EnterSpectateMode();
+            EnterSpectateMode(false);
         }
 
         _jumpedThisFrame = false;
@@ -3851,6 +3935,7 @@ public class PlayerController : MonoBehaviour
         _wallRunContactHoldTimer = 0f;
         _wallRunSprintGraceTimer = 0f;
         UpdateForcedCameraViewState(forceImmediate: true);
+        UpdateSimulationCombatHitboxState();
     }
 
     public void ApplyNetworkRoundReset(Vector3 worldPosition, float rotationY)
@@ -5564,6 +5649,19 @@ public class PlayerController : MonoBehaviour
         {
             _gameplayCameraTransform.localRotation = Quaternion.Euler(rotation.y, 0f, 0f);
         }
+
+        if (_isSimulationControlled)
+        {
+            if (_remoteArmPointTransform == null)
+            {
+                CacheRemoteArmPointTransform();
+            }
+
+            if (_remoteArmPointTransform != null)
+            {
+                _remoteArmPointTransform.localRotation = Quaternion.Euler(-rotation.y, 0f, 0f) * _remoteArmPointOriginalLocalRotation;
+            }
+        }
     }
 
     public float GetVisualYaw()
@@ -6282,9 +6380,10 @@ public class PlayerController : MonoBehaviour
         return _isEliminatedState;
     }
 
-    public void EnterSpectateMode()
+    public void EnterSpectateMode(bool notifyServer = true)
     {
         _isSpectating = true;
+        _spectateModeSyncedToServer = notifyServer;
         _spectateTargetKey = null;
         _nextSpectateRefreshTime = 0f;
         _isPauseMenuOpen = false;
@@ -6302,7 +6401,7 @@ public class PlayerController : MonoBehaviour
         UnityEngine.Cursor.lockState = CursorLockMode.Locked;
         UnityEngine.Cursor.visible = false;
         
-        if (NetworkManager.Instance != null)
+        if (notifyServer && NetworkManager.Instance != null)
         {
             NetworkManager.Instance.SendSpectatorState(true);
         }
@@ -6328,10 +6427,12 @@ public class PlayerController : MonoBehaviour
         SetCameraView(_preferredViewMode, true);
         UpdateForcedCameraViewState(forceImmediate: true);
 
-        if (NetworkManager.Instance != null)
+        if (_spectateModeSyncedToServer && NetworkManager.Instance != null)
         {
             NetworkManager.Instance.SendSpectatorState(false);
         }
+
+        _spectateModeSyncedToServer = false;
     }
 
     public bool DidJumpThisFrame()
@@ -6446,6 +6547,8 @@ public class PlayerController : MonoBehaviour
         {
             _characterController.enabled = !isSimulationControlled;
         }
+
+        UpdateSimulationCombatHitboxState();
 
         if (!isSimulationControlled)
         {

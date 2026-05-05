@@ -104,6 +104,7 @@ const PLAYER_SPAWN_ROTATION_Y = 180;
 const PLAYER_MAX_COMBAT_HEALTH = 100;
 const NEXTBOT_MAX_COMBAT_HEALTH = 100;
 const PLAYER_NEXTBOT_RESPAWN_DELAY_MS = 5_000;
+const PLAYER_COMBAT_RESPAWN_DELAY_MS = 5_000;
 const DEFAULT_MAP_ID = "SampleScene";
 const AVAILABLE_MAPS = [
   { mapId: "SampleScene", sceneName: "Classic", displayName: "Classic", difficulty: "NORMAL" },
@@ -481,7 +482,7 @@ export class MyRoom extends Room<MyRoomState> {
         player.isWallRunning = false;
         player.wallRunSide = 0;
         player.isShootingMode = false;
-        player.combatHealth = player.maxCombatHealth > 0 ? player.maxCombatHealth : PLAYER_MAX_COMBAT_HEALTH;
+        player.combatHealth = 0;
         return;
       }
 
@@ -1765,7 +1766,7 @@ export class MyRoom extends Room<MyRoomState> {
     
     if (target.combatHealth <= 0) {
       this.recordPlayerHazardElimination(target.sessionId, Date.now(), client.sessionId);
-      this.schedulePlayerRespawnAfterNextbotDeath(target.sessionId, PLAYER_NEXTBOT_RESPAWN_DELAY_MS);
+      this.schedulePlayerRespawnAfterNextbotDeath(target.sessionId, PLAYER_COMBAT_RESPAWN_DELAY_MS);
     }
   }
 
@@ -1849,6 +1850,8 @@ export class MyRoom extends Room<MyRoomState> {
 
     this.clearCarryStateForPlayer(sessionId);
     const spawnPosition = this.getPlayerSpawnPosition(sessionId);
+    player.isSpectator = false;
+    player.isReady = true;
     player.x = spawnPosition.x;
     player.y = spawnPosition.y;
     player.z = spawnPosition.z;
