@@ -156,6 +156,7 @@ public class PlayerController : MonoBehaviour
 
     [Header("Sprint Arms")]
     [SerializeField] private string[] _firstPersonOnlyRootNames = { "arms", "arm", "R_Arm", "L_Arm" };
+    [SerializeField] private string _remoteArmPointName = "arm point";
     [SerializeField] private Vector3 _firstPersonArmsBasePositionOffset = new Vector3(0f, -0.22f, 0.1f);
     [SerializeField] private Vector3 _firstPersonArmsBaseRotationOffset = new Vector3(8f, 0f, 0f);
     [SerializeField] private Vector3 _firstPersonArmsLookDownPositionOffset = new Vector3(0f, -0.42f, 0.24f);
@@ -279,6 +280,9 @@ public class PlayerController : MonoBehaviour
     [Header("Shooting Debug")]
     [SerializeField] private bool _debugShootingLogs = true;
     [SerializeField, Min(0f)] private float _debugShootingLogCooldown = 0.2f;
+    [Header("Remote Arms Debug")]
+    [SerializeField] private bool _debugRemoteArmMountLogs = true;
+    [SerializeField, Min(0f)] private float _debugRemoteArmMountLogCooldown = 0.25f;
 
     private PlayerLocomotionInput _playerLocomotionInput;
     private Transform _transform;
@@ -388,6 +392,7 @@ public class PlayerController : MonoBehaviour
     private Quaternion _muzzleFlashPrefabLocalRotation = Quaternion.identity;
     private float _nextDebugShootingLogTime;
     private float _nextDebugClickPathLogTime;
+    private float _nextDebugRemoteArmMountLogTime;
     private float _respawnCountdownEndTime = -1f;
 
     private CameraViewMode _currentViewMode;
@@ -419,6 +424,12 @@ public class PlayerController : MonoBehaviour
     private Vector3[] _firstPersonOnlyRootLocalScales = Array.Empty<Vector3>();
     private Transform _leftArmTransform;
     private Transform _rightArmTransform;
+    private Transform _remoteArmPointTransform;
+    private Transform _firstPersonArmRootOriginalParent;
+    private Vector3 _firstPersonArmRootOriginalLocalPosition;
+    private Quaternion _firstPersonArmRootOriginalLocalRotation = Quaternion.identity;
+    private Vector3 _firstPersonArmRootOriginalLocalScale = Vector3.one;
+    private bool _hasCachedFirstPersonArmRootOriginalState;
     private Transform _carryLeftAnchorTransform;
     private Transform _carryRightAnchorTransform;
     private Transform _nextbotHitLeftArmTransform;
@@ -589,6 +600,8 @@ public class PlayerController : MonoBehaviour
         CacheThirdPersonCameraSettings();
         CacheLocalRenderers();
         CacheArmTransforms();
+        CacheRemoteArmPointTransform();
+        CacheFirstPersonArmRootOriginalState();
         CacheNextbotHitLimbTransforms();
         CacheFirstPersonWallHideRenderers();
         CacheInjuredVisualRoot();
@@ -1413,6 +1426,97 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+    }
+
+    private void CacheRemoteArmPointTransform()
+    {
+        if (_remoteArmPointTransform != null || string.IsNullOrWhiteSpace(_remoteArmPointName))
+        {
+            return;
+        }
+
+        Transform[] transforms = GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform candidate = transforms[i];
+            if (candidate != null
+                && string.Equals(candidate.name, _remoteArmPointName, StringComparison.OrdinalIgnoreCase))
+            {
+                _remoteArmPointTransform = candidate;
+                return;
+            }
+        }
+    }
+
+    private void CacheFirstPersonArmRootOriginalState()
+    {
+        if (_hasCachedFirstPersonArmRootOriginalState || _firstPersonArmRoot == null)
+        {
+            return;
+        }
+
+        Transform armRootTransform = _firstPersonArmRoot.transform;
+        _firstPersonArmRootOriginalParent = armRootTransform.parent;
+        _firstPersonArmRootOriginalLocalPosition = armRootTransform.localPosition;
+        _firstPersonArmRootOriginalLocalRotation = armRootTransform.localRotation;
+        _firstPersonArmRootOriginalLocalScale = armRootTransform.localScale;
+        _hasCachedFirstPersonArmRootOriginalState = true;
+    }
+
+    private bool TryMountRemoteArmRootToArmPoint()
+    {
+        if (!_isSimulationControlled || _firstPersonArmRoot == null)
+        {
+            return false;
+        }
+
+        if (_remoteArmPointTransform == null)
+        {
+            CacheRemoteArmPointTransform();
+        }
+
+        if (_remoteArmPointTransform == null)
+        {
+            LogRemoteArmMountDebug("MountSkipped", "arm point not found");
+            return false;
+        }
+
+        Transform armRootTransform = _firstPersonArmRoot.transform;
+        if (armRootTransform.parent != _remoteArmPointTransform)
+        {
+            LogRemoteArmMountDebug(
+                "ReparentArmRoot",
+                $"from={GetTransformPath(armRootTransform.parent)} to={GetTransformPath(_remoteArmPointTransform)}");
+            armRootTransform.SetParent(_remoteArmPointTransform, false);
+        }
+
+        armRootTransform.localPosition = Vector3.zero;
+        armRootTransform.localRotation = Quaternion.identity;
+        armRootTransform.localScale = Vector3.one;
+        LogRemoteArmMountDebug(
+            "Mounted",
+            $"armRootParent={GetTransformPath(armRootTransform.parent)}, localPos={armRootTransform.localPosition}, localRot={armRootTransform.localEulerAngles}");
+        return true;
+    }
+
+    private void RestoreFirstPersonArmRootParent()
+    {
+        if (_isSimulationControlled
+            || _firstPersonArmRoot == null
+            || !_hasCachedFirstPersonArmRootOriginalState)
+        {
+            return;
+        }
+
+        Transform armRootTransform = _firstPersonArmRoot.transform;
+        if (armRootTransform.parent != _firstPersonArmRootOriginalParent)
+        {
+            armRootTransform.SetParent(_firstPersonArmRootOriginalParent, false);
+        }
+
+        armRootTransform.localPosition = _firstPersonArmRootOriginalLocalPosition;
+        armRootTransform.localRotation = _firstPersonArmRootOriginalLocalRotation;
+        armRootTransform.localScale = _firstPersonArmRootOriginalLocalScale;
     }
 
     private void StabilizeFirstPersonArmAndGunHierarchy()
@@ -4749,17 +4853,39 @@ public class PlayerController : MonoBehaviour
 
     private void SyncFirstPersonOnlyRootsToGameplayCamera()
     {
+        if (TryMountRemoteArmRootToArmPoint())
+        {
+            return;
+        }
+
         Transform syncTarget = _gameplayCameraTransform;
         
-        // Ensure remote players sync their arms to their main camera, not the spectate camera
-        if (_isSimulationControlled && _playerCamera != null)
+        // Remote players should prefer the explicit arm mount on the prefab.
+        if (_isSimulationControlled)
         {
-            syncTarget = _playerCamera.transform;
+            if (_remoteArmPointTransform == null)
+            {
+                CacheRemoteArmPointTransform();
+            }
+
+            if (_remoteArmPointTransform != null)
+            {
+                syncTarget = _remoteArmPointTransform;
+            }
+            else if (_playerCamera != null)
+            {
+                syncTarget = _playerCamera.transform;
+            }
         }
 
         if (syncTarget == null || _firstPersonOnlyRoots == null)
         {
             return;
+        }
+
+        if (_isSimulationControlled)
+        {
+            LogRemoteArmMountDebug("FallbackSyncTarget", $"target={GetTransformPath(syncTarget)}");
         }
 
         float lookDownWeight = 0f;
@@ -4783,6 +4909,12 @@ public class PlayerController : MonoBehaviour
             // Force parentage to the current gameplay camera if it's lost
             if (root.parent != syncTarget)
             {
+                if (_isSimulationControlled)
+                {
+                    LogRemoteArmMountDebug(
+                        "ReparentArmChildRoot",
+                        $"root={root.name}, from={GetTransformPath(root.parent)} to={GetTransformPath(syncTarget)}");
+                }
                 root.SetParent(syncTarget, false);
             }
 
@@ -4816,6 +4948,39 @@ public class PlayerController : MonoBehaviour
 
             root.localScale = _firstPersonOnlyRootLocalScales[i];
         }
+    }
+
+    private void LogRemoteArmMountDebug(string stage, string details)
+    {
+        if (!_debugRemoteArmMountLogs || Time.unscaledTime < _nextDebugRemoteArmMountLogTime)
+        {
+            return;
+        }
+
+        _nextDebugRemoteArmMountLogTime = Time.unscaledTime + Mathf.Max(0f, _debugRemoteArmMountLogCooldown);
+        string playerName = gameObject != null ? gameObject.name : "Player";
+        string armRootParent = _firstPersonArmRoot != null ? GetTransformPath(_firstPersonArmRoot.transform.parent) : "null";
+        string armPoint = GetTransformPath(_remoteArmPointTransform);
+        Debug.Log($"[RemoteArmDebug] {playerName} {stage} | {details} | currentArmRootParent={armRootParent} | armPoint={armPoint}");
+    }
+
+    private static string GetTransformPath(Transform target)
+    {
+        if (target == null)
+        {
+            return "null";
+        }
+
+        System.Text.StringBuilder pathBuilder = new System.Text.StringBuilder(target.name);
+        Transform current = target.parent;
+        while (current != null)
+        {
+            pathBuilder.Insert(0, '/');
+            pathBuilder.Insert(0, current.name);
+            current = current.parent;
+        }
+
+        return pathBuilder.ToString();
     }
 
     private void SetLocalSpectatorBodyVisible(bool visible)
@@ -6254,6 +6419,19 @@ public class PlayerController : MonoBehaviour
         _isSimulationControlled = isSimulationControlled;
         SetLocalCharacterAudio(!isSimulationControlled);
 
+        if (_debugRemoteArmMountLogs)
+        {
+            string armRootPath = _firstPersonArmRoot != null ? GetTransformPath(_firstPersonArmRoot.transform) : "null";
+            string armRootParentPath = _firstPersonArmRoot != null ? GetTransformPath(_firstPersonArmRoot.transform.parent) : "null";
+            string playerCameraPath = _playerCamera != null ? GetTransformPath(_playerCamera.transform) : "null";
+            string gameplayCameraPath = _gameplayCameraTransform != null ? GetTransformPath(_gameplayCameraTransform) : "null";
+            string spectateCameraPath = _spectateCameraTransform != null ? GetTransformPath(_spectateCameraTransform) : "null";
+            Debug.Log(
+                $"[RemoteArmDebug] {gameObject.name} SetSimulationControlled({isSimulationControlled}) | " +
+                $"armRoot={armRootPath} | armRootParent={armRootParentPath} | " +
+                $"playerCamera={playerCameraPath} | gameplayCamera={gameplayCameraPath} | spectateCamera={spectateCameraPath}");
+        }
+
         if (_playerLocomotionInput != null)
         {
             _playerLocomotionInput.SetSimulatedInputEnabled(isSimulationControlled);
@@ -6267,6 +6445,8 @@ public class PlayerController : MonoBehaviour
 
         if (!isSimulationControlled)
         {
+            RestoreFirstPersonArmRootParent();
+
             if (_playerHudDocument != null)
             {
                 _playerHudDocument.enabled = true;
@@ -6286,6 +6466,7 @@ public class PlayerController : MonoBehaviour
     private void ApplySimulationPresentationState()
     {
         EnsureRemoteFullBodyVisible();
+        TryMountRemoteArmRootToArmPoint();
 
         // For remote players, show both arms/gun and body as requested
         if (_firstPersonArmRoot != null)

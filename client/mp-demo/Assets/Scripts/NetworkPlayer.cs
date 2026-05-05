@@ -52,6 +52,7 @@ public class NetworkPlayer : MonoBehaviour
 
         if (controller != null)
         {
+            Debug.Log($"[RemoteArmDebug] {gameObject.name} NetworkPlayer.Initialize | isLocal={isLocal} | sessionId={playerState?.sessionId ?? "null"}");
             controller.SetSimulationControlled(!isLocal);
             controller.SetCombatModeActive(useShootingPresentation);
             if (useShootingPresentation)
