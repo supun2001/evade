@@ -1352,9 +1352,9 @@ public class RoundHudController : MonoBehaviour
             {
                 $"UI/{baseName}_map_icon",
                 $"UI/{baseName}",
-                $"UI/{baseName.Replace(\"_\", \" \")}",
-                $"UI/{baseName.Replace(\" \", \"_\")}",
-                $"UI/{baseName.Replace(\"-\", \" \")}",
+                "UI/" + baseName.Replace("_", " "),
+                "UI/" + baseName.Replace(" ", "_"),
+                "UI/" + baseName.Replace("-", " "),
             };
 
             for (int i = 0; i < variants.Length; i++)

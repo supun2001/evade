@@ -12,6 +12,9 @@ using UIButton = UnityEngine.UI.Button;
 using UIImage = UnityEngine.UI.Image;
 using UIToolkitImage = UnityEngine.UIElements.Image;
 using UIToolkitButton = UnityEngine.UIElements.Button;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class LobbyUI : MonoBehaviour
 {
@@ -37,6 +40,7 @@ public class LobbyUI : MonoBehaviour
     public UIImage skinPreviewImage;
     public TextMeshProUGUI skinNameText;
     [SerializeField] private GameObject shopPreviewPrefab;
+    [SerializeField] private RuntimeAnimatorController shopPreviewAnimatorController;
     [SerializeField] private Vector3 shopPreviewModelPosition = new Vector3(0f, -20f, 0f);
     [SerializeField] private Vector3 shopPreviewModelEuler = new Vector3(0f, 205f, 0f);
     [SerializeField] private Vector3 shopPreviewCameraPosition = new Vector3(0f, 1.1f, 6.1f);
@@ -131,6 +135,8 @@ public class LobbyUI : MonoBehaviour
     private const string ShopCardResourcePath = "UI/ShopCard";
     private const string OfflineCardResourcePath = "UI/Offline mode";
     private const string InventoryCardResourcePath = "UI/InventoryCard";
+    private const string DefaultShopPreviewPrefabAssetPath = "Assets/Models/NewPlayer/player.fbx";
+    private const string DefaultShopPreviewAnimatorControllerAssetPath = "Assets/Models/NewPlayer/Animations/AC_NewPlayer.controller";
     private const string ClassicMapSceneName = "Classic";
     private const string ClassicMapId = "SampleScene";
     private const string BackroomMapSceneName = "backroom";
@@ -220,6 +226,43 @@ public class LobbyUI : MonoBehaviour
             OnGameStarted();
         }
     }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
+        bool changed = false;
+
+        if (shopPreviewPrefab == null)
+        {
+            GameObject defaultPreviewPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(DefaultShopPreviewPrefabAssetPath);
+            if (defaultPreviewPrefab != null)
+            {
+                shopPreviewPrefab = defaultPreviewPrefab;
+                changed = true;
+            }
+        }
+
+        if (shopPreviewAnimatorController == null)
+        {
+            RuntimeAnimatorController defaultController = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(DefaultShopPreviewAnimatorControllerAssetPath);
+            if (defaultController != null)
+            {
+                shopPreviewAnimatorController = defaultController;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(this);
+        }
+    }
+#endif
 
     private void Update()
     {
@@ -2657,42 +2700,72 @@ public class LobbyUI : MonoBehaviour
         _shopPreviewCamera.targetTexture = _shopPreviewRenderTexture;
         _shopPreviewCamera.enabled = false;
 
-        GameObject previewPrefab = shopPreviewPrefab;
-        if (previewPrefab == null && NetworkManager.Instance != null)
-        {
-            previewPrefab = NetworkManager.Instance.playerPrefab;
-        }
+        GameObject previewPrefab = ResolveShopPreviewPrefabSource();
 
         if (previewPrefab == null)
         {
             return;
         }
 
-        _shopPreviewInstance = Instantiate(previewPrefab, _shopPreviewRoot.transform);
-        _shopPreviewInstance.name = "ShopPreviewPlayer";
+        _shopPreviewInstance = new GameObject("ShopPreviewPlayer");
+        _shopPreviewInstance.hideFlags = HideFlags.HideAndDontSave;
+        _shopPreviewInstance.transform.SetParent(_shopPreviewRoot.transform, false);
         _shopPreviewInstance.transform.localPosition = shopPreviewModelPosition;
         _shopPreviewInstance.transform.localRotation = Quaternion.Euler(shopPreviewModelEuler);
         _shopPreviewInstance.transform.localScale = Vector3.one;
 
-        DisablePreviewComponents(_shopPreviewInstance);
+        GameObject previewVisualInstance = Instantiate(previewPrefab, _shopPreviewInstance.transform);
+        previewVisualInstance.name = "ShopPreviewVisual";
+        previewVisualInstance.transform.localPosition = Vector3.zero;
+        previewVisualInstance.transform.localRotation = Quaternion.identity;
+        previewVisualInstance.transform.localScale = Vector3.one;
 
-        PlayerAppearance previewAppearance = _shopPreviewInstance.GetComponent<PlayerAppearance>();
+        DisablePreviewComponents(previewVisualInstance);
+        EnsureShopPreviewPresentation(previewVisualInstance);
+
+        PlayerAppearance previewAppearance = previewVisualInstance.GetComponent<PlayerAppearance>();
         if (previewAppearance != null)
         {
-            _shopPreviewRenderers = previewAppearance.GetTargetRenderers();
+            _shopPreviewRenderers = GetShopPreviewRenderers(previewAppearance, previewVisualInstance);
         }
         else
         {
-            _shopPreviewRenderers = _shopPreviewInstance.GetComponentsInChildren<Renderer>(true);
+            _shopPreviewRenderers = GetShopPreviewRenderers(null, previewVisualInstance);
         }
 
-        _shopPreviewAnimator = _shopPreviewInstance.GetComponentInChildren<Animator>(true);
+        _shopPreviewAnimator = previewVisualInstance.GetComponentInChildren<Animator>(true);
         if (_shopPreviewAnimator != null)
         {
+            if (shopPreviewAnimatorController != null)
+            {
+                _shopPreviewAnimator.runtimeAnimatorController = shopPreviewAnimatorController;
+            }
             _shopPreviewAnimator.enabled = true;
             _shopPreviewAnimator.speed = 1f;
             _shopPreviewAnimator.Update(0f);
         }
+    }
+
+    private GameObject ResolveShopPreviewPrefabSource()
+    {
+        if (shopPreviewPrefab != null && shopPreviewPrefab.GetComponent<PlayerController>() == null)
+        {
+            return shopPreviewPrefab;
+        }
+
+        GameObject networkPlayerPrefab = NetworkManager.Instance != null ? NetworkManager.Instance.playerPrefab : null;
+        if (networkPlayerPrefab == null)
+        {
+            return shopPreviewPrefab;
+        }
+
+        PlayerAnimation previewAnimation = networkPlayerPrefab.GetComponent<PlayerAnimation>();
+        if (previewAnimation != null && previewAnimation.VisualRootTransform != null)
+        {
+            return previewAnimation.VisualRootTransform.gameObject;
+        }
+
+        return networkPlayerPrefab;
     }
 
     private void DisablePreviewComponents(GameObject previewObject)
@@ -2737,7 +2810,8 @@ public class LobbyUI : MonoBehaviour
         {
             if (cameras[i] != null)
             {
-                cameras[i].gameObject.SetActive(false);
+                cameras[i].enabled = false;
+                cameras[i].gameObject.SetActive(true);
             }
         }
 
@@ -2749,6 +2823,120 @@ public class LobbyUI : MonoBehaviour
                 listeners[i].enabled = false;
             }
         }
+    }
+
+    private void EnsureShopPreviewPresentation(GameObject previewObject)
+    {
+        if (previewObject == null)
+        {
+            return;
+        }
+
+        PlayerController previewController = previewObject.GetComponent<PlayerController>();
+        if (previewController != null)
+        {
+            previewController.SetSimulationControlled(true);
+            previewController.ApplyRemoteCameraRotation(Vector2.zero);
+            previewController.EnsureRemoteFullBodyVisible();
+        }
+
+        Transform[] transforms = previewObject.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < transforms.Length; i++)
+        {
+            Transform child = transforms[i];
+            if (child == null)
+            {
+                continue;
+            }
+
+            if (!child.gameObject.activeSelf || IsShopPreviewArmRootName(child.name))
+            {
+                child.gameObject.SetActive(true);
+            }
+        }
+
+        Renderer[] renderers = previewObject.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] != null)
+            {
+                renderers[i].enabled = true;
+            }
+        }
+    }
+
+    private Renderer[] GetShopPreviewRenderers(PlayerAppearance previewAppearance, GameObject previewObject)
+    {
+        List<Renderer> renderers = new List<Renderer>();
+
+        if (previewAppearance != null)
+        {
+            Renderer[] appearanceRenderers = previewAppearance.GetTargetRenderers();
+            for (int i = 0; i < appearanceRenderers.Length; i++)
+            {
+                Renderer renderer = appearanceRenderers[i];
+                if (renderer != null && !renderers.Contains(renderer))
+                {
+                    renderers.Add(renderer);
+                }
+            }
+        }
+
+        if (previewObject == null)
+        {
+            return renderers.ToArray();
+        }
+
+        Renderer[] discoveredRenderers = previewObject.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < discoveredRenderers.Length; i++)
+        {
+            Renderer renderer = discoveredRenderers[i];
+            if (renderer == null || renderers.Contains(renderer))
+            {
+                continue;
+            }
+
+            if (renderer is ParticleSystemRenderer || renderer is TrailRenderer || renderer is LineRenderer)
+            {
+                continue;
+            }
+
+            if (previewAppearance == null || HasShopPreviewArmRootAncestor(renderer.transform))
+            {
+                renderers.Add(renderer);
+            }
+        }
+
+        return renderers.ToArray();
+    }
+
+    private static bool HasShopPreviewArmRootAncestor(Transform target)
+    {
+        Transform current = target;
+        while (current != null)
+        {
+            if (IsShopPreviewArmRootName(current.name))
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
+    }
+
+    private static bool IsShopPreviewArmRootName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        return string.Equals(name, "arms", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "arm", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "r_arm", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "l_arm", StringComparison.OrdinalIgnoreCase);
     }
 
     private void RefreshShopPreviewVisual()
