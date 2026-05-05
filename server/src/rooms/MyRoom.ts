@@ -16,6 +16,15 @@ const DEFAULT_PLAYER_SPAWN_POINTS = [
   { x: 2, y: 0, z: -6 },
   { x: -2, y: 0, z: -6 },
 ];
+
+const MAP_PLAYER_SPAWN_POINTS: Record<string, SpawnPoint[]> = {
+};
+
+const MAP_NEXTBOT_SPAWN_POINTS: Record<string, SpawnPoint[]> = {
+};
+
+const MAP_NEXTBOT_PATROL_POINTS: Record<string, SpawnPoint[]> = {
+};
 const NEXTBOT_MOVE_SPEED = 9;
 const NEXTBOT_STOPPING_DISTANCE = 0.7;
 const NEXTBOT_INJURY_DISTANCE = 0.95;
@@ -32,7 +41,7 @@ const NEXTBOT_BLOCKED_MOVE_EPSILON = 0.05;
 const NEXTBOT_PREDICTION_TIME = 0.28;
 const NEXTBOT_MAX_CHASE_RANGE = 70;
 const NEXTBOT_PARKOUR_ACQUIRE_RANGE = 1000;
-const NEXTBOT_MAX_VERTICAL_DELTA = 12;
+const NEXTBOT_MAX_VERTICAL_DELTA = 3.0;
 const NEXTBOT_STALE_TARGET_TIMEOUT_MS = 1500;
 const NEXTBOT_DISTANCE_SCORE_BASE = 120;
 const NEXTBOT_VISIBLE_PROXY_RANGE = 18;
@@ -71,7 +80,7 @@ const NEXTBOT_MAX_ALLOWED_ASCENT = 3;
 const NEXTBOT_MIN_SPAWN_POINT_SEPARATION = 3.5;
 const NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT = 4;
 const NEXTBOT_FLOOR_BLEND_RADIUS = 3.5;
-const NEXTBOT_DROP_START_HEIGHT = 0.9;
+const NEXTBOT_DROP_START_HEIGHT = 0.1;
 const NEXTBOT_DROP_GRAVITY = 22;
 const NEXTBOT_DROP_LAND_BLEND_HEIGHT = 0.75;
 const NEXTBOT_DROP_LAND_SNAP_DISTANCE = 0.015;
@@ -101,6 +110,7 @@ const AVAILABLE_MAPS = [
   { mapId: "backroom", sceneName: "backroom", displayName: "Backroom", difficulty: "HARD" },
   { mapId: "brutilistVoid", sceneName: "BrutalistVoid", displayName: "Brutilist Void", difficulty: "HARD" },
   { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
+  { mapId: "Vitamin_B", sceneName: "Vitamin_B", displayName: "Vitamin B", difficulty: "NORMAL" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;
@@ -1730,7 +1740,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private handleCombatHitPlayer(client: Client, message: any) {
-    if (this.currentPhase !== "round" || !this.state.isGameStarted) {
+    if (this.currentPhase === "waiting") {
       return;
     }
 
@@ -1751,8 +1761,11 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     target.combatHealth = Math.max(0, target.combatHealth - damage);
+    console.log(`[room ${this.roomId}] player ${targetSessionId} took ${damage} damage from ${client.sessionId} (${target.combatHealth}/${target.maxCombatHealth})`);
+    
     if (target.combatHealth <= 0) {
       this.recordPlayerHazardElimination(target.sessionId, Date.now(), client.sessionId);
+      this.schedulePlayerRespawnAfterNextbotDeath(target.sessionId, PLAYER_NEXTBOT_RESPAWN_DELAY_MS);
     }
   }
 
@@ -1825,7 +1838,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private respawnPlayerAfterNextbotDeath(sessionId: string) {
-    if (this.currentPhase !== "round" || !this.state.isGameStarted) {
+    if (this.currentPhase === "waiting") {
       return;
     }
 
@@ -2046,7 +2059,7 @@ export class MyRoom extends Room<MyRoomState> {
   private getNextbotSpawnPoint(spawnIndex: number): SpawnPoint {
     const spawnPoints = this.nextbotSpawnPoints.length > 0 ? this.nextbotSpawnPoints : DEFAULT_NEXTBOT_SPAWN_POINTS;
     if (this.getMapNextbotConfig().useSharedSpawnPoint) {
-      const sharedSpawn = spawnPoints[0];
+      const sharedSpawn = this.resolveGroundedSpawnPoint(spawnPoints[0]);
       return {
         x: sharedSpawn.x,
         y: sharedSpawn.y,
@@ -2055,7 +2068,19 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     const normalizedIndex = ((spawnIndex % spawnPoints.length) + spawnPoints.length) % spawnPoints.length;
-    return spawnPoints[normalizedIndex];
+    return this.resolveGroundedSpawnPoint(spawnPoints[normalizedIndex]);
+  }
+
+  private resolveGroundedSpawnPoint(spawnPoint: SpawnPoint): SpawnPoint {
+    if (!Number.isFinite(spawnPoint.x) || !Number.isFinite(spawnPoint.y) || !Number.isFinite(spawnPoint.z)) {
+      return spawnPoint;
+    }
+
+    return {
+      x: spawnPoint.x,
+      y: this.getGroundYForPosition(spawnPoint.x, spawnPoint.z, spawnPoint.y),
+      z: spawnPoint.z,
+    };
   }
 
   private ensureSufficientNextbotSpawnPoints(
@@ -2324,7 +2349,7 @@ export class MyRoom extends Room<MyRoomState> {
   private resolveNextbotSpawnPoints(options: any): SpawnPoint[] {
     const candidatePoints = options?.nextbotSpawnPoints;
     if (!Array.isArray(candidatePoints) || candidatePoints.length === 0) {
-      return DEFAULT_NEXTBOT_SPAWN_POINTS;
+      return MAP_NEXTBOT_SPAWN_POINTS[this.mapId] || DEFAULT_NEXTBOT_SPAWN_POINTS;
     }
 
     const parsedPoints = candidatePoints
@@ -2350,7 +2375,7 @@ export class MyRoom extends Room<MyRoomState> {
   private resolveNextbotPatrolPoints(options: any): SpawnPoint[] {
     const candidatePoints = options?.nextbotPatrolPoints;
     if (!Array.isArray(candidatePoints) || candidatePoints.length === 0) {
-      return [];
+      return MAP_NEXTBOT_PATROL_POINTS[this.mapId] || [];
     }
 
     const parsedPoints = candidatePoints
@@ -3245,7 +3270,7 @@ export class MyRoom extends Room<MyRoomState> {
   private resolvePlayerSpawnPoints(options: any): SpawnPoint[] {
     const candidatePoints = options?.playerSpawnPoints;
     if (!Array.isArray(candidatePoints) || candidatePoints.length === 0) {
-      return DEFAULT_PLAYER_SPAWN_POINTS;
+      return MAP_PLAYER_SPAWN_POINTS[this.mapId] || DEFAULT_PLAYER_SPAWN_POINTS;
     }
 
     const parsedPoints = candidatePoints
@@ -3668,7 +3693,7 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private recordPlayerHazardElimination(sessionId: string, now: number, attackerSessionId?: string) {
-    if (this.currentPhase !== "round") {
+    if (this.currentPhase === "waiting") {
       return;
     }
 

@@ -68,7 +68,9 @@ public class NetworkPlayer : MonoBehaviour
 
         if (!isLocal)
         {
-            if (controller) controller.enabled = false;
+            // We keep the controller enabled so that LateUpdate/UpdateSimulationVisuals can run.
+            // The controller handles being in simulation mode internally.
+            if (controller) controller.enabled = true;
             
             if (input) 
             {

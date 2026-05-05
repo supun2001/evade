@@ -143,10 +143,12 @@
                 </ui:VisualElement>
                 <ui:Label text="Temporary lobby map selection for development." style="margin-top: 10px; color: rgba(255,255,255,0.68); font-size: 14px; white-space: normal;"/>
                 <ui:VisualElement style="margin-top: 18px; row-gap: 12px;">
+                    <ui:Button name="map-random-button" text="RANDOM" style="height: 58px; color: rgb(255, 255, 255); background-color: rgba(60, 60, 60, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                     <ui:Button name="map-classic-button" text="CLASSIC" style="height: 58px; color: rgb(18, 24, 18); background-color: rgb(142, 224, 132); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                     <ui:Button name="map-backroom-button" text="BACKROOM" style="height: 58px; color: rgb(255, 245, 226); background-color: rgba(96, 72, 20, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                     <ui:Button name="map-brutilistvoid-button" text="BRUTILIST VOID" style="height: 58px; color: rgb(236, 240, 250); background-color: rgba(48, 56, 72, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                     <ui:Button name="map-parkour-button" text="PARKOUR" style="height: 58px; color: rgb(238, 248, 255); background-color: rgba(40, 88, 130, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
+                    <ui:Button name="map-vitaminb-button" text="VITAMIN B" style="height: 58px; color: rgb(240, 230, 255); background-color: rgba(140, 80, 200, 0.96); border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; font-size: 20px; -unity-font-style: bold;"/>
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>

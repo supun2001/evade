@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -1674,6 +1673,11 @@ public class RoundHudController : MonoBehaviour
             return new Color(0.09f, 0.22f, 0.35f, 0.92f);
         }
 
+        if (string.Equals(mapId, "Vitamin_B", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.3f, 0.15f, 0.45f, 0.92f);
+        }
+
         return new Color(0.16f, 0.27f, 0.19f, 0.92f);
     }
 
@@ -1692,6 +1696,11 @@ public class RoundHudController : MonoBehaviour
         if (string.Equals(mapId, "parkour", StringComparison.OrdinalIgnoreCase))
         {
             return new Color(0.41f, 0.83f, 1f);
+        }
+
+        if (string.Equals(mapId, "Vitamin_B", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Color(0.6f, 0.3f, 0.9f);
         }
 
         return new Color(0.47f, 0.93f, 0.54f);
@@ -1791,8 +1800,17 @@ public class RoundHudController : MonoBehaviour
             return null;
         }
 
-        return _results.entries.FirstOrDefault(entry =>
-            string.Equals(entry.sessionId, _networkManager.LocalSessionId, StringComparison.Ordinal));
+        string localSessionId = _networkManager.LocalSessionId;
+        for (int i = 0; i < _results.entries.Length; i++)
+        {
+            var entry = _results.entries[i];
+            if (entry != null && string.Equals(entry.sessionId, localSessionId, StringComparison.Ordinal))
+            {
+                return entry;
+            }
+        }
+
+        return null;
     }
 
     private static string FormatTime(float totalSeconds)

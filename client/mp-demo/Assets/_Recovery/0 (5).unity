@@ -19955,7 +19955,19 @@ MonoBehaviour:
     m_Bits: 4294967295
   serverFloorSampleSpacing: 2
   serverFloorSamplePadding: 2
-  nextbotPatrolPoints: []
+  nextbotPatrolPoints:
+  - anchor: {fileID: 594219164}
+    position: {x: -4.7, y: 3.57, z: 31.8}
+  - anchor: {fileID: 594219164}
+    position: {x: -5.51, y: 3.31, z: -108.27}
+  - anchor: {fileID: 282920869}
+    position: {x: -169.54, y: 2.87, z: -107.66}
+  - anchor: {fileID: 736859776}
+    position: {x: -175.41, y: 2.63, z: -46.41}
+  - anchor: {fileID: 763626587}
+    position: {x: -139.71, y: 2.63, z: 33.67}
+  - anchor: {fileID: 1845726629}
+    position: {x: -48.47, y: 1.01, z: 7.07}
   intermissionDurationSeconds: 30
   roundDurationSeconds: 180
   roomName: my_room
@@ -39640,7 +39652,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 400000, guid: d34e8533c8de8ec45869f9144584d929, type: 3}
       propertyPath: m_LocalScale.z
-      value: 2.3818
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 400000, guid: d34e8533c8de8ec45869f9144584d929, type: 3}
       propertyPath: m_LocalPosition.x
@@ -42201,7 +42213,7 @@ GameObject:
   - component: {fileID: 1456026833}
   - component: {fileID: 1456026834}
   m_Layer: 0
-  m_Name: DisabledPatrolPoints
+  m_Name: PatrolPoints
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -45730,7 +45742,7 @@ Transform:
   m_GameObject: {fileID: 1549373508}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 5.73, y: -12.5, z: -14.51}
+  m_LocalPosition: {x: 5.73, y: -7.9, z: -14.51}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -65072,7 +65084,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 400000, guid: 4f32dfddb033d3e40b5841bc53cc1689, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -196
+      value: -198.83739
       objectReference: {fileID: 0}
     - target: {fileID: 400000, guid: 4f32dfddb033d3e40b5841bc53cc1689, type: 3}
       propertyPath: m_LocalRotation.w

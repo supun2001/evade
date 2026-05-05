@@ -77,6 +77,8 @@ public class NetworkManager : MonoBehaviour
     private const string BrutilistVoidMapSceneName = "BrutalistVoid";
     private const string ParkourMapId = "parkour";
     private const string ParkourMapSceneName = "parkour";
+    private const string VitaminBMapId = "Vitamin_B";
+    private const string VitaminBMapSceneName = "Vitamin_B";
     private const float MinServerObstacleThickness = 0.25f;
     private const int MaxServerFloorSamples = 384;
     private const int MaxServerObstacles = 384;
@@ -113,8 +115,8 @@ public class NetworkManager : MonoBehaviour
         new PlayerSpawnPointConfig { position = new Vector3(2f, 0f, -6f) },
         new PlayerSpawnPointConfig { position = new Vector3(-2f, 0f, -6f) },
     };
-    [SerializeField] private float spawnGroundProbeHeight = 30f;
-    [SerializeField] private float spawnGroundProbeDistance = 120f;
+    [SerializeField] private float spawnGroundProbeHeight = 6f;
+    [SerializeField] private float spawnGroundProbeDistance = 30f;
     [SerializeField] private float spawnGroundOffset = 0.15f;
     [SerializeField] private LayerMask spawnGroundLayers = ~0;
     [SerializeField] private float serverFloorSampleSpacing = 0.75f;
@@ -269,7 +271,8 @@ public class NetworkManager : MonoBehaviour
         return string.Equals(mapId, ClassicMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, BackroomMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, BrutilistVoidMapId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSceneNameForMapId(string mapId)
@@ -287,6 +290,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase))
         {
             return ParkourMapSceneName;
+        }
+
+        if (string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return VitaminBMapSceneName;
         }
 
         return ClassicMapSceneName;
@@ -307,6 +315,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return ParkourMapId;
+        }
+
+        if (string.Equals(sceneName, VitaminBMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return VitaminBMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
@@ -863,11 +876,28 @@ public class NetworkManager : MonoBehaviour
     {
         return new Dictionary<string, object>
         {
-            ["intermissionDurationMs"] = IntermissionDurationMs,
-            ["roundDurationMs"] = RoundDurationMs,
             ["mapId"] = ResolveCurrentMapId(),
             ["username"] = string.IsNullOrWhiteSpace(AuthenticatedUsername) ? "Player" : AuthenticatedUsername,
+            ["playerSpawnPoints"] = BuildSerializedPlayerSpawnPoints(),
         };
+    }
+
+    private List<object> BuildSerializedPlayerSpawnPoints()
+    {
+        AutoDiscoverSpawnPoints();
+        List<object> serializedPlayerSpawnPoints = new List<object>();
+        for (int i = 0; i < playerSpawnPoints.Count; i++)
+        {
+            Vector3 point = playerSpawnPoints[i].GetWorldPosition();
+            Vector3 groundedPoint = ResolveGroundedSpawnPosition(point);
+            serializedPlayerSpawnPoints.Add(new Dictionary<string, object>
+            {
+                ["x"] = groundedPoint.x,
+                ["y"] = groundedPoint.y,
+                ["z"] = groundedPoint.z,
+            });
+        }
+        return serializedPlayerSpawnPoints;
     }
 
     private Dictionary<string, object> BuildMapSyncPayload()
@@ -1100,6 +1130,14 @@ public class NetworkManager : MonoBehaviour
             Debug.LogWarning($"NetworkManager: reduced server floor samples from about {estimatedSampleCount} to {maxGridSamples} for map {ResolveCurrentMapId()} using {spacing:0.##}m spacing.");
         }
 
+        float referenceY = 0f;
+        if (playerSpawnPoints.Count > 0)
+        {
+            float totalY = 0;
+            foreach (var p in playerSpawnPoints) totalY += p.GetWorldPosition().y;
+            referenceY = totalY / playerSpawnPoints.Count;
+        }
+
         HashSet<string> dedup = new HashSet<string>();
         for (float x = minX; x <= maxX + 0.01f; x += spacing)
         {
@@ -1110,7 +1148,7 @@ public class NetworkManager : MonoBehaviour
                     break;
                 }
 
-                Vector3 grounded = ResolveGroundedSpawnPosition(new Vector3(x, 0f, z));
+                Vector3 grounded = ResolveGroundedSpawnPosition(new Vector3(x, referenceY, z));
                 string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
                 if (!dedup.Add(key))
                 {
@@ -1245,27 +1283,77 @@ public class NetworkManager : MonoBehaviour
     private bool TryResolveGroundedSpawnPosition(Vector3 desiredPosition, out Vector3 resolvedPosition)
     {
         resolvedPosition = desiredPosition;
-        Vector3 rayOrigin = desiredPosition + Vector3.up * Mathf.Max(1f, spawnGroundProbeHeight);
-        float rayDistance = Mathf.Max(10f, spawnGroundProbeDistance);
+        // Start raycast only 2 meters above the desired position to avoid hitting roofs or skyboxes
+        // that might be present high above the spawn point.
+        Vector3 rayOrigin = desiredPosition + Vector3.up * 2f;
+        float rayDistance = 40f; 
         int layerMask = GetSpawnGroundLayerMask();
-        if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, rayDistance, layerMask, QueryTriggerInteraction.Ignore))
+        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, rayDistance, layerMask, QueryTriggerInteraction.Ignore);
+
+        if (hits.Length == 0)
         {
-            resolvedPosition = hit.point + Vector3.up * spawnGroundOffset;
-            return true;
+            int fallbackLayerMask = GetFallbackSpawnGroundLayerMask(layerMask);
+            if (fallbackLayerMask != layerMask)
+            {
+                hits = Physics.RaycastAll(rayOrigin, Vector3.down, rayDistance, fallbackLayerMask, QueryTriggerInteraction.Ignore);
+            }
         }
 
-        int walkableLayer = LayerMask.NameToLayer("Walkable");
-        if (walkableLayer >= 0)
+        if (hits.Length > 0)
         {
-            int walkableMask = 1 << walkableLayer;
-            if (Physics.SphereCast(rayOrigin, 0.35f, Vector3.down, out hit, rayDistance, walkableMask, QueryTriggerInteraction.Ignore))
+            int walkableLayer = LayerMask.NameToLayer(WalkableLayerName);
+            RaycastHit bestHit = default;
+            bool foundHit = false;
+            bool foundWalkableHit = false;
+            float bestDistanceToY = float.PositiveInfinity;
+
+            for (int i = 0; i < hits.Length; i++)
             {
-                resolvedPosition = hit.point + Vector3.up * spawnGroundOffset;
+                RaycastHit hit = hits[i];
+                bool isWalkable = walkableLayer >= 0 && hit.collider.gameObject.layer == walkableLayer;
+                float distanceToY = Mathf.Abs(hit.point.y - desiredPosition.y);
+
+                if (isWalkable && !foundWalkableHit)
+                {
+                    bestHit = hit;
+                    bestDistanceToY = distanceToY;
+                    foundWalkableHit = true;
+                    foundHit = true;
+                }
+                else if (isWalkable && foundWalkableHit)
+                {
+                    if (distanceToY < bestDistanceToY)
+                    {
+                        bestHit = hit;
+                        bestDistanceToY = distanceToY;
+                    }
+                }
+                else if (!foundWalkableHit)
+                {
+                    if (distanceToY < bestDistanceToY)
+                    {
+                        bestHit = hit;
+                        bestDistanceToY = distanceToY;
+                        foundHit = true;
+                    }
+                }
+            }
+
+            if (foundHit)
+            {
+                resolvedPosition = bestHit.point + Vector3.up * spawnGroundOffset;
                 return true;
             }
         }
 
         return false;
+    }
+
+    private int GetFallbackSpawnGroundLayerMask(int primaryLayerMask)
+    {
+        int configuredMask = spawnGroundLayers.value;
+        int fallbackMask = configuredMask != 0 ? configuredMask : ~0;
+        return fallbackMask == primaryLayerMask ? primaryLayerMask : fallbackMask;
     }
 
     private int GetSpawnGroundLayerMask()

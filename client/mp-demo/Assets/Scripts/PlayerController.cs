@@ -177,7 +177,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float _sprintBobBlendSpeed = 10f;
 
     [Header("View Toggle")]
-    [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.ThirdPerson;
+    [SerializeField] private CameraViewMode _startingViewMode = CameraViewMode.FirstPerson;
     [SerializeField] private bool _useManualThirdPersonCamera = true;
     [SerializeField] private Vector3 _thirdPersonCameraOffset = new Vector3(1f, 0.55f, -3.2f);
     [SerializeField] private float _thirdPersonCameraPitch = 8f;
@@ -341,6 +341,9 @@ public class PlayerController : MonoBehaviour
     private float _jumpBoostMultiplier = 1f;
     private float _jumpBoostExpiresAt = -1f;
     private Coroutine _pickupFadeCoroutine;
+    private Coroutine _shootRecoilCoroutine;
+    private Animator _firstPersonArmAnimator;
+    private bool _hasCheckedArmAnimator;
     private float _reviveHoldTimer;
     private float _reviveHoldStartedAt = -1f;
     private string _reviveHoldTargetSessionId;
@@ -544,7 +547,6 @@ public class PlayerController : MonoBehaviour
         // Consolidate cameras: ensure only one camera is active to prevent buffer fighting (shaking)
         ConsolidateGameplayCameras();
         
-        // Ensure FPS arms can't pick up physics jitter from imported child bodies/colliders
         // Ensure ALL child rigidbodies in the prefab are kinematic to prevent physics-based jitter
         Rigidbody[] allRigidbodies = GetComponentsInChildren<Rigidbody>(true);
         for (int i = 0; i < allRigidbodies.Length; i++)
@@ -553,6 +555,8 @@ public class PlayerController : MonoBehaviour
             {
                 allRigidbodies[i].isKinematic = true;
                 allRigidbodies[i].useGravity = false;
+                allRigidbodies[i].collisionDetectionMode = CollisionDetectionMode.Discrete;
+                allRigidbodies[i].interpolation = RigidbodyInterpolation.None;
             }
         }
 
@@ -686,9 +690,11 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        if (!_isSimulationControlled)
+        if (_isSimulationControlled)
         {
             UpdateRespawnCountdownUi();
+            // Skip physics and movement for simulation controlled players (handled by NetworkPlayer)
+            return;
         }
 
         if (!_playerLocomotionInput.InputEnabled) 
@@ -859,6 +865,8 @@ public class PlayerController : MonoBehaviour
         if (ShouldForceThirdPersonView()) return;
         if (ShouldForceFirstPersonView()) return; // Prevent switching in combat mode
 
+        // Third person view toggle disabled as per request to remove third person view
+        /*
         if (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
         {
             CameraViewMode nextView =
@@ -869,6 +877,7 @@ public class PlayerController : MonoBehaviour
             _preferredViewMode = nextView;
             SetCameraView(nextView);
         }
+        */
     }
 
     private void HandleInjuredInteractionInput()
@@ -1015,7 +1024,8 @@ public class PlayerController : MonoBehaviour
 
     private bool ShouldForceThirdPersonView()
     {
-        return IsInjuredOrHitReacting() || _isCarryingPlayer || _isBeingCarried;
+        // Force third person disabled to keep player in first person even when injured/dead
+        return false; 
     }
 
     private bool ShouldForceFirstPersonView()
@@ -4019,6 +4029,12 @@ public class PlayerController : MonoBehaviour
             newViewMode = CameraViewMode.ThirdPerson;
         }
 
+        // Always force First Person for the active player if third person is "removed"
+        if (!_isSpectating && newViewMode == CameraViewMode.ThirdPerson)
+        {
+            newViewMode = CameraViewMode.FirstPerson;
+        }
+
         if (!force && _currentViewMode == newViewMode)
         {
             return;
@@ -4236,7 +4252,10 @@ public class PlayerController : MonoBehaviour
     {
         if (_spectateCamera != null)
         {
-            _spectateCamera.enabled = isActive;
+            // Never allow the spectate camera to be active for remote players
+            bool shouldActuallyBeActive = isActive && !_isSimulationControlled;
+            _spectateCamera.gameObject.SetActive(shouldActuallyBeActive);
+            _spectateCamera.enabled = shouldActuallyBeActive;
         }
 
         if (_spectateAudioListener != null)
@@ -4639,8 +4658,13 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        Animator armAnimator = _firstPersonArmRoot.GetComponentInChildren<Animator>(true);
-        return armAnimator != null && armAnimator.runtimeAnimatorController != null;
+        if (!_hasCheckedArmAnimator)
+        {
+            _firstPersonArmAnimator = _firstPersonArmRoot.GetComponentInChildren<Animator>(true);
+            _hasCheckedArmAnimator = true;
+        }
+
+        return _firstPersonArmAnimator != null && _firstPersonArmAnimator.runtimeAnimatorController != null;
     }
 
     private void SetLocalRenderMode(bool firstPerson)
@@ -4648,17 +4672,17 @@ public class PlayerController : MonoBehaviour
         // Handle explicit roots if assigned
         if (_firstPersonArmRoot != null)
         {
-            // For remote players (simulation controlled), always show arms/gun
-            // For local players, only show in first person
-            _firstPersonArmRoot.SetActive(firstPerson || _isSimulationControlled);
+            // For remote players, always show arms. For local, only in first person and not spectating.
+            _firstPersonArmRoot.SetActive(_isSimulationControlled || (firstPerson && !_isSpectating));
         }
 
         if (_thirdPersonBodyRoot != null)
         {
-            _thirdPersonBodyRoot.SetActive(!firstPerson);
+            // For remote players, always show body. For local, only in third person and not spectating.
+            _thirdPersonBodyRoot.SetActive(_isSimulationControlled || (!firstPerson && !_isSpectating));
             
             // Apply rotation offset to ensure the model faces the correct way
-            if (!firstPerson)
+            if (!firstPerson && !_isSpectating)
             {
                 _thirdPersonBodyRoot.transform.localRotation = Quaternion.Euler(_thirdPersonBodyRotationOffset);
             }
@@ -4689,12 +4713,12 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        SetFirstPersonHeadHidden(firstPerson);
+        SetFirstPersonHeadHidden(firstPerson && !_isSpectating);
         
         // Handle legacy arm syncing if explicit root isn't used
         if (_firstPersonArmRoot == null)
         {
-            SetFirstPersonOnlyRenderersVisible(firstPerson);
+            SetFirstPersonOnlyRenderersVisible(firstPerson && !_isSpectating);
         }
     }
 
@@ -4713,19 +4737,33 @@ public class PlayerController : MonoBehaviour
                 continue;
             }
 
-            renderer.enabled = visible && _defaultFirstPersonOnlyRendererEnabledStates[i];
+            renderer.enabled = (visible || _isSimulationControlled) && _defaultFirstPersonOnlyRendererEnabledStates[i];
+            
+            // If simulation controlled (remote player), ensure they are on a visible layer
+            if (_isSimulationControlled)
+            {
+                renderer.gameObject.layer = gameObject.layer;
+            }
         }
     }
 
     private void SyncFirstPersonOnlyRootsToGameplayCamera()
     {
-        if (_gameplayCameraTransform == null || _firstPersonOnlyRoots == null)
+        Transform syncTarget = _gameplayCameraTransform;
+        
+        // Ensure remote players sync their arms to their main camera, not the spectate camera
+        if (_isSimulationControlled && _playerCamera != null)
+        {
+            syncTarget = _playerCamera.transform;
+        }
+
+        if (syncTarget == null || _firstPersonOnlyRoots == null)
         {
             return;
         }
 
         float lookDownWeight = 0f;
-        if (_currentViewMode == CameraViewMode.FirstPerson && _firstPersonLookDownLimit > 0.001f)
+        if ((_currentViewMode == CameraViewMode.FirstPerson || _isSimulationControlled) && _firstPersonLookDownLimit > 0.001f)
         {
             lookDownWeight = Mathf.Clamp01(Mathf.Max(0f, _cameraRotation.y) / _firstPersonLookDownLimit);
         }
@@ -4743,9 +4781,9 @@ public class PlayerController : MonoBehaviour
             }
 
             // Force parentage to the current gameplay camera if it's lost
-            if (root.parent != _gameplayCameraTransform)
+            if (root.parent != syncTarget)
             {
-                root.SetParent(_gameplayCameraTransform, false);
+                root.SetParent(syncTarget, false);
             }
 
             // Calculate desired local state
@@ -4760,7 +4798,7 @@ public class PlayerController : MonoBehaviour
             }
 
             // Apply wall retreat and tilt to the arms specifically
-            if (_currentViewMode == CameraViewMode.FirstPerson && _firstPersonWallRetreat > 0.001f)
+            if ((_currentViewMode == CameraViewMode.FirstPerson || _isSimulationControlled) && _firstPersonWallRetreat > 0.001f)
             {
                 float retreatNormalized = Mathf.Clamp01(_firstPersonWallRetreat / _firstPersonWallRetreatDistance);
                 targetLocalPos += Vector3.back * _firstPersonWallRetreat;
@@ -4772,15 +4810,9 @@ public class PlayerController : MonoBehaviour
 
             // Only apply if the difference is significant to avoid "micro-vibrations"
             // caused by floating point competition with Animators or Cinemachine.
-            if (Vector3.SqrMagnitude(root.localPosition - targetLocalPos) > 0.000001f)
-            {
-                root.localPosition = targetLocalPos;
-            }
+            root.localPosition = targetLocalPos;
 
-            if (Quaternion.Angle(root.localRotation, targetLocalRot) > 0.01f)
-            {
-                root.localRotation = targetLocalRot;
-            }
+            root.localRotation = targetLocalRot;
 
             root.localScale = _firstPersonOnlyRootLocalScales[i];
         }
@@ -5351,9 +5383,17 @@ public class PlayerController : MonoBehaviour
     public void ApplyRemoteCameraRotation(Vector2 rotation)
     {
         // rotation.x is Yaw (handled by root transform), rotation.y is Pitch
+        // Sync internal pitch state so procedural arm logic (SyncFirstPersonOnlyRoots) works correctly
+        _cameraRotation.y = rotation.y;
+
         if (_playerCamera != null)
         {
             _playerCamera.transform.localRotation = Quaternion.Euler(rotation.y, 0f, 0f);
+        }
+
+        if (_gameplayCameraTransform != null && _gameplayCameraTransform != (_playerCamera != null ? _playerCamera.transform : null))
+        {
+            _gameplayCameraTransform.localRotation = Quaternion.Euler(rotation.y, 0f, 0f);
         }
     }
 
@@ -6220,6 +6260,11 @@ public class PlayerController : MonoBehaviour
             _playerLocomotionInput.InputEnabled = true;
         }
 
+        if (_characterController != null)
+        {
+            _characterController.enabled = !isSimulationControlled;
+        }
+
         if (!isSimulationControlled)
         {
             if (_playerHudDocument != null)
@@ -6246,6 +6291,23 @@ public class PlayerController : MonoBehaviour
         if (_firstPersonArmRoot != null)
         {
             _firstPersonArmRoot.SetActive(true);
+            
+            // Ensure all renderers are enabled and on a visible layer for remote players
+            Renderer[] armRenderers = _firstPersonArmRoot.GetComponentsInChildren<Renderer>(true);
+            int targetLayer = gameObject.layer;
+            foreach (Renderer r in armRenderers)
+            {
+                if (r != null)
+                {
+                    r.enabled = true;
+                    r.gameObject.layer = targetLayer;
+                }
+            }
+        }
+        else
+        {
+            // Fallback for legacy systems where arms are handled as individual renderers
+            SetFirstPersonOnlyRenderersVisible(true);
         }
 
         if (_thirdPersonBodyRoot != null)
@@ -6259,12 +6321,21 @@ public class PlayerController : MonoBehaviour
         {
             if (cameras[i] != null)
             {
-                // Disable camera component but keep GameObject active so child arms/guns remain visible
+                // Disable camera component
                 cameras[i].enabled = false;
-                if (!cameras[i].gameObject.activeSelf)
+
+                // Only activate the main player camera GameObject so its children (arms/guns) show.
+                // EVERYTHING ELSE must be deactivated for remote players to avoid floating arms (especially spec camera).
+                bool isMainCamera = (cameras[i] == _playerCamera || cameras[i] == _gameplayCamera) && cameras[i] != _spectateCamera;
+                
+                // Extra check for names to be safe
+                string camName = cameras[i].gameObject.name.ToLower();
+                if (camName.Contains("spec") || camName.Contains("spectate"))
                 {
-                    cameras[i].gameObject.SetActive(true);
+                    isMainCamera = false;
                 }
+
+                cameras[i].gameObject.SetActive(isMainCamera);
             }
         }
 

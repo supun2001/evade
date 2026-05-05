@@ -69,10 +69,12 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _inventoryButton;
     private UIToolkitButton _spectateButton;
     private UIToolkitButton _comingSoonCloseButton;
+    private UIToolkitButton _mapRandomButton;
     private UIToolkitButton _mapClassicButton;
     private UIToolkitButton _mapBackroomButton;
     private UIToolkitButton _mapBrutilistVoidButton;
     private UIToolkitButton _mapParkourButton;
+    private UIToolkitButton _mapVitaminBButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
@@ -127,7 +129,7 @@ public class LobbyUI : MonoBehaviour
     private const string ShopCardResourcePath = "UI/ShopCard";
     private const string OfflineCardResourcePath = "UI/Offline mode";
     private const string InventoryCardResourcePath = "UI/InventoryCard";
-    private const string ClassicMapSceneName = "SampleScene";
+    private const string ClassicMapSceneName = "Classic";
     private const string ClassicMapId = "SampleScene";
     private const string BackroomMapSceneName = "backroom";
     private const string BackroomMapId = "backroom";
@@ -135,6 +137,8 @@ public class LobbyUI : MonoBehaviour
     private const string BrutilistVoidMapId = "brutilistVoid";
     private const string ParkourMapSceneName = "parkour";
     private const string ParkourMapId = "parkour";
+    private const string VitaminBMapSceneName = "Vitamin_B";
+    private const string VitaminBMapId = "Vitamin_B";
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
@@ -584,10 +588,12 @@ public class LobbyUI : MonoBehaviour
         _inventoryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("inventory-button");
         _spectateButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("spectate-button");
         _comingSoonCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("coming-soon-close-button");
+        _mapRandomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-random-button");
         _mapClassicButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-classic-button");
         _mapBackroomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-backroom-button");
         _mapBrutilistVoidButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-brutilistvoid-button");
         _mapParkourButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-parkour-button");
+        _mapVitaminBButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-vitaminb-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
@@ -753,6 +759,10 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked += HandleComingSoonCloseButtonClicked;
         }
+        if (_mapRandomButton != null)
+        {
+            _mapRandomButton.clicked += HandleRandomMapButtonClicked;
+        }
         if (_mapClassicButton != null)
         {
             _mapClassicButton.clicked += HandleClassicMapButtonClicked;
@@ -768,6 +778,10 @@ public class LobbyUI : MonoBehaviour
         if (_mapParkourButton != null)
         {
             _mapParkourButton.clicked += HandleParkourMapButtonClicked;
+        }
+        if (_mapVitaminBButton != null)
+        {
+            _mapVitaminBButton.clicked += HandleVitaminBMapButtonClicked;
         }
         if (_mapSelectionCloseButton != null)
         {
@@ -878,6 +892,10 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked -= HandleComingSoonCloseButtonClicked;
         }
+        if (_mapRandomButton != null)
+        {
+            _mapRandomButton.clicked -= HandleRandomMapButtonClicked;
+        }
         if (_mapClassicButton != null)
         {
             _mapClassicButton.clicked -= HandleClassicMapButtonClicked;
@@ -893,6 +911,10 @@ public class LobbyUI : MonoBehaviour
         if (_mapParkourButton != null)
         {
             _mapParkourButton.clicked -= HandleParkourMapButtonClicked;
+        }
+        if (_mapVitaminBButton != null)
+        {
+            _mapVitaminBButton.clicked -= HandleVitaminBMapButtonClicked;
         }
         if (_mapSelectionCloseButton != null)
         {
@@ -920,7 +942,12 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        // Skip map selection and start immediately with a random map
+        SetMapSelectionVisible(true);
+    }
+
+    private void HandleRandomMapButtonClicked()
+    {
+        SetMapSelectionVisible(false);
         if (NetworkManager.Instance != null)
         {
             NetworkManager.Instance.UseServerRandomMap();
@@ -941,6 +968,11 @@ public class LobbyUI : MonoBehaviour
     private void HandleParkourMapButtonClicked()
     {
         BeginJoinForMap(ParkourMapSceneName, ParkourMapId);
+    }
+
+    private void HandleVitaminBMapButtonClicked()
+    {
+        BeginJoinForMap(VitaminBMapSceneName, VitaminBMapId);
     }
 
     private void HandleBrutilistVoidMapButtonClicked()
@@ -1501,10 +1533,12 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_inventoryButton, "Open your inventory");
         SetMenuButtonDescription(_spectateButton, "Watch the current match");
         SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
+        SetMenuButtonDescription(_mapRandomButton, "Join a random map selected by the server");
         SetMenuButtonDescription(_mapClassicButton, "Join the classic map");
         SetMenuButtonDescription(_mapBackroomButton, "Join the Backroom map");
         SetMenuButtonDescription(_mapBrutilistVoidButton, "Join the Brutilist Void map");
         SetMenuButtonDescription(_mapParkourButton, "Join the Parkour map");
+        SetMenuButtonDescription(_mapVitaminBButton, "Join the Vitamin B map");
 
         _pendingHoverLabelText = DefaultMenuHoverText;
     }
@@ -1537,10 +1571,12 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_shopRobuxButton);
         RegisterHoverButton(_inventoryButton);
         RegisterHoverButton(_spectateButton);
+        RegisterHoverButton(_mapRandomButton);
         RegisterHoverButton(_mapClassicButton);
         RegisterHoverButton(_mapBackroomButton);
         RegisterHoverButton(_mapBrutilistVoidButton);
         RegisterHoverButton(_mapParkourButton);
+        RegisterHoverButton(_mapVitaminBButton);
     }
 
     private void UnbindHoverEffects()

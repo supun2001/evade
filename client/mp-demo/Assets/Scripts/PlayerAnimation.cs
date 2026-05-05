@@ -119,6 +119,7 @@ public class PlayerAnimation : MonoBehaviour
     private float _shootAnimationTimer;
     private readonly System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController> _shootingAnimatorOverrides
         = new System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController>();
+    private bool _hasInitializedChildAnimators;
 
     private const float DEFAULT_SMOOTH_SPEED = 10f;
     #endregion
@@ -302,7 +303,7 @@ public class PlayerAnimation : MonoBehaviour
 
     private void EnsureRuntimeChildAnimators()
     {
-        if (_animator == null)
+        if (_hasInitializedChildAnimators || _animator == null)
         {
             return;
         }
@@ -333,6 +334,8 @@ public class PlayerAnimation : MonoBehaviour
         {
             _childAnimators = GetComponentsInChildren<Animator>(true);
         }
+        
+        _hasInitializedChildAnimators = true;
     }
 
     private bool ShouldCreateRuntimeChildAnimator(Transform candidate)

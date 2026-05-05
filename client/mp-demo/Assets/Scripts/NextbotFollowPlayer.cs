@@ -70,6 +70,14 @@ public class NextbotFollowPlayer : MonoBehaviour
             maxChaseRange = 1000f,
             navMeshRejoinWarpDistance = 0.3f,
         },
+        new MapNextbotSettings
+        {
+            mapId = "Vitamin_B",
+            useLocalRoomStateNavMesh = false,
+            targetHoldSeconds = 1f,
+            maxChaseRange = 1000f,
+            navMeshRejoinWarpDistance = 0.3f,
+        },
     };
 
     [Header("Target Score")]
@@ -118,7 +126,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _edgeStuckVelocity = 0.2f;
 
     [Header("Grounding")]
-    [SerializeField] private bool _lockToStartingHeight = true;
+    [SerializeField] private bool _lockToStartingHeight = false;
     [SerializeField] private float _gravity = 20f;
     [SerializeField] private LayerMask _groundCheckLayers = Physics.DefaultRaycastLayers;
     [SerializeField] private float _groundProbeStartHeight = 3f;
@@ -140,6 +148,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     [Header("Hit")]
     [SerializeField] private float _hitDistance = 2.2f;
+    [SerializeField] private float _maxVerticalHitDistance = 3.0f;
     [SerializeField] private float _hitCooldown = 0.2f;
 
     [Header("Billboard")]
@@ -260,6 +269,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _offlineCombatHealth = _maxCombatHealth;
         _defaultLoopClip = _loopClip;
         _defaultMoveSpeed = _moveSpeed;
+        _visualRuntimeMaterial = null;
         _characterController = GetComponent<CharacterController>();
         _navMeshAgent = GetComponent<NavMeshAgent>();
         _pathBuffer = new NavMeshPath();
@@ -296,6 +306,15 @@ public class NextbotFollowPlayer : MonoBehaviour
             transform.position = groundedStartPosition;
             _lockedHeight = groundedStartPosition.y;
             _groundHeightVelocity = 0f;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (_visualRuntimeMaterial != null)
+        {
+            Destroy(_visualRuntimeMaterial);
+            _visualRuntimeMaterial = null;
         }
     }
 
@@ -882,12 +901,19 @@ public class NextbotFollowPlayer : MonoBehaviour
             nextbotState.y,
             nextbotState.z + nextbotState.velocityZ * predictionTime);
 
-        // ALWAYS trust the local NavMesh or physics ground height over the server's Y.
-        // The server often doesn't know about ramps, so it incorrectly pathfinds at Y=0.
-        // If we limit this by height, the nextbot will suddenly drop through the ramp halfway up.
+        // Trust the local NavMesh or physics ground height over the server's Y,
+        // but only if it's within a reasonable range of the server's reported height.
+        // This prevents snapping to high roofs or skybox colliders if the server thinks we are on the floor.
         if (TryResolveGroundedPosition(predictedPosition, out Vector3 groundedPosition))
         {
-            predictedPosition.y = groundedPosition.y;
+            if (Mathf.Abs(groundedPosition.y - nextbotState.y) < 3.5f)
+            {
+                predictedPosition.y = groundedPosition.y;
+            }
+            else
+            {
+                predictedPosition.y = nextbotState.y;
+            }
         }
 
         return predictedPosition;
@@ -2119,10 +2145,17 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
 
-            // Sync the transform to the agent's next position.
+            // Sync the transform using the character controller to apply gravity and physics.
             Vector3 agentPos = _navMeshAgent.nextPosition;
-            transform.position = agentPos;
-            _lockedHeight = agentPos.y;
+            Vector3 horizontalMove = (agentPos - transform.position);
+            horizontalMove.y = 0;
+            
+            // Apply movement through the gravity-aware fallback system
+            ApplyFallbackMovement(horizontalMove / Mathf.Max(0.0001f, Time.deltaTime));
+            
+            // Tell the agent where we actually moved to (respecting physics/gravity)
+            _navMeshAgent.nextPosition = transform.position;
+            _lockedHeight = transform.position.y;
 
             UpdateBodyRotation(_horizontalVelocity);
             ApplySolidObstaclePush();
@@ -3541,9 +3574,12 @@ public class NextbotFollowPlayer : MonoBehaviour
             groundMask,
             QueryTriggerInteraction.Ignore);
 
+        int walkableLayer = LayerMask.NameToLayer("Walkable");
         RaycastHit bestHit = default;
         bool foundHit = false;
-        float bestDistance = float.PositiveInfinity;
+        bool foundWalkableHit = false;
+        float bestDistanceToY = float.PositiveInfinity;
+
         for (int i = 0; i < hitCount; i++)
         {
             RaycastHit hit = _groundHitBuffer[i];
@@ -3552,11 +3588,35 @@ public class NextbotFollowPlayer : MonoBehaviour
                 continue;
             }
 
-            if (hit.distance < bestDistance)
+            bool isWalkable = walkableLayer >= 0 && hit.collider.gameObject.layer == walkableLayer;
+            float distanceToY = Mathf.Abs(hit.point.y - worldPosition.y);
+
+            if (isWalkable && !foundWalkableHit)
             {
+                // First walkable hit found, it's automatically better than any non-walkable hit
                 bestHit = hit;
-                bestDistance = hit.distance;
+                bestDistanceToY = distanceToY;
+                foundWalkableHit = true;
                 foundHit = true;
+            }
+            else if (isWalkable && foundWalkableHit)
+            {
+                // Multiple walkable hits, pick the one closest to our current Y
+                if (distanceToY < bestDistanceToY)
+                {
+                    bestHit = hit;
+                    bestDistanceToY = distanceToY;
+                }
+            }
+            else if (!foundWalkableHit)
+            {
+                // No walkable hit yet, pick the best non-walkable hit closest to our current Y
+                if (distanceToY < bestDistanceToY)
+                {
+                    bestHit = hit;
+                    bestDistanceToY = distanceToY;
+                    foundHit = true;
+                }
             }
         }
 
