@@ -53,6 +53,12 @@ export default config({
             next();
         });
         app.use(express.json());
+        app.use((req, _res, next) => {
+            if (req.path.startsWith("/matchmake/")) {
+                console.log(`[matchmake] ${req.method} ${req.path}`);
+            }
+            next();
+        });
 
         /**
          * Bind your custom express routes here:
