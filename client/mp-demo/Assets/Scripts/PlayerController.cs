@@ -4922,8 +4922,8 @@ public class PlayerController : MonoBehaviour
 
         float side = useWallRunPose ? _wallRunSide : (_lastWallRunCameraSide == 0 ? 1f : _lastWallRunCameraSide);
         
-        // For a left wall (side = -1), we want the camera to lean right (negative Z rotation).
-        // For a right wall (side = 1), we want the camera to lean left (positive Z rotation).
+        // For a left wall (side = -1), lean away from the wall.
+        // For a right wall (side = 1), lean away from the wall.
         float targetRoll = side * _firstPersonWallRunCameraRoll;
         
         // Offset the camera position away from the wall

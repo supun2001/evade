@@ -749,6 +749,20 @@ public class PlayerAnimation : MonoBehaviour
             return;
         }
 
+        if (_reloadAnimationTimer > 0f && _presentationMode == PresentationMode.Shooting)
+        {
+            if (targetAnimator.HasState(0, _ak47ReloadArmsStateHash))
+            {
+                CrossFadeIfNeeded(targetAnimator, AK47_RELOAD_ARMS_STATE, 0.08f);
+                return;
+            }
+        }
+
+        if (ApplyWallRunState(targetAnimator, isGrounded, verticalSpeed))
+        {
+            return;
+        }
+
         if (_shootAnimationTimer > 0f && _presentationMode == PresentationMode.Shooting)
         {
             bool isMoving = Mathf.Abs(inputX) > 0.05f || Mathf.Abs(inputY) > 0.05f;
@@ -770,14 +784,6 @@ public class PlayerAnimation : MonoBehaviour
                 {
                     CrossFadeIfNeeded(targetAnimator, AK47_SHOOT_ARMS_STATE, 0.1f);
                 }
-            }
-        }
-
-        if (_reloadAnimationTimer > 0f && _presentationMode == PresentationMode.Shooting)
-        {
-            if (targetAnimator.HasState(0, _ak47ReloadArmsStateHash))
-            {
-                CrossFadeIfNeeded(targetAnimator, AK47_RELOAD_ARMS_STATE, 0.08f);
             }
         }
         
@@ -839,8 +845,6 @@ public class PlayerAnimation : MonoBehaviour
             CrossFadeIfNeeded(targetAnimator, GetActiveLocomotionState(targetAnimator), 0.08f);
             return;
         }
-
-        ApplyWallRunState(targetAnimator, isGrounded, verticalSpeed);
     }
 
     public bool UsesSingleForwardRunController()
@@ -1116,11 +1120,11 @@ public class PlayerAnimation : MonoBehaviour
         return Mathf.Clamp01(_crouchReleaseTimer / Mathf.Max(_crouchReleaseBlendDuration, 0.001f));
     }
 
-    private void ApplyWallRunState(Animator targetAnimator, bool isGrounded, float verticalSpeed)
+    private bool ApplyWallRunState(Animator targetAnimator, bool isGrounded, float verticalSpeed)
     {
         if (targetAnimator == null)
         {
-            return;
+            return false;
         }
 
         bool wallRunning = _useNetworkAnimationState
@@ -1131,32 +1135,22 @@ public class PlayerAnimation : MonoBehaviour
             int wallRunSide = _useNetworkAnimationState
                 ? _networkWallRunSide
                 : (_playerController != null ? _playerController.GetWallRunSide() : 0);
-            
-            string targetState = wallRunSide < 0 ? WALL_SLIDE_RIGHT_STATE : WALL_SLIDE_LEFT_STATE;
-            
-            // Allow arm-specific wall run states to take precedence when in shooting mode
-            if (_presentationMode == PresentationMode.Shooting)
+
+            if (!TryGetWallRunStateForAnimator(targetAnimator, wallRunSide, out string targetState))
             {
-                if (wallRunSide < 0 && targetAnimator.HasState(0, _ak47WallRunRightStateHash))
-                {
-                    targetState = AK47_WALL_RUN_RIGHT_STATE;
-                }
-                else if (wallRunSide >= 0 && targetAnimator.HasState(0, _ak47WallRunLeftStateHash))
-                {
-                    targetState = AK47_WALL_RUN_LEFT_STATE;
-                }
+                return false;
             }
 
             _lastWallRunState = targetState;
             _wallRunAnimationHoldTimer = _wallRunAnimationExitBuffer;
             CrossFadeIfNeeded(targetAnimator, targetState, 0.08f);
-            return;
+            return true;
         }
 
         AnimatorStateInfo currentState = targetAnimator.GetCurrentAnimatorStateInfo(0);
         if (!currentState.IsName(WALL_SLIDE_LEFT_STATE) && !currentState.IsName(WALL_SLIDE_RIGHT_STATE))
         {
-            return;
+            return false;
         }
 
         bool shouldHoldWallRunAnimation;
@@ -1181,7 +1175,7 @@ public class PlayerAnimation : MonoBehaviour
         {
             _wallRunAnimationHoldTimer = Mathf.Max(0f, _wallRunAnimationHoldTimer - Time.deltaTime);
             CrossFadeIfNeeded(targetAnimator, _lastWallRunState, 0.05f);
-            return;
+            return true;
         }
 
         _wallRunAnimationHoldTimer = 0f;
@@ -1191,6 +1185,32 @@ public class PlayerAnimation : MonoBehaviour
             : (verticalSpeed < -0.1f ? FALLING_STATE : IN_AIR_STATE);
 
         CrossFadeIfNeeded(targetAnimator, recoveryState, 0.08f);
+        return true;
+    }
+
+    private static bool TryGetWallRunStateForAnimator(Animator targetAnimator, int wallRunSide, out string targetState)
+    {
+        bool leftWall = wallRunSide < 0;
+
+        int bodyStateHash = leftWall ? _wallSlideRightStateHash : _wallSlideLeftStateHash;
+        int armsStateHash = leftWall ? _ak47WallRunRightStateHash : _ak47WallRunLeftStateHash;
+        string bodyState = leftWall ? WALL_SLIDE_RIGHT_STATE : WALL_SLIDE_LEFT_STATE;
+        string armsState = leftWall ? AK47_WALL_RUN_RIGHT_STATE : AK47_WALL_RUN_LEFT_STATE;
+
+        if (targetAnimator != null && targetAnimator.HasState(0, armsStateHash))
+        {
+            targetState = armsState;
+            return true;
+        }
+
+        if (targetAnimator != null && targetAnimator.HasState(0, bodyStateHash))
+        {
+            targetState = bodyState;
+            return true;
+        }
+
+        targetState = null;
+        return false;
     }
 
     private bool ApplyCarryRecoveryState(Animator targetAnimator, bool isGrounded, float verticalSpeed, bool isInjuredActive, bool isCrouchingActive)
