@@ -441,6 +441,78 @@ describe("testing your Colyseus app", () => {
     assert.strictEqual(player!.hitTriggerId > 0, true);
   });
 
+  it("drops eliminated players as nextbot targets and sends bots back to patrol", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      nextbotPatrolPoints: [
+        { x: 10, y: 0, z: 0 },
+      ],
+    });
+    const client = await colyseus.connectTo(room);
+
+    await room.waitForNextPatch();
+
+    const roomAny = room as any;
+    roomAny.currentPhase = "round";
+    roomAny.phaseEndsAt = Date.now() + 30_000;
+    room.state.isGameStarted = true;
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    player!.x = 0;
+    player!.y = 0;
+    player!.z = 0;
+    player!.isReady = true;
+    player!.isSpectator = false;
+    player!.isInjured = false;
+    player!.isHitReacting = false;
+    player!.isEliminated = false;
+    roomAny.playerSafeUntil.set(client.sessionId, 0);
+
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    nextbot!.isActive = true;
+    nextbot!.x = 0.1;
+    nextbot!.y = 0;
+    nextbot!.z = 0;
+    nextbot!.targetSessionId = client.sessionId;
+    controller.currentTargetSessionId = client.sessionId;
+    controller.nextInjuryAt = 0;
+    controller.patrolTargetX = 0;
+    controller.patrolTargetY = 0;
+    controller.patrolTargetZ = 0;
+
+    client.send("nextbotHit", {
+      id: "nextbot_0",
+      x: nextbot!.x,
+      y: nextbot!.y,
+      z: nextbot!.z,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(player!.isEliminated, true);
+    assert.strictEqual(controller.currentTargetSessionId, "");
+    assert.strictEqual(nextbot!.targetSessionId, "");
+    assert.strictEqual(controller.patrolTargetX, 10);
+
+    const hitTriggerId = player!.hitTriggerId;
+    controller.nextInjuryAt = 0;
+    client.send("nextbotHit", {
+      id: "nextbot_0",
+      x: nextbot!.x,
+      y: nextbot!.y,
+      z: nextbot!.z,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(player!.hitTriggerId, hitTriggerId);
+  });
+
   it("removes nextbots when combat damage reaches zero", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {});
     const client = await colyseus.connectTo(room);

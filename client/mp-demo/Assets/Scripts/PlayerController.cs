@@ -1041,6 +1041,32 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void ClearLocalControlBlockers(bool clearInjuredState)
+    {
+        _isHitReacting = false;
+        _nextbotHitReactionTimer = 0f;
+        _nextbotHitReactionPitch = 0f;
+        _nextbotHitReactionRoll = 0f;
+        _nextbotHitAngularVelocityPitch = 0f;
+        _nextbotHitAngularVelocityRoll = 0f;
+        _nextbotHitReactionSeed = 0f;
+        _lastAppliedRemoteHitReactionSeed = float.NaN;
+        _nextbotHitImpactVelocity = Vector3.zero;
+        _nextbotHitImpactTimer = 0f;
+        _recentNextbotHitSourceExpiresAt = 0f;
+        ClearHitReactionTiltPreservingVisualYaw();
+
+        if (clearInjuredState)
+        {
+            SetDebugInjuredState(false);
+        }
+
+        ResetInjuredVisualRootRotation();
+        ResetNextbotHitReactionLimbPose();
+        UpdateDownedCollisionShape();
+        UpdateDownedVisualRootPosition();
+    }
+
     private void UpdateForcedCameraViewState(bool forceImmediate = false)
     {
         if (_isSpectating)
@@ -2803,6 +2829,7 @@ public class PlayerController : MonoBehaviour
         _isReloading = true;
         _reloadCompleteTime = Time.time + Mathf.Max(0.01f, _ak47ReloadDuration);
         _nextAllowedShotTime = _reloadCompleteTime;
+        _playerAnimation?.PlayReloadAnimation(_ak47ReloadDuration);
         PlayReloadSound();
         LogShootingDebug("Reload.Start", $"reason={reason}, ammo={_currentMagazineAmmo}");
         return true;
@@ -4056,19 +4083,10 @@ public class PlayerController : MonoBehaviour
         _eliminationTossTimer = 0f;
         _eliminationTossVelocity = Vector3.zero;
         _eliminationTossRoll = 0f;
-        _isHitReacting = false;
-        _nextbotHitReactionTimer = 0f;
-        _nextbotHitImpactVelocity = Vector3.zero;
         ClearRespawnCountdown();
         if (_combatModeActive)
         {
             _currentHealth = _maxHealth;
-        }
-
-        if (_characterController != null)
-        {
-            _characterController.enabled = true;
-            RestoreGhostingState();
         }
 
         // Restore renderers
@@ -4084,10 +4102,11 @@ public class PlayerController : MonoBehaviour
                 _playerLocomotionInput.Controls.PlayerLocomotionMap.Disable();
                 _playerLocomotionInput.Controls.PlayerLocomotionMap.Enable();
             }
-            if (_isSpectating)
-            {
-                ExitSpectateMode(false);
-            }
+        }
+
+        if (!_isSimulationControlled && _isSpectating)
+        {
+            ExitSpectateMode(false);
         }
 
         if (!_isSimulationControlled && _characterController != null)
@@ -4095,11 +4114,13 @@ public class PlayerController : MonoBehaviour
             _characterController.enabled = true;
             RestoreGhostingState();
         }
+        else if (_characterController != null)
+        {
+            _characterController.enabled = true;
+            RestoreGhostingState();
+        }
 
-        SetDebugInjuredState(false);
-        ResetInjuredVisualRootRotation();
-        UpdateDownedCollisionShape();
-        UpdateDownedVisualRootPosition();
+        ClearLocalControlBlockers(clearInjuredState: true);
         UpdateForcedCameraViewState(forceImmediate: true);
         UpdateSimulationCombatHitboxState();
     }
@@ -4135,7 +4156,7 @@ public class PlayerController : MonoBehaviour
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
         _isEliminatedState = true;
         _currentHealth = 0f;
-        _isHitReacting = false;
+        ClearLocalControlBlockers(clearInjuredState: true);
         if (!_isSimulationControlled && _playerLocomotionInput != null)
         {
             _playerLocomotionInput.InputEnabled = false;
@@ -4194,8 +4215,7 @@ public class PlayerController : MonoBehaviour
         _wallRunNormal = Vector3.zero;
         _wallRunSprintGraceTimer = 0f;
         _wallRunContactHoldTimer = 0f;
-        _nextbotHitImpactVelocity = Vector3.zero;
-        _nextbotHitImpactTimer = 0f;
+        ClearLocalControlBlockers(clearInjuredState: true);
 
         Transform targetTransform = _transform != null ? _transform : transform;
         Quaternion targetRotation = Quaternion.Euler(0f, rotationY, 0f);
@@ -4213,17 +4233,26 @@ public class PlayerController : MonoBehaviour
         }
 
         _playerRotationY = rotationY;
+        _cameraRotation = new Vector2(rotationY, 0f);
+        _preferredViewMode = _startingViewMode;
+        SetSpectateCameraActive(false);
+        SetCameraView(_startingViewMode, true);
         UpdateForcedCameraViewState(forceImmediate: true);
 
         if (!_isSimulationControlled && _playerLocomotionInput != null)
         {
             _playerLocomotionInput.enabled = true;
             _playerLocomotionInput.InputEnabled = true;
+            _playerLocomotionInput.ResetSimulationState();
             if (_playerLocomotionInput.Controls != null)
             {
+                _playerLocomotionInput.Controls.PlayerLocomotionMap.Disable();
                 _playerLocomotionInput.Controls.PlayerLocomotionMap.Enable();
             }
         }
+
+        UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+        UnityEngine.Cursor.visible = false;
     }
 
     public bool IsCarrying()
@@ -6206,13 +6235,14 @@ public class PlayerController : MonoBehaviour
             1f - NextbotHitImpactForceRandomness,
             1f + NextbotHitImpactForceRandomness);
 
-        PlayPlayerGotHitSound();
-        _isHitReacting = true;
-        
         if (!_isSimulationControlled)
         {
             ApplyNetworkEliminated();
+            return true;
         }
+
+        PlayPlayerGotHitSound();
+        _isHitReacting = true;
 
         _nextbotHitReactionTimer = _nextbotHitReactionDuration;
         _nextbotHitReactionSeed = UnityEngine.Random.Range(0f, 10000f);

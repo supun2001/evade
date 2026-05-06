@@ -72,6 +72,7 @@ public class PlayerAnimation : MonoBehaviour
     private static readonly int _ak47WallRunLeftStateHash = Animator.StringToHash("Base Layer.ak47_walRunLeft_arms");
     private static readonly int _ak47WallRunRightStateHash = Animator.StringToHash("Base Layer.ak47_walRunRight_arms");
     private static readonly int _ak47ShootArmsStateHash = Animator.StringToHash("Base Layer.ak47_shooting_arms");
+    private static readonly int _ak47ReloadArmsStateHash = Animator.StringToHash("Base Layer.ak47_reload_arms");
     private const string WALL_SLIDE_LEFT_STATE = "Base Layer.WallSlideLeft";
     private const string WALL_SLIDE_RIGHT_STATE = "Base Layer.WallSlideRight";
     private const string FALLING_STATE = "Base Layer.Falling";
@@ -85,6 +86,7 @@ public class PlayerAnimation : MonoBehaviour
     private const string CARRYING_RUN_STATE = "Base Layer.CarryingRun";
     private const string AK47_RUNNING_SHOOT_STATE = "Base Layer.ak47_runningShoot";
     private const string AK47_SHOOT_ARMS_STATE = "Base Layer.ak47_shooting_arms";
+    private const string AK47_RELOAD_ARMS_STATE = "Base Layer.ak47_reload_arms";
     private const string AK47_WALL_RUN_LEFT_STATE = "Base Layer.ak47_walRunLeft_arms";
     private const string AK47_WALL_RUN_RIGHT_STATE = "Base Layer.ak47_walRunRight_arms";
 
@@ -117,6 +119,7 @@ public class PlayerAnimation : MonoBehaviour
     private float _lastAppliedVerticalSpeed;
     private PresentationMode _presentationMode = PresentationMode.Shooting;
     private float _shootAnimationTimer;
+    private float _reloadAnimationTimer;
     private readonly System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController> _shootingAnimatorOverrides
         = new System.Collections.Generic.Dictionary<RuntimeAnimatorController, AnimatorOverrideController>();
     private bool _hasInitializedChildAnimators;
@@ -240,6 +243,17 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         _shootAnimationTimer = Mathf.Max(_shootAnimationDuration, 0.01f);
+    }
+
+    public void PlayReloadAnimation(float durationSeconds)
+    {
+        if (_presentationMode != PresentationMode.Shooting)
+        {
+            return;
+        }
+
+        _shootAnimationTimer = 0f;
+        _reloadAnimationTimer = Mathf.Max(durationSeconds, 0.01f);
     }
 
     public string GetAnimatorDebugInfo()
@@ -758,6 +772,14 @@ public class PlayerAnimation : MonoBehaviour
                 }
             }
         }
+
+        if (_reloadAnimationTimer > 0f && _presentationMode == PresentationMode.Shooting)
+        {
+            if (targetAnimator.HasState(0, _ak47ReloadArmsStateHash))
+            {
+                CrossFadeIfNeeded(targetAnimator, AK47_RELOAD_ARMS_STATE, 0.08f);
+            }
+        }
         
         if (isBeingCarriedActive)
         {
@@ -842,6 +864,11 @@ public class PlayerAnimation : MonoBehaviour
         if (_shootAnimationTimer > 0f)
         {
             _shootAnimationTimer = Mathf.Max(0f, _shootAnimationTimer - Time.deltaTime);
+        }
+
+        if (_reloadAnimationTimer > 0f)
+        {
+            _reloadAnimationTimer = Mathf.Max(0f, _reloadAnimationTimer - Time.deltaTime);
         }
 
         if (!IsInjuredActive)

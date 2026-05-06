@@ -750,7 +750,7 @@ export class MyRoom extends Room<MyRoomState> {
       }
 
       const target = this.state.players.get(client.sessionId);
-      if (!target || target.isSpectator || !target.isReady) {
+      if (!target || target.isSpectator || target.isEliminated || !target.isReady) {
         return;
       }
 
@@ -1700,6 +1700,15 @@ export class MyRoom extends Room<MyRoomState> {
 
     // If client reporting is enabled, we trust the client's hit detection for maximum responsiveness
     if (this.getMapNextbotConfig().useClientReportedHits) {
+      if (distance > maxDistance
+        || now < controller.nextInjuryAt
+        || safeUntil > now
+        || target.isEliminated
+        || Math.abs(target.y - sourceY) > NEXTBOT_MAX_VERTICAL_DELTA) {
+        return;
+      }
+
+      controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
       this.clearCarryStateForPlayer(target.sessionId);
       this.applyPlayerEliminationState(target, false);
       target.isHitReacting = false;
@@ -2034,6 +2043,9 @@ export class MyRoom extends Room<MyRoomState> {
       const nextbot = this.getNextbotState(index);
       if (nextbot != null) {
         nextbot.targetSessionId = "";
+        if (nextbot.isActive) {
+          this.setNextPatrolTargetFromCurrentPosition(controller, nextbot);
+        }
       }
     }
   }
@@ -2052,6 +2064,9 @@ export class MyRoom extends Room<MyRoomState> {
       const nextbot = this.getNextbotState(index);
       if (nextbot != null) {
         nextbot.targetSessionId = "";
+        if (nextbot.isActive) {
+          this.setNextPatrolTargetFromCurrentPosition(controller, nextbot);
+        }
       }
     }
   }

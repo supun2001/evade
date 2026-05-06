@@ -58,8 +58,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4125142228217673944}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122102, y: -0, z: -0, w: 0.99941766}
-  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
+  m_LocalRotation: {x: -0.000000026463134, y: 0.8741679, z: -0.48562384, w: -0.000000034790634}
+  m_LocalPosition: {x: 0, y: -0.05941789, z: 0.2057233}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -224,6 +224,10 @@ MonoBehaviour:
   _injuredMoveSpeed: 1.75
   _crouchMoveSpeed: 2
   _crouchRunHoldDuration: 3
+  _movementCollisionLayers:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  _movementCollisionPadding: 0.03
   _crouchRunAnimationExitSpeedRatio: 0.2
   _crouchRunEnterMinSpeed: 4
   autoSprintDelay: 3
@@ -441,11 +445,15 @@ MonoBehaviour:
   _ak47Damage: 25
   _ak47FireInterval: 0.12
   _ak47Range: 220
+  _ak47MagazineSize: 30
+  _ak47ReloadDuration: 1.45
   _ak47HitLayers:
     serializedVersion: 2
     m_Bits: 755
   _gunshotResourceFolder: SFX/Gunshots
+  _reloadSfxResourcePath: SFX/Reload
   _gunshotVolume: 0.9
+  _reloadVolume: 0.95
   _shotEffectSpawnPoint: {fileID: 6649532019823269084}
   _bulletVfxResourcePath: VFX/Bullet
   _ak47AttachPointName: AK47 Attach point
@@ -461,6 +469,12 @@ MonoBehaviour:
   _debugShootingLogCooldown: 0.2
   _debugRemoteArmMountLogs: 1
   _debugRemoteArmMountLogCooldown: 0.25
+  _eliminationTossDuration: 0.55
+  _eliminationHideDelay: 0.45
+  _eliminationTossHorizontalSpeed: 2.4
+  _eliminationTossUpwardSpeed: 2.8
+  _eliminationTossGravity: 10
+  _eliminationTossSpinSpeed: 220
 --- !u!114 &6108517970698058712
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -981,8 +995,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7935467204511516964}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.034122106, y: 0.0000000074063085, z: 8.110277e-10, w: 0.9994177}
-  m_LocalPosition: {x: 0, y: 0.023889244, z: -6.05423}
+  m_LocalRotation: {x: -0.000000026463134, y: 0.8741679, z: -0.48562384, w: -0.000000034790634}
+  m_LocalPosition: {x: 0, y: -0.05941789, z: 0.2057233}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -1284,7 +1298,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 2579012927138111666, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
       propertyPath: m_LocalPosition.x
