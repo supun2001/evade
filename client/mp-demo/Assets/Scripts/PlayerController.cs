@@ -4987,10 +4987,9 @@ public class PlayerController : MonoBehaviour
         float retreatBlend = 1f - Mathf.Exp(-_firstPersonWallRetreatSmooth * Time.deltaTime);
         _firstPersonWallRetreat = Mathf.Lerp(_firstPersonWallRetreat, targetRetreat, retreatBlend);
 
-        // Instead of moving the camera back (which can be overridden or cause FOV issues),
-        // we'll let SyncFirstPersonOnlyRootsToGameplayCamera handle the visual retreat of the arms.
-        // We only hide the arms if the retreat is very high.
-        SetFirstPersonWallClipHidden(_firstPersonWallRetreat > _firstPersonWallHideDistance);
+        // Keep the arms visible and let SyncFirstPersonOnlyRootsToGameplayCamera
+        // push/tilt them back instead of popping them off near walls.
+        SetFirstPersonWallClipHidden(false);
     }
 
     private void ResolveThirdPersonCameraCollision()
@@ -5106,8 +5105,7 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateArmWallClipVisibility()
     {
-        bool hideArms = IsWallNearArm(_leftArmTransform) || IsWallNearArm(_rightArmTransform);
-        SetFirstPersonWallClipHidden(hideArms);
+        SetFirstPersonWallClipHidden(false);
     }
 
     private bool IsWallNearArm(Transform armTransform)
