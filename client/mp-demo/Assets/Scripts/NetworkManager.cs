@@ -64,7 +64,11 @@ public struct FloorHeightSampleConfig
 
 public class NetworkManager : MonoBehaviour
 {
-    private const string HostedServerUrl = "wss://wargrid.games";
+    private const string DefaultLocalServerUrl = "ws://localhost:2567";
+    private const string DefaultProductionServerUrl = "wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev";
+    private const string ServerUrlOverridePlayerPrefsKey = "NetworkManager.ServerUrlOverride";
+    private const string ServerUrlOverrideQueryParameterName = "server";
+    private const string ServerUrlOverrideCommandLineArgumentName = "-serverUrl";
     private const int PlayerUpdateFieldCount = 31;
     private const string WalkableLayerName = "Walkable";
     private const string RampLayerName = "Ramp";
@@ -96,10 +100,10 @@ public class NetworkManager : MonoBehaviour
     
     [Header("Network Configuration")]
     [Tooltip("Local development server URL")]
-    [SerializeField] private string localServerUrl = "ws://localhost:2567";
+    [SerializeField] private string localServerUrl = DefaultLocalServerUrl;
 
     [Tooltip("Production server URL (Render/Railway). Must use wss:// for WebGL.")]
-    [SerializeField] private string productionServerUrl = HostedServerUrl;
+    [SerializeField] private string productionServerUrl = DefaultProductionServerUrl;
     [Tooltip("Use the production URL even while running in the Unity Editor.")]
     [SerializeField] private bool useProductionServerInEditor = false;
     [Header("Gameplay Configuration")]
@@ -139,6 +143,11 @@ public class NetworkManager : MonoBehaviour
     {
         get 
         {
+            if (!string.IsNullOrWhiteSpace(_runtimeServerUrlOverride))
+            {
+                return _runtimeServerUrlOverride;
+            }
+
             #if UNITY_EDITOR
                 return useProductionServerInEditor ? productionServerUrl : localServerUrl;
             #else
@@ -164,6 +173,7 @@ public class NetworkManager : MonoBehaviour
     private bool _isLoadingServerMap;
     private bool _awaitingInitialMapSelection;
     private Coroutine _serverMapLoadCoroutine;
+    private string _runtimeServerUrlOverride = string.Empty;
     public GameObject PlayerPrefab => playerPrefab;
 
     private bool ShouldUseCompactPlayerUpdatePayload
@@ -194,6 +204,7 @@ public class NetworkManager : MonoBehaviour
         DontDestroyOnLoad(gameObject); 
 
         MigrateLegacyServerUrls();
+        InitializeRuntimeServerUrlOverride();
         
         // Ensure the game keeps running and syncing when focus is lost (e.g., when testing multiple instances)
         Application.runInBackground = true;
@@ -377,6 +388,7 @@ public class NetworkManager : MonoBehaviour
         roundDurationSeconds = sceneManager.roundDurationSeconds;
         roomName = sceneManager.roomName;
         playerPrefab = sceneManager.playerPrefab;
+        MigrateLegacyServerUrls();
 
         if (string.IsNullOrWhiteSpace(selectedMapId))
         {
@@ -420,6 +432,7 @@ public class NetworkManager : MonoBehaviour
 
         GameObject obj = Instantiate(playerPrefab, pos, Quaternion.identity);
         obj.name = isLocal ? "LocalPlayer" : $"RemotePlayer_{id}";
+        Debug.Log($"NetworkManager: spawned {(isLocal ? "local" : "remote")} player '{obj.name}' at {pos} in scene {SceneManager.GetActiveScene().name}");
 
         NetworkPlayer np = obj.GetComponent<NetworkPlayer>();
         if (np == null) np = obj.AddComponent<NetworkPlayer>();
@@ -438,9 +451,16 @@ public class NetworkManager : MonoBehaviour
             {
                 camera.gameObject.SetActive(false);
             }
-            
+             
              var audioListener = obj.GetComponentInChildren<AudioListener>();
             if (audioListener) audioListener.enabled = false;
+        }
+        else
+        {
+            PlayerController controller = obj.GetComponent<PlayerController>();
+            controller?.EnsureGameplayCameraActive();
+            LobbyUI.ForceClearJoinTransitionOverlay();
+            Debug.Log("NetworkManager: local player spawned, cleared join overlay.");
         }
 
         players.Add(id, obj);
@@ -855,8 +875,9 @@ public class NetworkManager : MonoBehaviour
             return null; // Success
 
         }catch(System.Exception e){
-            Debug.LogError($"Matchmaking Failed: {e.Message}");
-            return e.Message;
+            string error = FormatNetworkError("Matchmaking Failed", e);
+            Debug.LogError(error);
+            return error;
         }
     }
 
@@ -872,8 +893,9 @@ public class NetworkManager : MonoBehaviour
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"JoinOrCreate Failed: {e.Message}");
-            return e.Message;
+            string error = FormatNetworkError("JoinOrCreate Failed", e);
+            Debug.LogError(error);
+            return error;
         }
     }
 
@@ -890,9 +912,26 @@ public class NetworkManager : MonoBehaviour
         }
         catch (System.Exception e) 
         { 
-            Debug.LogError($"Join Failed: {e.Message}"); 
-            return e.Message;
+            string error = FormatNetworkError("Join Failed", e);
+            Debug.LogError(error); 
+            return error;
         }
+    }
+
+    private string FormatNetworkError(string prefix, Exception exception)
+    {
+        string activeServerUrl = serverUrl;
+        string message = exception != null ? exception.Message : "Unknown error";
+        string detail = exception != null ? exception.ToString() : "No exception details available.";
+        bool isCodespacesTunnel = !string.IsNullOrWhiteSpace(activeServerUrl)
+            && activeServerUrl.Contains("app.github.dev", StringComparison.OrdinalIgnoreCase);
+
+        if (isCodespacesTunnel)
+        {
+            return $"{prefix}: {message} | server={activeServerUrl} | If this is GitHub Codespaces WebGL, make sure port 2567 is Public and the codespace server is still running. | details={detail}";
+        }
+
+        return $"{prefix}: {message} | server={activeServerUrl} | details={detail}";
     }
 
     private void InitializeClient()
@@ -1462,16 +1501,121 @@ public class NetworkManager : MonoBehaviour
         return new ColyseusClient(settings);
     }
 
+    private void InitializeRuntimeServerUrlOverride()
+    {
+        string overrideUrl = TryGetServerUrlOverrideFromAbsoluteUrl();
+        if (string.IsNullOrWhiteSpace(overrideUrl))
+        {
+            overrideUrl = TryGetServerUrlOverrideFromCommandLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(overrideUrl))
+        {
+            _runtimeServerUrlOverride = overrideUrl;
+            PlayerPrefs.SetString(ServerUrlOverridePlayerPrefsKey, _runtimeServerUrlOverride);
+            PlayerPrefs.Save();
+            Debug.Log($"NetworkManager: using runtime server override {_runtimeServerUrlOverride}");
+            return;
+        }
+
+        string savedOverride = PlayerPrefs.GetString(ServerUrlOverridePlayerPrefsKey, string.Empty);
+        if (!string.IsNullOrWhiteSpace(savedOverride))
+        {
+            _runtimeServerUrlOverride = NormalizeConfiguredServerUrl(savedOverride);
+            if (!string.IsNullOrWhiteSpace(_runtimeServerUrlOverride))
+            {
+                Debug.Log($"NetworkManager: using saved server override {_runtimeServerUrlOverride}");
+            }
+        }
+    }
+
+    private string TryGetServerUrlOverrideFromAbsoluteUrl()
+    {
+        string absoluteUrl = Application.absoluteURL;
+        if (string.IsNullOrWhiteSpace(absoluteUrl))
+        {
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(absoluteUrl, UriKind.Absolute, out Uri uri))
+        {
+            return string.Empty;
+        }
+
+        string query = uri.Query;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return string.Empty;
+        }
+
+        string trimmedQuery = query.TrimStart('?');
+        string[] parameters = trimmedQuery.Split('&', StringSplitOptions.RemoveEmptyEntries);
+        for (int index = 0; index < parameters.Length; index++)
+        {
+            string[] keyValue = parameters[index].Split('=', 2);
+            if (keyValue.Length != 2)
+            {
+                continue;
+            }
+
+            if (!string.Equals(Uri.UnescapeDataString(keyValue[0]), ServerUrlOverrideQueryParameterName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return NormalizeConfiguredServerUrl(Uri.UnescapeDataString(keyValue[1]));
+        }
+
+        return string.Empty;
+    }
+
+    private string TryGetServerUrlOverrideFromCommandLine()
+    {
+        string[] arguments = Environment.GetCommandLineArgs();
+        for (int index = 0; index < arguments.Length - 1; index++)
+        {
+            if (!string.Equals(arguments[index], ServerUrlOverrideCommandLineArgumentName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return NormalizeConfiguredServerUrl(arguments[index + 1]);
+        }
+
+        return string.Empty;
+    }
+
+    private string NormalizeConfiguredServerUrl(string rawServerUrl)
+    {
+        string candidate = (rawServerUrl ?? string.Empty).Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return string.Empty;
+        }
+
+        if (candidate.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "wss://" + candidate.Substring("https://".Length);
+        }
+
+        if (candidate.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ws://" + candidate.Substring("http://".Length);
+        }
+
+        return candidate;
+    }
+
     private void MigrateLegacyServerUrls()
     {
-        if (IsLegacyHostedUrl(localServerUrl))
+        if (string.IsNullOrWhiteSpace(localServerUrl))
         {
-            localServerUrl = HostedServerUrl;
+            localServerUrl = DefaultLocalServerUrl;
         }
 
         if (IsLegacyHostedUrl(productionServerUrl) || string.IsNullOrWhiteSpace(productionServerUrl))
         {
-            productionServerUrl = HostedServerUrl;
+            productionServerUrl = DefaultProductionServerUrl;
         }
     }
 
@@ -1491,7 +1635,7 @@ public class NetworkManager : MonoBehaviour
         string candidate = (rawServerUrl ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(candidate))
         {
-            candidate = "ws://localhost:2567";
+            candidate = DefaultLocalServerUrl;
         }
 
         if (!candidate.Contains("://", StringComparison.Ordinal))
@@ -1729,6 +1873,31 @@ public class NetworkManager : MonoBehaviour
         room.Send("syncMapConfig", BuildMapSyncPayload());
     }
 
+    public void FinalizeLocalSelectedMapJoinIfReady(string expectedSceneName)
+    {
+        if (room == null || string.IsNullOrWhiteSpace(expectedSceneName))
+        {
+            return;
+        }
+
+        string activeSceneName = SceneManager.GetActiveScene().name;
+        if (!string.Equals(activeSceneName, expectedSceneName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string resolvedMapId = GetMapIdForSceneName(activeSceneName);
+        _awaitingInitialMapSelection = false;
+        _isLoadingServerMap = false;
+        activeServerMapId = resolvedMapId;
+        selectedMapId = resolvedMapId;
+
+        Debug.Log($"NetworkManager: finalized local selected map join for scene '{activeSceneName}' without waiting for mapSelected.");
+        SyncCurrentMapConfiguration();
+        ReconcilePlayerRepresentations(room?.State);
+        LobbyUI.ForceClearJoinTransitionOverlay();
+    }
+
     private IEnumerator ClearMapSelectionTimeoutSafety()
     {
         yield return new WaitForSeconds(5f);
@@ -1764,6 +1933,7 @@ public class NetworkManager : MonoBehaviour
         string sceneName = string.IsNullOrWhiteSpace(message.sceneName)
             ? GetSceneNameForMapId(mapId)
             : message.sceneName.Trim();
+        Debug.Log($"NetworkManager: server selected mapId={mapId}, scene='{sceneName}', activeScene='{SceneManager.GetActiveScene().name}'");
         if (string.IsNullOrWhiteSpace(sceneName))
         {
             ReconcilePlayerRepresentations(room?.State);
@@ -1790,6 +1960,8 @@ public class NetworkManager : MonoBehaviour
     {
         _isLoadingServerMap = true;
         ClearSpawnedPlayerObjects();
+        LobbyUI.ForceClearJoinTransitionOverlay();
+        Debug.Log($"NetworkManager: loading server-selected scene '{sceneName}' for mapId={mapId}");
 
         AsyncOperation loadOperation = null;
         Exception loadException = null;
@@ -1829,6 +2001,8 @@ public class NetworkManager : MonoBehaviour
         SyncCurrentMapConfiguration();
         ReconcilePlayerRepresentations(room?.State);
         RestartLocalRoundResetCoroutine();
+        LobbyUI.ForceClearJoinTransitionOverlay();
+        Debug.Log($"NetworkManager: finished loading scene '{sceneName}'. Active scene is now '{SceneManager.GetActiveScene().name}'.");
         _isLoadingServerMap = false;
         _serverMapLoadCoroutine = null;
     }

@@ -1,7 +1,7 @@
 import { randomBytes, createHash } from "crypto";
 import { MongoClient, Collection } from "mongodb";
 
-const DEFAULT_MONGODB_URI = "mongodb+srv://supunhasankauk23034_db_user:nyx3FW0uOdazgzLh@cluster0.xbyqos9.mongodb.net/";
+const DEFAULT_MONGODB_URI = "mongodb://127.0.0.1:27017";
 const DATABASE_NAME = process.env.MONGODB_DB_NAME || "evade";
 const USERS_COLLECTION_NAME = "users";
 
@@ -34,6 +34,9 @@ let mongoClientPromise: Promise<MongoClient> | null = null;
 function getMongoClient(): Promise<MongoClient> {
   if (!mongoClientPromise) {
     const uri = process.env.MONGODB_URI || DEFAULT_MONGODB_URI;
+    if (!process.env.MONGODB_URI) {
+      console.warn(`[accountStore] MONGODB_URI not set. Falling back to ${DEFAULT_MONGODB_URI}/${DATABASE_NAME}.`);
+    }
     const client = new MongoClient(uri);
     mongoClientPromise = client.connect();
   }

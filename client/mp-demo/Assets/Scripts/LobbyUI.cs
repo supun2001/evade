@@ -119,6 +119,7 @@ public class LobbyUI : MonoBehaviour
     private bool _menuEventsBound;
     private bool _pendingSpectateJoin;
     private bool _isSpectatingFromMenu;
+    private bool _hasLoggedWaitingForLocalPlayer;
     private Coroutine _mapLoadCoroutine;
     private readonly List<UIToolkitButton> _hoverButtons = new();
     private readonly List<UIToolkitButton> _shopSkinButtons = new();
@@ -183,6 +184,7 @@ public class LobbyUI : MonoBehaviour
     private bool _isAuthRequestInFlight;
     private static CanvasGroup s_joinTransitionCanvasGroup;
     private static float s_joinTransitionTargetAlpha;
+    private static float s_joinTransitionVisibleUntilRealtime = -1f;
     #endregion
 
     #region Class Methods
@@ -229,7 +231,24 @@ public class LobbyUI : MonoBehaviour
         }
         else if (!shouldShowMenu && NetworkManager.Instance != null && !NetworkManager.Instance.IsPreparingServerSelectedMap)
         {
-            OnGameStarted();
+            if (CanEnterJoinedRoomNow())
+            {
+                OnGameStarted();
+            }
+            else
+            {
+                if (menuPanel != null)
+                {
+                    menuPanel.SetActive(true);
+                }
+
+                if (lobbyCamera != null)
+                {
+                    lobbyCamera.gameObject.SetActive(true);
+                }
+
+                SetJoinTransitionVisible(false, immediate: true);
+            }
         }
     }
 
@@ -302,7 +321,14 @@ public class LobbyUI : MonoBehaviour
             }
             else if (menuPanel.activeSelf)
             {
-                AutoStartJoinedRoom();
+                if (CanEnterJoinedRoomNow())
+                {
+                    AutoStartJoinedRoom();
+                }
+                else
+                {
+                    SetJoinTransitionVisible(false);
+                }
             }
         }
 
@@ -396,6 +422,12 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
+        if (!CanEnterJoinedRoomNow())
+        {
+            SetJoinTransitionVisible(false);
+            return;
+        }
+
         menuPanel.SetActive(false);
 
         if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(false);
@@ -408,6 +440,51 @@ public class LobbyUI : MonoBehaviour
         }
 
         OnGameStarted();
+    }
+
+    private bool CanEnterJoinedRoomNow()
+    {
+        if (NetworkManager.Instance == null)
+        {
+            return false;
+        }
+
+        if (NetworkManager.Instance.Room == null || string.IsNullOrEmpty(NetworkManager.Instance.LocalSessionId))
+        {
+            return false;
+        }
+
+        if (NetworkManager.Instance.TryGetPlayerObject(NetworkManager.Instance.LocalSessionId, out GameObject localPlayer)
+            && localPlayer != null)
+        {
+            PlayerController playerController = localPlayer.GetComponent<PlayerController>();
+            if (playerController != null)
+            {
+                playerController.EnsureGameplayCameraActive();
+                if (!playerController.HasReadyGameplayCamera())
+                {
+                    if (!_hasLoggedWaitingForLocalPlayer)
+                    {
+                        Debug.Log("LobbyUI: local player exists but gameplay camera is not ready yet.");
+                        _hasLoggedWaitingForLocalPlayer = true;
+                    }
+
+                    return false;
+                }
+            }
+
+            _hasLoggedWaitingForLocalPlayer = false;
+            Debug.Log($"LobbyUI: local player and gameplay camera ready in scene {SceneManager.GetActiveScene().name}.");
+            return true;
+        }
+
+        if (!_hasLoggedWaitingForLocalPlayer)
+        {
+            Debug.Log("LobbyUI: waiting for local player spawn before switching away from the lobby camera.");
+            _hasLoggedWaitingForLocalPlayer = true;
+        }
+
+        return false;
     }
 
     #region Button Clicks
@@ -480,6 +557,10 @@ public class LobbyUI : MonoBehaviour
 
         if (string.IsNullOrEmpty(error))
         {
+            if (NetworkManager.Instance != null)
+            {
+                NetworkManager.Instance.FinalizeLocalSelectedMapJoinIfReady(SceneManager.GetActiveScene().name);
+            }
             SaveAndSyncSkin();
             OnGameStarted();
         }
@@ -1199,6 +1280,7 @@ public class LobbyUI : MonoBehaviour
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = short.MaxValue;
 
+        overlayRoot.AddComponent<JoinTransitionOverlayDriver>();
         overlayRoot.AddComponent<GraphicRaycaster>();
         s_joinTransitionCanvasGroup = overlayRoot.AddComponent<CanvasGroup>();
         s_joinTransitionCanvasGroup.alpha = 0f;
@@ -1224,6 +1306,7 @@ public class LobbyUI : MonoBehaviour
     {
         EnsureJoinTransitionOverlay();
         s_joinTransitionTargetAlpha = visible ? 1f : 0f;
+        s_joinTransitionVisibleUntilRealtime = visible ? Time.realtimeSinceStartup + 2.5f : -1f;
         if (s_joinTransitionCanvasGroup == null)
         {
             return;
@@ -1236,17 +1319,25 @@ public class LobbyUI : MonoBehaviour
         }
     }
 
-    private static async Task WaitForJoinTransitionLeadAsync()
+    public static void ForceClearJoinTransitionOverlay(bool immediate = true)
     {
-        int delayMs = Mathf.Max(1, Mathf.RoundToInt(JoinTransitionLeadTime * 1000f));
-        await Task.Delay(delayMs);
+        SetJoinTransitionVisible(false, immediate);
     }
 
-    private static void UpdateJoinTransitionOverlay()
+    private static void TickJoinTransitionOverlay()
     {
         if (s_joinTransitionCanvasGroup == null)
         {
             return;
+        }
+
+        if (s_joinTransitionVisibleUntilRealtime > 0f
+            && Time.realtimeSinceStartup >= s_joinTransitionVisibleUntilRealtime)
+        {
+            Debug.Log("LobbyUI: join transition overlay timeout reached, clearing overlay.");
+            s_joinTransitionVisibleUntilRealtime = -1f;
+            s_joinTransitionTargetAlpha = 0f;
+            s_joinTransitionCanvasGroup.blocksRaycasts = false;
         }
 
         float nextAlpha = Mathf.MoveTowards(
@@ -1259,6 +1350,17 @@ public class LobbyUI : MonoBehaviour
         {
             s_joinTransitionCanvasGroup.blocksRaycasts = false;
         }
+    }
+
+    private static async Task WaitForJoinTransitionLeadAsync()
+    {
+        int delayMs = Mathf.Max(1, Mathf.RoundToInt(JoinTransitionLeadTime * 1000f));
+        await Task.Delay(delayMs);
+    }
+
+    internal static void UpdateJoinTransitionOverlay()
+    {
+        TickJoinTransitionOverlay();
     }
 
     private void ContinuePendingMapJoinIfNeeded()
@@ -3127,7 +3229,7 @@ public class LobbyUI : MonoBehaviour
             return "http://localhost:2567";
         }
 
-        string url = NetworkManager.Instance.serverUrl.Trim();
+        string url = NetworkManager.Instance.serverUrl.Trim().TrimEnd('/');
         if (url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
         {
             return "https://" + url.Substring("wss://".Length);
@@ -3302,4 +3404,12 @@ public class LobbyUI : MonoBehaviour
         if (notificationText != null) notificationText.text = "";
     }
     #endregion
+}
+
+public class JoinTransitionOverlayDriver : MonoBehaviour
+{
+    private void Update()
+    {
+        LobbyUI.UpdateJoinTransitionOverlay();
+    }
 }

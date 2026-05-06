@@ -35,6 +35,12 @@ export default config({
     },
 
     initializeExpress: (app) => {
+        const healthPayload = {
+            ok: true,
+            service: "evade-colyseus-server",
+            environment: process.env.NODE_ENV || "development",
+        };
+
         // Enable CORS
         app.use((req, res, next) => {
             res.setHeader("Access-Control-Allow-Origin", "*");
@@ -52,6 +58,14 @@ export default config({
          * Bind your custom express routes here:
          * Read more: https://expressjs.com/en/starter/basic-routing.html
          */
+        app.get("/", (_req, res) => {
+            res.json(healthPayload);
+        });
+
+        app.get("/healthz", (_req, res) => {
+            res.json(healthPayload);
+        });
+
         app.get("/hello_world", (req, res) => {
             res.send("It's time to kick ass and chew bubblegum!");
         });

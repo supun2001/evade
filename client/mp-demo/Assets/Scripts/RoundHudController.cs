@@ -1883,6 +1883,7 @@ public class RoundHudController : MonoBehaviour
 
         if (!visible)
         {
+            RestoreGameplayCursorIfNeeded();
             return;
         }
 

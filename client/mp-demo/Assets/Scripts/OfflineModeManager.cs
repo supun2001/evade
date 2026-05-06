@@ -28,7 +28,8 @@ public class OfflineModeManager : MonoBehaviour
     private MapVoteStateMessageData _currentMapVoteState;
     private string _localVotedMapId = string.Empty;
 
-    [SerializeField, Min(1)] private int _offlineTotalPlayerCount = 15;
+    private int _offlineBotCount = 10;
+    [SerializeField, Min(1)] private int _offlineTotalPlayerCount = 11;
     [SerializeField] private float _spawnRingRadius = 1.8f;
     [SerializeField, Min(1f)] private float _patrolReservationRadius = 8f;
     private string _localDisplayName = "Offline Player";
@@ -79,6 +80,9 @@ public class OfflineModeManager : MonoBehaviour
 
     public bool IsOfflineModeActive { get; private set; }
     public bool IsOfflineRoundActive => IsOfflineModeActive && string.Equals(_currentPhase, RoundPhase, System.StringComparison.OrdinalIgnoreCase);
+    public bool IsOfflineIntermissionActive => IsOfflineModeActive && string.Equals(_currentPhase, IntermissionPhase, System.StringComparison.OrdinalIgnoreCase);
+    // True when nextbots should be patrolling (round or intermission - NOT map vote or waiting)
+    public bool IsOfflineNextbotPatrolActive => IsOfflineModeActive && (IsOfflineRoundActive || IsOfflineIntermissionActive);
     public bool CanOfflineNextbotsDamagePlayers => IsOfflineRoundActive && Time.unscaledTime >= _nextbotDamageEnabledAtUnscaledTime;
     public OfflinePresentationMode CurrentPresentationMode { get; private set; } = OfflinePresentationMode.Runner;
 
@@ -101,6 +105,8 @@ public class OfflineModeManager : MonoBehaviour
             return;
         }
 
+        EnsureOfflineLocalPlayerSpawned();
+        EnsureOfflineLocalPlayerControl();
         SyncOfflinePlayerStates();
         if (IsOfflineRoundActive)
         {
@@ -127,6 +133,17 @@ public class OfflineModeManager : MonoBehaviour
         RespawnAllPlayers();
 
         networkManager.SetSimulatedLocalSessionId("offline_local");
+        
+        // Ensure the network manager knows we are in shooting mode for global UI/logic
+        if (presentationMode == OfflinePresentationMode.Shooting)
+        {
+            networkManager.SetMultiplayerShootingPresentationEnabled(true);
+        }
+        else
+        {
+            networkManager.SetMultiplayerShootingPresentationEnabled(false);
+        }
+
         StartOfflineRoundFlow();
         return IsOfflineModeActive;
     }
@@ -135,6 +152,118 @@ public class OfflineModeManager : MonoBehaviour
     {
         playerObject = null;
         return _offlinePlayers.TryGetValue("offline_local", out playerObject) && playerObject != null;
+    }
+
+    private void EnsureOfflineLocalPlayerSpawned()
+    {
+        if (TryGetLocalPlayerObject(out _))
+        {
+            return;
+        }
+
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null || networkManager.PlayerPrefab == null)
+        {
+            return;
+        }
+
+        networkManager.SetSimulatedLocalSessionId("offline_local");
+
+        if (_spawnPositions.Count == 0)
+        {
+            _spawnPositions.AddRange(networkManager.GetConfiguredPlayerSpawnPositions());
+            if (_spawnPositions.Count == 0)
+            {
+                _spawnPositions.Add(Vector3.zero);
+            }
+        }
+
+        List<Vector3> reservedSpawnPositions = new List<Vector3>();
+        foreach (KeyValuePair<string, OfflinePlayerRoundState> pair in _offlinePlayerStates)
+        {
+            GameObject existingObject = pair.Value?.PlayerObject;
+            if (existingObject != null)
+            {
+                reservedSpawnPositions.Add(existingObject.transform.position);
+            }
+        }
+
+        _offlinePlayerStates.Remove("offline_local");
+        _offlinePlayers.Remove("offline_local");
+
+        SpawnOfflinePlayer(
+            sessionId: "offline_local",
+            displayName: _localDisplayName,
+            skinIndex: _localSkinIndex,
+            spawnIndex: 0,
+            isLocalPlayer: true,
+            botIndex: -1,
+            reservedSpawnPositions: reservedSpawnPositions);
+    }
+
+    private void EnsureOfflineLocalPlayerControl()
+    {
+        if (!TryGetLocalPlayerObject(out GameObject localPlayer) || localPlayer == null)
+        {
+            return;
+        }
+
+        if (!localPlayer.activeSelf)
+        {
+            localPlayer.SetActive(true);
+        }
+
+        PlayerLocomotionInput locomotionInput = localPlayer.GetComponent<PlayerLocomotionInput>();
+        PlayerController controller = localPlayer.GetComponent<PlayerController>();
+        PlayerAnimation playerAnimation = localPlayer.GetComponent<PlayerAnimation>();
+        NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
+
+        if (networkPlayer != null)
+        {
+            networkPlayer.enabled = false;
+        }
+
+        if (locomotionInput != null)
+        {
+            locomotionInput.enabled = true;
+            locomotionInput.SetSimulatedInputEnabled(false);
+            locomotionInput.InputEnabled = IsOfflineRoundActive;
+            if (locomotionInput.Controls != null)
+            {
+                locomotionInput.Controls.PlayerLocomotionMap.Enable();
+            }
+        }
+
+        if (controller != null)
+        {
+            controller.SetSimulationControlled(false);
+            controller.SetCombatModeActive(CurrentPresentationMode == OfflinePresentationMode.Shooting);
+            controller.SetLocalCharacterAudio(true);
+            controller.EnsureSingleLocalAudioListener();
+        }
+
+        if (playerAnimation != null)
+        {
+            playerAnimation.SetShootingModeActive(CurrentPresentationMode == OfflinePresentationMode.Shooting);
+        }
+
+        Camera activeMainCamera = Camera.main;
+        bool cameraOwnedByLocalPlayer = activeMainCamera != null
+            && activeMainCamera.transform != null
+            && activeMainCamera.transform.IsChildOf(localPlayer.transform);
+
+        bool shouldRestoreLocalControl = IsOfflineRoundActive
+            && controller != null
+            && (controller.IsSpectating()
+                || locomotionInput == null
+                || !locomotionInput.InputEnabled
+                || !cameraOwnedByLocalPlayer);
+
+        if (shouldRestoreLocalControl)
+        {
+            Vector3 restorePosition = localPlayer.transform.position;
+            controller.ApplyNetworkRoundReset(restorePosition, localPlayer.transform.eulerAngles.y);
+        }
     }
 
     private void RespawnAllPlayers()
@@ -181,13 +310,15 @@ public class OfflineModeManager : MonoBehaviour
                 reservedSpawnPositions: reservedSpawnPositions);
         }
 
+        EnsureOfflineLocalPlayerSpawned();
+
         if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
         {
             ResetOfflineNextbots(active: false);
             return;
         }
 
-        EnsureOfflineNextbots();
+        EnsureOfflineNextbots(reservedSpawnPositions);
     }
 
     private void ClearExistingOfflinePlayers()
@@ -1072,15 +1203,12 @@ public class OfflineModeManager : MonoBehaviour
             RoundResultsMessageData results = BuildRoundResults();
             NetworkManager.Instance?.PublishSimulatedRoundResults(results);
 
-            BeginOfflineMapVote();
+            BeginOfflineIntermission(results);
             yield return WaitForCurrentPhaseToEnd();
             if (!IsOfflineModeActive)
             {
                 break;
             }
-
-            FinalizeOfflineMapVote();
-            yield return WaitForCurrentPhaseToEnd();
         }
 
         _roundFlowCoroutine = null;
@@ -1101,7 +1229,8 @@ public class OfflineModeManager : MonoBehaviour
         _nextbotDamageEnabledAtUnscaledTime = float.PositiveInfinity;
 
         ResetOfflinePlayersForPhase(roundStarted: false);
-        ResetOfflineNextbots(active: false);
+        // Keep bots active during intermission so they walk around the map.
+        ResetOfflineNextbots(active: true);
         PublishRoundPhase(IntermissionPhase, _roundIndex);
 
         if (pendingResults != null)
@@ -1115,12 +1244,10 @@ public class OfflineModeManager : MonoBehaviour
         _currentPhase = RoundPhase;
         _roundIndex += 1;
         _phaseEndsAtUnscaledTime = Time.unscaledTime + GetRoundDurationSeconds();
-        _nextbotDamageEnabledAtUnscaledTime = CurrentPresentationMode == OfflinePresentationMode.Shooting
-            ? float.PositiveInfinity
-            : Time.unscaledTime + NextbotStartGraceSeconds;
+        _nextbotDamageEnabledAtUnscaledTime = Time.unscaledTime + NextbotStartGraceSeconds;
 
         ResetOfflinePlayersForPhase(roundStarted: true);
-        ResetOfflineNextbots(active: CurrentPresentationMode != OfflinePresentationMode.Shooting);
+        ResetOfflineNextbots(active: true);
         PublishRoundPhase(RoundPhase, _roundIndex);
         NetworkManager.Instance?.PublishSimulatedRoundAnnouncement(new RoundAnnouncementMessageData
         {
@@ -1311,60 +1438,82 @@ public class OfflineModeManager : MonoBehaviour
         _patrolAssignments.Clear();
         List<Vector3> reservedSpawnPositions = new List<Vector3>();
 
+        // Priority 1: Process local player first to ensure they get the primary spawn point
+        if (_offlinePlayerStates.TryGetValue("offline_local", out OfflinePlayerRoundState localState))
+        {
+            ResetSingleOfflinePlayer(localState, "offline_local", roundStarted, reservedSpawnPositions);
+        }
+
+        // Priority 2: Process all other players (bots)
         foreach (KeyValuePair<string, OfflinePlayerRoundState> pair in _offlinePlayerStates)
         {
-            OfflinePlayerRoundState state = pair.Value;
-            if (state == null || state.PlayerObject == null)
+            if (string.Equals(pair.Key, "offline_local", System.StringComparison.Ordinal))
             {
                 continue;
             }
 
-            ClearCarryStateForPlayer(pair.Key);
-
-            PlayerController controller = state.Controller != null
-                ? state.Controller
-                : state.PlayerObject.GetComponent<PlayerController>();
-            Vector3 resetPosition = ResolveSpawnPosition(state.SpawnIndex, reservedSpawnPositions);
-            float resetYaw = PlayerSpawnRotationY;
-            if (controller != null)
-            {
-                controller.ApplyNetworkRoundReset(resetPosition, resetYaw);
-                state.Controller = controller;
-            }
-            else
-            {
-                state.PlayerObject.transform.SetPositionAndRotation(resetPosition, Quaternion.Euler(0f, resetYaw, 0f));
-            }
-
-            PlayerLocomotionInput locomotionInput = state.LocomotionInput != null
-                ? state.LocomotionInput
-                : state.PlayerObject.GetComponent<PlayerLocomotionInput>();
-            if (locomotionInput != null)
-            {
-                bool isLocalOfflinePlayer = string.Equals(pair.Key, "offline_local", System.StringComparison.Ordinal);
-                locomotionInput.InputEnabled = true;
-                locomotionInput.SetSimulatedInputEnabled(!isLocalOfflinePlayer);
-            }
-            locomotionInput?.ResetSimulationState();
-            state.LocomotionInput = locomotionInput;
-
-            OfflinePlayerBotBrain botBrain = state.PlayerObject.GetComponent<OfflinePlayerBotBrain>();
-            botBrain?.ResetOpeningRoute();
-
-            state.WasDowned = false;
-            state.IsEliminated = false;
-            state.CurrentHealth = controller != null ? controller.MaxHealth : 100f;
-            state.CurrentLifeStartUnscaledTime = roundStarted ? Time.unscaledTime : -1f;
-            if (roundStarted)
-            {
-                state.BestTimeMs = 0;
-                state.DownedCount = 0;
-                state.RevivesDone = 0;
-            }
-
-            ResetPlayerStateForPhase(state, resetPosition, resetYaw);
-            SyncPlayerState(state);
+            ResetSingleOfflinePlayer(pair.Value, pair.Key, roundStarted, reservedSpawnPositions);
         }
+    }
+
+    private void ResetSingleOfflinePlayer(OfflinePlayerRoundState state, string sessionId, bool roundStarted, List<Vector3> reservedSpawnPositions)
+    {
+        if (state == null || state.PlayerObject == null)
+        {
+            return;
+        }
+
+        ClearCarryStateForPlayer(sessionId);
+
+        PlayerController controller = state.Controller != null
+            ? state.Controller
+            : state.PlayerObject.GetComponent<PlayerController>();
+        
+        Vector3 resetPosition = ResolveSpawnPosition(state.SpawnIndex, reservedSpawnPositions);
+        // Add a small vertical offset to prevent clipping into the ground or NavMesh
+        resetPosition += Vector3.up * 0.1f;
+        
+        float resetYaw = PlayerSpawnRotationY;
+        if (controller != null)
+        {
+            controller.ApplyNetworkRoundReset(resetPosition, resetYaw);
+            // Ensure combat mode is correctly synced for offline mode
+            controller.SetCombatModeActive(CurrentPresentationMode == OfflinePresentationMode.Shooting);
+            state.Controller = controller;
+        }
+        else
+        {
+            state.PlayerObject.transform.SetPositionAndRotation(resetPosition, Quaternion.Euler(0f, resetYaw, 0f));
+        }
+
+        PlayerLocomotionInput locomotionInput = state.LocomotionInput != null
+            ? state.LocomotionInput
+            : state.PlayerObject.GetComponent<PlayerLocomotionInput>();
+        if (locomotionInput != null)
+        {
+            bool isLocalOfflinePlayer = string.Equals(sessionId, "offline_local", System.StringComparison.Ordinal);
+            locomotionInput.InputEnabled = roundStarted;
+            locomotionInput.SetSimulatedInputEnabled(!isLocalOfflinePlayer);
+        }
+        locomotionInput?.ResetSimulationState();
+        state.LocomotionInput = locomotionInput;
+
+        OfflinePlayerBotBrain botBrain = state.PlayerObject.GetComponent<OfflinePlayerBotBrain>();
+        botBrain?.ResetOpeningRoute();
+
+        state.WasDowned = false;
+        state.IsEliminated = false;
+        state.CurrentHealth = controller != null ? controller.MaxHealth : 100f;
+        state.CurrentLifeStartUnscaledTime = roundStarted ? Time.unscaledTime : -1f;
+        if (roundStarted)
+        {
+            state.BestTimeMs = 0;
+            state.DownedCount = 0;
+            state.RevivesDone = 0;
+        }
+
+        ResetPlayerStateForPhase(state, resetPosition, resetYaw);
+        SyncPlayerState(state);
     }
 
     private void ResetPlayerStateForPhase(OfflinePlayerRoundState state, Vector3 resetPosition, float resetYaw)
@@ -1713,9 +1862,7 @@ public class OfflineModeManager : MonoBehaviour
 
     private int GetIntermissionDurationMs()
     {
-        return NetworkManager.Instance != null
-            ? NetworkManager.Instance.IntermissionDurationMilliseconds
-            : 30000;
+        return 0;
     }
 
     private int GetRoundDurationMs()
@@ -1735,7 +1882,7 @@ public class OfflineModeManager : MonoBehaviour
         return GetRoundDurationMs() / 1000f;
     }
 
-    private void EnsureOfflineNextbots()
+    private void EnsureOfflineNextbots(List<Vector3> reservedSpawnPositions = null)
     {
         if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
         {
@@ -1772,7 +1919,8 @@ public class OfflineModeManager : MonoBehaviour
                 nextbot.gameObject.SetActive(true);
             }
 
-            Vector3 spawnPosition = ResolveNextbotSpawnPosition(i);
+            Vector3 preferredPosition = ResolveNextbotSpawnPosition(i);
+            Vector3 spawnPosition = ResolveAvailableSpawnPosition(preferredPosition, reservedSpawnPositions);
             nextbot.PrepareOfflineNextbot(spawnPosition);
             nextbot.SetOfflineNextbotActive(IsOfflineRoundActive);
         }
@@ -1899,6 +2047,7 @@ public class OfflineModeManager : MonoBehaviour
         Vector3 spawnPosition = ResolveSpawnPosition(spawnIndex, reservedSpawnPositions);
         GameObject playerObject = Instantiate(networkManager.PlayerPrefab, spawnPosition, Quaternion.Euler(0f, PlayerSpawnRotationY, 0f));
         playerObject.name = isLocalPlayer ? "LocalPlayer" : $"OfflinePlayer_{displayName}";
+        playerObject.layer = isLocalPlayer ? LayerMask.NameToLayer("LocalPlayer") : LayerMask.NameToLayer("Default");
 
         OfflinePlayerIdentity identity = playerObject.GetComponent<OfflinePlayerIdentity>();
         if (identity == null)
@@ -1916,9 +2065,21 @@ public class OfflineModeManager : MonoBehaviour
         PlayerLocomotionInput locomotionInput = playerObject.GetComponent<PlayerLocomotionInput>();
         if (locomotionInput != null)
         {
-            locomotionInput.InputEnabled = !isLocalPlayer;
+            locomotionInput.InputEnabled = true;
             locomotionInput.SetSimulatedInputEnabled(!isLocalPlayer);
             locomotionInput.ResetSimulationState();
+            if (!isLocalPlayer)
+            {
+                locomotionInput.enabled = false;
+                if (locomotionInput.Controls != null)
+                {
+                    locomotionInput.Controls.Disable();
+                }
+            }
+            else if (locomotionInput.Controls != null)
+            {
+                locomotionInput.Controls.PlayerLocomotionMap.Enable();
+            }
         }
 
         PlayerController controller = playerObject.GetComponent<PlayerController>();
@@ -1927,6 +2088,11 @@ public class OfflineModeManager : MonoBehaviour
             controller.SetSimulationControlled(!isLocalPlayer);
             controller.SetCombatModeActive(CurrentPresentationMode == OfflinePresentationMode.Shooting);
             controller.SetCombatHealth(controller.MaxHealth);
+            controller.SetLocalCharacterAudio(isLocalPlayer);
+            if (isLocalPlayer)
+            {
+                controller.EnsureSingleLocalAudioListener();
+            }
         }
 
         PlayerAnimation playerAnimation = playerObject.GetComponent<PlayerAnimation>();
@@ -1966,6 +2132,10 @@ public class OfflineModeManager : MonoBehaviour
             }
 
             botBrain.Initialize(botIndex);
+        }
+        else
+        {
+            EnsureOfflineLocalPlayerControl();
         }
 
         return playerObject;
@@ -2113,10 +2283,16 @@ public class OfflineModeManager : MonoBehaviour
                 {
                     return resolvedCandidate;
                 }
+                
+                // Fallback to un-snapped candidate if the navmesh-snapped one was reserved
+                if (!IsSpawnPositionReserved(candidate, reservedSpawnPositions))
+                {
+                    return candidate;
+                }
             }
         }
 
-        return origin;
+        return origin + new Vector3(Random.Range(-2f, 2f), 0f, Random.Range(-2f, 2f));
     }
 
     private bool IsSpawnPositionReserved(Vector3 candidate, List<Vector3> reservedSpawnPositions)

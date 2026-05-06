@@ -11338,7 +11338,8 @@ MonoBehaviour:
   skinRegistry: {fileID: 11400000, guid: 3be7701bf166148e1bf5cca16220b916, type: 2}
   skinPreviewImage: {fileID: 0}
   skinNameText: {fileID: 0}
-  shopPreviewPrefab: {fileID: 0}
+  shopPreviewPrefab: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
+  shopPreviewAnimatorController: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
   shopPreviewModelPosition: {x: 0, y: -1.15, z: -4}
   shopPreviewModelEuler: {x: 0, y: 205, z: 0}
   shopPreviewCameraPosition: {x: 0, y: 1.1, z: 6.1}
@@ -16887,7 +16888,7 @@ MonoBehaviour:
   m_OverrideVoxelSize: 0
   m_VoxelSize: 0.16666667
   m_MinRegionArea: 2
-  m_NavMeshData: {fileID: 23800000, guid: 6188d8a5e1605461cbbf26185f4277d8, type: 2}
+  m_NavMeshData: {fileID: 23800000, guid: d21f0f3bee14e4e18bd979505cc9111b, type: 2}
   m_BuildHeightMesh: 0
 --- !u!4 &627969018
 Transform:
@@ -21467,9 +21468,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 89bdeed4550ae41409696559877e4b41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
-  localServerUrl: ws://localhost:2567
+  localServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
   productionServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
-  useProductionServerInEditor: 0
+  useProductionServerInEditor: 1
   mapIdOverride: 
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
@@ -21498,8 +21499,8 @@ MonoBehaviour:
     position: {x: -139.71, y: 2.63, z: 33.67}
   - anchor: {fileID: 1845726629}
     position: {x: -48.47, y: 1.01, z: 7.07}
-  intermissionDurationSeconds: 10
-  roundDurationSeconds: 10
+  intermissionDurationSeconds: 30
+  roundDurationSeconds: 180
   roomName: my_room
   playerPrefab: {fileID: 4842325826247379024, guid: fa064ee4d0a6048a298a22181dab671b, type: 3}
 --- !u!1001 &774368562

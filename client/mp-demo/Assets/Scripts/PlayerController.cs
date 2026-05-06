@@ -1182,11 +1182,7 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        bool allowOfflineSimulationControl = _isSimulationControlled
-            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
-            && offlineModeManager.IsOfflineModeActive;
-
-        if (_isSimulationControlled && !allowOfflineSimulationControl)
+        if (_isSimulationControlled)
         {
             UpdateSimulationVisuals();
             return;
@@ -2356,41 +2352,7 @@ public class PlayerController : MonoBehaviour
             view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
         }
 
-        NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        for (int i = 0; i < nextbots.Length; i++)
-        {
-            NextbotFollowPlayer nextbot = nextbots[i];
-            if (nextbot == null
-                || !nextbot.IsCombatActive
-                || string.IsNullOrWhiteSpace(nextbot.NetworkNextbotId))
-            {
-                continue;
-            }
-
-            Vector3 worldAnchor = nextbot.transform.position + Vector3.up * 2.4f;
-            if (!TryGetEnemyHealthBarScreenPoint(worldAnchor, out float uiX, out float uiY))
-            {
-                continue;
-            }
-
-            string nextbotKey = $"nextbot:{nextbot.NetworkNextbotId}";
-            activeSessionIds.Add(nextbotKey);
-            EnemyHealthBarView view = GetOrCreateEnemyHealthBar(nextbotKey);
-            if (view == null)
-            {
-                continue;
-            }
-
-            float maxHealth = Mathf.Max(1f, nextbot.MaxCombatHealth);
-            float currentHealth = Mathf.Clamp(nextbot.CurrentCombatHealth, 0f, maxHealth);
-            float normalizedHealth = Mathf.Clamp01(currentHealth / maxHealth);
-            view.Root.style.display = DisplayStyle.Flex;
-            view.Root.style.left = uiX;
-            view.Root.style.top = uiY;
-            view.Label.text = $"{nextbot.CombatDisplayName}  {Mathf.CeilToInt(currentHealth)}";
-            view.Fill.style.width = Length.Percent(normalizedHealth * 100f);
-            view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
-        }
+        // Nextbot health bars removed as requested.
 
         foreach (System.Collections.Generic.KeyValuePair<string, EnemyHealthBarView> pair in _enemyHealthBarViews)
         {
@@ -4302,6 +4264,9 @@ public class PlayerController : MonoBehaviour
 
         if (!_isSimulationControlled && _playerLocomotionInput != null)
         {
+            UnityEngine.Cursor.lockState = CursorLockMode.Locked;
+            UnityEngine.Cursor.visible = false;
+
             _playerLocomotionInput.enabled = true;
             _playerLocomotionInput.InputEnabled = true;
             _playerLocomotionInput.ResetSimulationState();
@@ -5244,7 +5209,9 @@ public class PlayerController : MonoBehaviour
             // unless they aren't part of those roots.
             if (_thirdPersonBodyRoot == null)
             {
-                bool shouldBeEnabled = !firstPerson && _defaultRendererEnabledStates[i];
+                // For simulation-controlled (remote/offline bot) players, always show the body.
+                // Only hide the body for the local player in first-person view.
+                bool shouldBeEnabled = (_isSimulationControlled || !firstPerson) && _defaultRendererEnabledStates[i];
                 renderer.enabled = shouldBeEnabled;
             }
         }
@@ -7042,22 +7009,25 @@ public class PlayerController : MonoBehaviour
         EnsureRemoteFullBodyVisible();
         TryMountRemoteArmRootToArmPoint();
 
-        // For remote players, show both arms/gun and body as requested
+        int targetLayer = gameObject.layer;
+
+        // Force the entire hierarchy of a remote/bot player to be on a visible layer
+        SetLayerRecursive(gameObject, targetLayer);
+
+        // Aggressively ensure all renderers in the bot hierarchy are enabled and on a visible layer
+        Renderer[] allRenderers = GetComponentsInChildren<Renderer>(true);
+        foreach (Renderer r in allRenderers)
+        {
+            if (r != null)
+            {
+                r.enabled = true;
+                r.gameObject.layer = targetLayer;
+            }
+        }
+
         if (_firstPersonArmRoot != null)
         {
             _firstPersonArmRoot.SetActive(true);
-            
-            // Ensure all renderers are enabled and on a visible layer for remote players
-            Renderer[] armRenderers = _firstPersonArmRoot.GetComponentsInChildren<Renderer>(true);
-            int targetLayer = gameObject.layer;
-            foreach (Renderer r in armRenderers)
-            {
-                if (r != null)
-                {
-                    r.enabled = true;
-                    r.gameObject.layer = targetLayer;
-                }
-            }
         }
         else
         {
@@ -7068,22 +7038,38 @@ public class PlayerController : MonoBehaviour
         if (_thirdPersonBodyRoot != null)
         {
             _thirdPersonBodyRoot.SetActive(true);
-            _thirdPersonBodyRoot.transform.localRotation = Quaternion.identity;
+            _thirdPersonBodyRoot.transform.localRotation = Quaternion.Euler(_thirdPersonBodyRotationOffset);
         }
 
+        CleanupSimulationComponents();
+        CleanupSimulationAudioListeners();
+    }
+
+    private void SetLayerRecursive(GameObject obj, int layer)
+    {
+        if (obj == null)
+        {
+            return;
+        }
+
+        obj.layer = layer;
+        foreach (Transform child in obj.transform)
+        {
+            SetLayerRecursive(child.gameObject, layer);
+        }
+    }
+
+    private void CleanupSimulationComponents()
+    {
         Camera[] cameras = GetComponentsInChildren<Camera>(true);
         for (int i = 0; i < cameras.Length; i++)
         {
             if (cameras[i] != null)
             {
-                // Disable camera component
                 cameras[i].enabled = false;
 
                 // Only activate the main player camera GameObject so its children (arms/guns) show.
-                // EVERYTHING ELSE must be deactivated for remote players to avoid floating arms (especially spec camera).
                 bool isMainCamera = (cameras[i] == _playerCamera || cameras[i] == _gameplayCamera) && cameras[i] != _spectateCamera;
-                
-                // Extra check for names to be safe
                 string camName = cameras[i].gameObject.name.ToLower();
                 if (camName.Contains("spec") || camName.Contains("spectate"))
                 {
@@ -7093,7 +7079,9 @@ public class PlayerController : MonoBehaviour
                 cameras[i].gameObject.SetActive(isMainCamera);
             }
         }
-
+    }
+    private void CleanupSimulationAudioListeners()
+    {
         AudioListener[] audioListeners = GetComponentsInChildren<AudioListener>(true);
         for (int i = 0; i < audioListeners.Length; i++)
         {
@@ -7144,6 +7132,51 @@ public class PlayerController : MonoBehaviour
         {
             _gameplayAudioListener.enabled = true;
         }
+    }
+
+    public bool HasReadyGameplayCamera()
+    {
+        if (_isSimulationControlled || _gameplayCamera == null)
+        {
+            return false;
+        }
+
+        return _gameplayCamera.enabled
+            && _gameplayCamera.gameObject.activeInHierarchy;
+    }
+
+    public void EnsureGameplayCameraActive()
+    {
+        if (_isSimulationControlled || _gameplayCamera == null)
+        {
+            return;
+        }
+
+        Transform current = _gameplayCamera.transform;
+        while (current != null)
+        {
+            if (!current.gameObject.activeSelf)
+            {
+                current.gameObject.SetActive(true);
+            }
+
+            if (current == transform)
+            {
+                break;
+            }
+
+            current = current.parent;
+        }
+
+        SetSpectateCameraActive(false);
+        _gameplayCamera.enabled = true;
+        if (_gameplayAudioListener != null)
+        {
+            _gameplayAudioListener.enabled = true;
+        }
+
+        EnsureSingleLocalAudioListener();
+        Debug.Log($"PlayerController: gameplay camera active | player={gameObject.name} | camera={_gameplayCamera.gameObject.name} | scene={UnityEngine.SceneManagement.SceneManager.GetActiveScene().name}");
     }
 
     private static void ConfigureCharacterAudioSource(AudioSource audioSource, bool isLocalCharacter, float minDistance, float maxDistance)

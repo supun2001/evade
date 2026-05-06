@@ -235,6 +235,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool _hasOfflinePatrolTarget;
     private Vector3 _offlinePatrolTarget;
     private float _offlinePatrolWaitUntil;
+    private Vector3 _offlineStuckCheckPosition;
+    private float _offlineStuckTime;
     private float _groundHeightVelocity;
     private Texture _defaultBaseMap;
     private Color _defaultBaseColor = Color.white;
@@ -1431,7 +1433,8 @@ public class NextbotFollowPlayer : MonoBehaviour
             return null;
         }
 
-        if ((_forceOfflineLocalAuthority || ShouldUseMapLocalNavMeshPresentation())
+        if (!_forceOfflineLocalAuthority
+            && ShouldUseMapLocalNavMeshPresentation()
             && !isCurrentTarget
             && IsTargetClaimedByOtherNextbot(candidateTransform))
         {
@@ -1450,11 +1453,19 @@ public class NextbotFollowPlayer : MonoBehaviour
         float visibleBonus = hasLineOfSight && pathDistance <= _visibleRange ? _visibleBonus : 0f;
         float frontBonus = IsTargetInFront(candidateTransform.position) ? _frontBonus : 0f;
         float currentTargetBonus = isCurrentTarget ? _currentTargetBonus : 0f;
-        float localPlayerPressureBonus = _forceOfflineLocalAuthority && IsOfflineLocalPlayerTarget(candidateTransform)
-            ? OfflineLocalPlayerPressureBonus
-            : 0f;
+        float localPlayerPressureBonus = 0f;
+        if (_forceOfflineLocalAuthority && IsOfflineLocalPlayerTarget(candidateTransform))
+        {
+            // Only one nextbot should chase the local player in offline mode.
+            // If someone else is already chasing them, we don't apply the massive pressure bonus.
+            if (isCurrentTarget || !IsTargetClaimedByOtherNextbot(candidateTransform))
+            {
+                localPlayerPressureBonus = OfflineLocalPlayerPressureBonus;
+            }
+        }
+        
         float targetPressurePenalty = _forceOfflineLocalAuthority
-            ? 0f
+            ? (IsTargetClaimedByOtherNextbot(candidateTransform) ? _sameTargetScorePenalty : 0f)
             : CountOtherNextbotsTargeting(candidateTransform) * _sameTargetScorePenalty;
 
         return new ScoredTarget
@@ -1681,6 +1692,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _hasOfflinePatrolTarget = false;
         _offlinePatrolTarget = Vector3.zero;
         _offlinePatrolWaitUntil = 0f;
+        _offlineStuckTime = 0f;
     }
 
     private bool TryUpdateOfflinePatrolMovement()
@@ -1692,7 +1704,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
-            || !offlineModeManager.IsOfflineRoundActive)
+            || !offlineModeManager.IsOfflineNextbotPatrolActive)
         {
             ResetOfflinePatrolTarget();
             return false;
@@ -1721,6 +1733,25 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             SetNextOfflinePatrolTarget(offlineModeManager);
             distance = GetPlanarDistance(transform.position, _offlinePatrolTarget);
+        }
+        else
+        {
+            // Stuck detection
+            float moveDistance = GetPlanarDistance(transform.position, _offlineStuckCheckPosition);
+            if (moveDistance < 0.1f)
+            {
+                _offlineStuckTime += Time.deltaTime;
+                if (_offlineStuckTime >= 2f)
+                {
+                    SetNextOfflinePatrolTarget(offlineModeManager);
+                    distance = GetPlanarDistance(transform.position, _offlinePatrolTarget);
+                }
+            }
+            else
+            {
+                _offlineStuckCheckPosition = transform.position;
+                _offlineStuckTime = 0f;
+            }
         }
 
         MoveTowardOfflinePatrolTarget(_offlinePatrolTarget);
