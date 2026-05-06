@@ -42,6 +42,7 @@ public class PlayerController : MonoBehaviour
     [Header("Collision")]
     [SerializeField] private LayerMask _movementCollisionLayers = ~0;
     [SerializeField, Min(0f)] private float _movementCollisionPadding = 0.03f;
+    [SerializeField, Min(0f)] private float _respawnCollisionGraceDuration = 0.2f;
     [SerializeField, Range(0f, 1f)] private float _crouchRunAnimationExitSpeedRatio = 0.2f;
     [SerializeField, Min(0f)] private float _crouchRunEnterMinSpeed = 4f;
     public float autoSprintDelay = 5f;
@@ -414,6 +415,7 @@ public class PlayerController : MonoBehaviour
     private float _nextDebugShootingLogTime;
     private float _nextDebugClickPathLogTime;
     private float _nextDebugRemoteArmMountLogTime;
+    private float _movementCollisionGraceUntil = float.NegativeInfinity;
     private float _respawnCountdownEndTime = -1f;
     private bool _isEliminationTossActive;
     private bool _eliminationBodyHidden;
@@ -885,6 +887,7 @@ public class PlayerController : MonoBehaviour
                 {
                     bool wasEnabled = _characterController.enabled;
                     _characterController.enabled = false;
+                    ResetCharacterControllerShapeImmediate();
                     _transform.position = spawnPoint;
                     _characterController.enabled = wasEnabled;
                 }
@@ -895,6 +898,9 @@ public class PlayerController : MonoBehaviour
 
                 _verticalVelocity = 0f;
                 _horizontalVelocity = Vector3.zero;
+                Physics.SyncTransforms();
+                RefreshGroundProbeState();
+                BeginRespawnMovementCollisionGrace();
             }
         }
     }
@@ -1065,6 +1071,23 @@ public class PlayerController : MonoBehaviour
         ResetNextbotHitReactionLimbPose();
         UpdateDownedCollisionShape();
         UpdateDownedVisualRootPosition();
+    }
+
+    private void ResetCharacterControllerShapeImmediate()
+    {
+        if (_characterController == null)
+        {
+            return;
+        }
+
+        _characterController.height = _defaultCharacterControllerHeight;
+        _characterController.radius = _defaultCharacterControllerRadius;
+        _characterController.center = _defaultCharacterControllerCenter;
+    }
+
+    private void BeginRespawnMovementCollisionGrace()
+    {
+        _movementCollisionGraceUntil = Time.time + Mathf.Max(0f, _respawnCollisionGraceDuration);
     }
 
     private void UpdateForcedCameraViewState(bool forceImmediate = false)
@@ -3096,6 +3119,7 @@ public class PlayerController : MonoBehaviour
         GameObject particleClone = Instantiate(prefab, worldPosition, worldRotation);
         particleClone.name = $"{prefab.name}_Shot";
         particleClone.transform.localScale = Vector3.one;
+        DisableOneShotEffectPhysics(particleClone);
 
         ParticleSystem particleSystem = particleClone.GetComponent<ParticleSystem>();
         if (particleSystem == null)
@@ -3169,6 +3193,38 @@ public class PlayerController : MonoBehaviour
 
         float cleanupDelay = main.duration + Mathf.Max(main.startLifetime.constantMax, 0.15f) + 0.25f;
         Destroy(particleClone, cleanupDelay);
+    }
+
+    private static void DisableOneShotEffectPhysics(GameObject effectRoot)
+    {
+        if (effectRoot == null)
+        {
+            return;
+        }
+
+        Collider[] colliders = effectRoot.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null)
+            {
+                colliders[i].enabled = false;
+            }
+        }
+
+        Rigidbody[] rigidbodies = effectRoot.GetComponentsInChildren<Rigidbody>(true);
+        for (int i = 0; i < rigidbodies.Length; i++)
+        {
+            Rigidbody body = rigidbodies[i];
+            if (body == null)
+            {
+                continue;
+            }
+
+            body.detectCollisions = false;
+            body.isKinematic = true;
+            body.linearVelocity = Vector3.zero;
+            body.angularVelocity = Vector3.zero;
+        }
     }
 
     private static float GetParticleStartSpeed(ParticleSystem.MainModule mainModule)
@@ -4121,6 +4177,10 @@ public class PlayerController : MonoBehaviour
         }
 
         ClearLocalControlBlockers(clearInjuredState: true);
+        ResetCharacterControllerShapeImmediate();
+        Physics.SyncTransforms();
+        RefreshGroundProbeState();
+        BeginRespawnMovementCollisionGrace();
         UpdateForcedCameraViewState(forceImmediate: true);
         UpdateSimulationCombatHitboxState();
     }
@@ -4224,6 +4284,7 @@ public class PlayerController : MonoBehaviour
         {
             bool wasEnabled = _characterController.enabled;
             _characterController.enabled = false;
+            ResetCharacterControllerShapeImmediate();
             targetTransform.SetPositionAndRotation(worldPosition, targetRotation);
             _characterController.enabled = true;
         }
@@ -4251,6 +4312,10 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        ResetCharacterControllerShapeImmediate();
+        Physics.SyncTransforms();
+        RefreshGroundProbeState();
+        BeginRespawnMovementCollisionGrace();
         UnityEngine.Cursor.lockState = CursorLockMode.Locked;
         UnityEngine.Cursor.visible = false;
     }
@@ -6567,6 +6632,11 @@ public class PlayerController : MonoBehaviour
             return desiredDisplacement;
         }
 
+        if (Time.time < _movementCollisionGraceUntil)
+        {
+            return desiredDisplacement;
+        }
+
         float desiredDistance = desiredDisplacement.magnitude;
         if (desiredDistance <= 0.0001f)
         {
@@ -6880,6 +6950,18 @@ public class PlayerController : MonoBehaviour
         {
             _playerLocomotionInput.InputEnabled = true;
         }
+
+        if (_characterController != null)
+        {
+            _characterController.enabled = true;
+            RestoreGhostingState();
+        }
+
+        ClearLocalControlBlockers(clearInjuredState: true);
+        ResetCharacterControllerShapeImmediate();
+        Physics.SyncTransforms();
+        RefreshGroundProbeState();
+        BeginRespawnMovementCollisionGrace();
 
         // Refresh visibility and camera state when combat mode changes
         UpdateForcedCameraViewState(true);

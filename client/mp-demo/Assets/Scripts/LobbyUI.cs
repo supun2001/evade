@@ -151,6 +151,8 @@ public class LobbyUI : MonoBehaviour
     private const string VillageMapId = "vilage";
     private const string BoomBoomMapSceneName = "Boom Boom";
     private const string BoomBoomMapId = "boomBoom";
+    private const float JoinTransitionFadeDuration = 0.24f;
+    private const float JoinTransitionLeadTime = 0.12f;
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
@@ -179,11 +181,15 @@ public class LobbyUI : MonoBehaviour
     private string _authToken = string.Empty;
     private AccountData _accountData;
     private bool _isAuthRequestInFlight;
+    private static CanvasGroup s_joinTransitionCanvasGroup;
+    private static float s_joinTransitionTargetAlpha;
     #endregion
 
     #region Class Methods
     private void Start()
     {
+        EnsureJoinTransitionOverlay();
+
         bool isOfflineModeActive = IsOfflineModeRunning();
         bool shouldShowMenu = !isOfflineModeActive
             && (NetworkManager.Instance == null
@@ -303,6 +309,7 @@ public class LobbyUI : MonoBehaviour
         UpdateHoverLabelFade();
         UpdateMenuButtonScaleAnimation();
         UpdateShopPreviewAnimation();
+        UpdateJoinTransitionOverlay();
     }
 
     private static bool IsOfflineModeRunning()
@@ -352,6 +359,7 @@ public class LobbyUI : MonoBehaviour
     {
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = false;
+        SetJoinTransitionVisible(false, immediate: true);
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
             NetworkManager.Instance.SendReadyState(false);
@@ -420,6 +428,8 @@ public class LobbyUI : MonoBehaviour
     public async void OnCreateClicked()
     {
         SetStartButtonEnabled(false);
+        SetJoinTransitionVisible(true);
+        await WaitForJoinTransitionLeadAsync();
 
         if (createButton != null) createButton.interactable = false;
         if (NetworkManager.Instance != null)
@@ -436,6 +446,7 @@ public class LobbyUI : MonoBehaviour
         }
         else
         {
+            SetJoinTransitionVisible(false);
             ShowNotification($"Create Failed: {error}");
         }
         
@@ -454,6 +465,8 @@ public class LobbyUI : MonoBehaviour
     private async void StartSelectedMapJoin()
     {
         SetStartButtonEnabled(false);
+        SetJoinTransitionVisible(true);
+        await WaitForJoinTransitionLeadAsync();
 
         if (createButton != null) createButton.interactable = false;
         if (joinButton != null) joinButton.interactable = false;
@@ -472,6 +485,7 @@ public class LobbyUI : MonoBehaviour
         }
         else
         {
+            SetJoinTransitionVisible(false);
             ShowNotification($"Start Failed: {error}");
         }
 
@@ -550,6 +564,9 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
+        SetJoinTransitionVisible(true);
+        await WaitForJoinTransitionLeadAsync();
+
         if (joinButton != null) joinButton.interactable = false;
         if (NetworkManager.Instance != null)
         {
@@ -564,6 +581,7 @@ public class LobbyUI : MonoBehaviour
         }
         else
         {
+            SetJoinTransitionVisible(false);
             if (error.Contains("full")) ShowNotification("Room is full!");
             else if (error.Contains("not found")) ShowNotification("Room not found!");
             else ShowNotification($"Join Failed: {error}");
@@ -579,6 +597,7 @@ public class LobbyUI : MonoBehaviour
         SetMapSelectionVisible(false);
         SetShopVisible(false);
         if (menuPanel != null) menuPanel.SetActive(false);
+        SetJoinTransitionVisible(false);
         hasAutoReadiedCurrentRoom = true;
 
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
@@ -1134,6 +1153,9 @@ public class LobbyUI : MonoBehaviour
 
     private IEnumerator LoadSelectedMapScene(string sceneName)
     {
+        SetJoinTransitionVisible(true);
+        yield return new WaitForSecondsRealtime(JoinTransitionLeadTime);
+
         AsyncOperation loadOperation = null;
         Exception loadException = null;
 
@@ -1149,6 +1171,7 @@ public class LobbyUI : MonoBehaviour
         if (loadException != null || loadOperation == null)
         {
             s_pendingJoinAfterMapLoad = false;
+            SetJoinTransitionVisible(false);
             SetStartButtonEnabled(true);
             ShowNotification(loadException != null
                 ? $"Map load failed: {loadException.Message}"
@@ -1159,6 +1182,82 @@ public class LobbyUI : MonoBehaviour
         while (!loadOperation.isDone)
         {
             yield return null;
+        }
+    }
+
+    private static void EnsureJoinTransitionOverlay()
+    {
+        if (s_joinTransitionCanvasGroup != null)
+        {
+            return;
+        }
+
+        GameObject overlayRoot = new GameObject("JoinTransitionOverlay");
+        UnityEngine.Object.DontDestroyOnLoad(overlayRoot);
+
+        Canvas canvas = overlayRoot.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = short.MaxValue;
+
+        overlayRoot.AddComponent<GraphicRaycaster>();
+        s_joinTransitionCanvasGroup = overlayRoot.AddComponent<CanvasGroup>();
+        s_joinTransitionCanvasGroup.alpha = 0f;
+        s_joinTransitionCanvasGroup.blocksRaycasts = false;
+        s_joinTransitionCanvasGroup.interactable = false;
+
+        GameObject imageObject = new GameObject("BlackFade");
+        imageObject.transform.SetParent(overlayRoot.transform, false);
+
+        RectTransform rectTransform = imageObject.AddComponent<RectTransform>();
+        rectTransform.anchorMin = Vector2.zero;
+        rectTransform.anchorMax = Vector2.one;
+        rectTransform.offsetMin = Vector2.zero;
+        rectTransform.offsetMax = Vector2.zero;
+
+        UnityEngine.UI.Image image = imageObject.AddComponent<UnityEngine.UI.Image>();
+        image.color = Color.black;
+
+        s_joinTransitionTargetAlpha = 0f;
+    }
+
+    private static void SetJoinTransitionVisible(bool visible, bool immediate = false)
+    {
+        EnsureJoinTransitionOverlay();
+        s_joinTransitionTargetAlpha = visible ? 1f : 0f;
+        if (s_joinTransitionCanvasGroup == null)
+        {
+            return;
+        }
+
+        s_joinTransitionCanvasGroup.blocksRaycasts = visible;
+        if (immediate)
+        {
+            s_joinTransitionCanvasGroup.alpha = s_joinTransitionTargetAlpha;
+        }
+    }
+
+    private static async Task WaitForJoinTransitionLeadAsync()
+    {
+        int delayMs = Mathf.Max(1, Mathf.RoundToInt(JoinTransitionLeadTime * 1000f));
+        await Task.Delay(delayMs);
+    }
+
+    private static void UpdateJoinTransitionOverlay()
+    {
+        if (s_joinTransitionCanvasGroup == null)
+        {
+            return;
+        }
+
+        float nextAlpha = Mathf.MoveTowards(
+            s_joinTransitionCanvasGroup.alpha,
+            s_joinTransitionTargetAlpha,
+            Time.unscaledDeltaTime / Mathf.Max(0.0001f, JoinTransitionFadeDuration));
+
+        s_joinTransitionCanvasGroup.alpha = nextAlpha;
+        if (nextAlpha <= 0.001f && s_joinTransitionTargetAlpha <= 0f)
+        {
+            s_joinTransitionCanvasGroup.blocksRaycasts = false;
         }
     }
 
