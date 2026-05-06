@@ -17653,7 +17653,8 @@ MonoBehaviour:
   skinRegistry: {fileID: 11400000, guid: 3be7701bf166148e1bf5cca16220b916, type: 2}
   skinPreviewImage: {fileID: 0}
   skinNameText: {fileID: 0}
-  shopPreviewPrefab: {fileID: 0}
+  shopPreviewPrefab: {fileID: 919132149155446097, guid: 79e68ac24133c4c0a9e82be50138d6f3, type: 3}
+  shopPreviewAnimatorController: {fileID: 9100000, guid: 0e7de73d4233b4b6696aafaca3013802, type: 2}
   shopPreviewModelPosition: {x: 0, y: -1.15, z: -4}
   shopPreviewModelEuler: {x: 0, y: 205, z: 0}
   shopPreviewCameraPosition: {x: 0, y: 1.1, z: 6.1}

@@ -1092,6 +1092,12 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
+        if (!CanLoadMapScene(sceneName))
+        {
+            ShowNotification($"Map scene '{sceneName}' is not available in this build.");
+            return;
+        }
+
         if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
         {
             OnGameStarted();
@@ -1178,6 +1184,12 @@ public class LobbyUI : MonoBehaviour
         }
 
         StartSelectedMapJoin();
+    }
+
+    private static bool CanLoadMapScene(string sceneName)
+    {
+        return !string.IsNullOrWhiteSpace(sceneName)
+            && Application.CanStreamedLevelBeLoaded(sceneName);
     }
 
     private static string GetActiveSceneMapId()

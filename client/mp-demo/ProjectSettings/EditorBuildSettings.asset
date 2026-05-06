@@ -17,6 +17,15 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/parkour.unity
     guid: a88a920fa294f4137878aeb3381337fa
+  - enabled: 1
+    path: Assets/Scenes/Vitamin_B.unity
+    guid: 3d4449e7fe6d241daa23dc8403e256d3
+  - enabled: 1
+    path: Assets/Scenes/Village.unity
+    guid: a3fa4bf3be5b244cfb8d409f29399a06
+  - enabled: 1
+    path: Assets/Scenes/Boom Boom.unity
+    guid: ee2aa7d84928440d684ac987ece8cd3b
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

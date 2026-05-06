@@ -555,6 +555,7 @@ public class PlayerController : MonoBehaviour
     private float _nextSpectateRefreshTime;
     private readonly System.Collections.Generic.List<SpectateTarget> _spectateTargets = new();
     private static readonly System.Collections.Generic.List<PlayerController> RegisteredPlayerCollisionControllers = new();
+    private readonly System.Collections.Generic.Dictionary<Collider, bool> _ghostedColliderEnabledStates = new();
     private bool _spectateCharacterControllerWasEnabled;
     private bool _spectateVisualRootWasActive = true;
     private static readonly Vector3 SpectatorHiddenPosition = new Vector3(0f, -500f, 0f);
@@ -4077,8 +4078,10 @@ public class PlayerController : MonoBehaviour
         {
             _playerLocomotionInput.enabled = true;
             _playerLocomotionInput.InputEnabled = true;
+            _playerLocomotionInput.ResetSimulationState();
             if (_playerLocomotionInput.Controls != null)
             {
+                _playerLocomotionInput.Controls.PlayerLocomotionMap.Disable();
                 _playerLocomotionInput.Controls.PlayerLocomotionMap.Enable();
             }
             if (_isSpectating)
@@ -8120,6 +8123,11 @@ public class PlayerController : MonoBehaviour
         for (int i = 0; i < allColliders.Length; i++)
         {
             if (allColliders[i] == null) continue;
+
+            if (!_ghostedColliderEnabledStates.ContainsKey(allColliders[i]))
+            {
+                _ghostedColliderEnabledStates.Add(allColliders[i], allColliders[i].enabled);
+            }
             
             if (allColliders[i].enabled)
             {
@@ -8163,6 +8171,11 @@ public class PlayerController : MonoBehaviour
         for (int i = 0; i < allColliders.Length; i++)
         {
             if (allColliders[i] == null) continue;
+            if (_ghostedColliderEnabledStates.TryGetValue(allColliders[i], out bool wasEnabled))
+            {
+                allColliders[i].enabled = wasEnabled;
+            }
+
             for (int j = 0; j < allNextbots.Length; j++)
             {
                 if (allNextbots[j] == null) continue;
@@ -8173,5 +8186,7 @@ public class PlayerController : MonoBehaviour
                 }
             }
         }
+
+        _ghostedColliderEnabledStates.Clear();
     }
 }

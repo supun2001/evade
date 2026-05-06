@@ -223,7 +223,14 @@ public class NetworkPlayer : MonoBehaviour
                 && (wasControllerEliminated || controller.IsInjuredOrHitReacting())
                 && !controller.IsAwaitingAuthoritativeNextbotHit())
             {
-                controller.ApplyNetworkRevive();
+                if (wasControllerEliminated)
+                {
+                    ApplyAuthoritativeRoundReset();
+                }
+                else
+                {
+                    controller.ApplyNetworkRevive();
+                }
             }
 
             if (controller != null && controller.IsSpectating())
