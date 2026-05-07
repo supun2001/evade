@@ -3258,11 +3258,13 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             GameObject healthBarPointObject = new GameObject(_healthBarPointName);
             healthBarPointObject.transform.SetParent(transform, false);
-            healthBarPointObject.transform.localPosition = new Vector3(0f, 2.6f, 0f);
+            healthBarPointObject.transform.localPosition = new Vector3(0f, 5.6f, 0f);
             healthBarPointObject.transform.localRotation = Quaternion.identity;
             healthBarPointObject.transform.localScale = Vector3.one;
             _healthBarPointTransform = healthBarPointObject.transform;
         }
+
+        UpdateHealthBarAnchorPosition();
 
         if (_healthBarCanvas == null)
         {
@@ -3329,10 +3331,10 @@ public class NextbotFollowPlayer : MonoBehaviour
         canvasObject.transform.SetParent(parent, false);
         canvasObject.transform.localPosition = Vector3.zero;
         canvasObject.transform.localRotation = Quaternion.identity;
-        canvasObject.transform.localScale = Vector3.one * 0.01f;
+        canvasObject.transform.localScale = Vector3.one * 0.05f;
 
         RectTransform rectTransform = canvasObject.GetComponent<RectTransform>();
-        rectTransform.sizeDelta = new Vector2(140f, 24f);
+        rectTransform.sizeDelta = new Vector2(180f, 28f);
 
         Canvas canvas = canvasObject.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
@@ -3350,7 +3352,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
         rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        rectTransform.sizeDelta = new Vector2(120f, 16f);
+        rectTransform.sizeDelta = new Vector2(160f, 18f);
         rectTransform.anchoredPosition = Vector2.zero;
 
         return backgroundObject;
@@ -3404,6 +3406,102 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             _healthBarForegroundImage.fillAmount = normalizedHealth;
         }
+    }
+
+    private void UpdateHealthBarAnchorPosition()
+    {
+        if (_healthBarPointTransform == null)
+        {
+            return;
+        }
+
+        if (_visualTransform != null)
+        {
+            MeshFilter visualMeshFilter = _visualTransform.GetComponent<MeshFilter>();
+            if (visualMeshFilter != null && visualMeshFilter.sharedMesh != null)
+            {
+                Vector3 localVisualTop = GetVisualTopLocalPosition(visualMeshFilter.sharedMesh);
+                _healthBarPointTransform.localPosition = new Vector3(
+                    _visualTransform.localPosition.x,
+                    _visualTransform.localPosition.y + localVisualTop.y - -2f,
+                    _visualTransform.localPosition.z);
+
+            
+                return;
+            }
+        }
+
+        Bounds visualBounds = default;
+        bool hasVisualBounds = _visualMeshRenderer != null && _visualMeshRenderer.enabled;
+        if (hasVisualBounds)
+        {
+            visualBounds = _visualMeshRenderer.bounds;
+        }
+        else if (_renderers != null)
+        {
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                Renderer candidate = _renderers[i];
+                if (candidate == null || !candidate.enabled || candidate == _rootMeshRenderer)
+                {
+                    continue;
+                }
+
+                if (!hasVisualBounds)
+                {
+                    visualBounds = candidate.bounds;
+                    hasVisualBounds = true;
+                }
+                else
+                {
+                    visualBounds.Encapsulate(candidate.bounds);
+                }
+            }
+        }
+
+        if (!hasVisualBounds)
+        {
+            _healthBarPointTransform.localPosition = new Vector3(0f, 5.6f, 0f);
+            return;
+        }
+
+        Vector3 worldAnchor = new Vector3(
+            visualBounds.center.x,
+            visualBounds.center.y + Mathf.Max(0.7f, visualBounds.size.y * 0.3f),
+            visualBounds.center.z);
+        _healthBarPointTransform.localPosition = transform.InverseTransformPoint(worldAnchor);
+    }
+
+    private Vector3 GetVisualTopLocalPosition(Mesh mesh)
+    {
+        if (mesh == null)
+        {
+            return new Vector3(0f, 5.6f, 0f);
+        }
+
+        Bounds bounds = mesh.bounds;
+        Vector3 center = bounds.center;
+        Vector3 extents = bounds.extents;
+        Quaternion baseRotation = Quaternion.Euler(_billboardRotationOffsetEuler);
+        float highestY = float.NegativeInfinity;
+
+        for (int x = -1; x <= 1; x += 2)
+        {
+            for (int y = -1; y <= 1; y += 2)
+            {
+                for (int z = -1; z <= 1; z += 2)
+                {
+                    Vector3 corner = center + Vector3.Scale(extents, new Vector3(x, y, z));
+                    Vector3 rotatedCorner = baseRotation * corner;
+                    if (rotatedCorner.y > highestY)
+                    {
+                        highestY = rotatedCorner.y;
+                    }
+                }
+            }
+        }
+
+        return new Vector3(_visualLocalOffset.x, highestY + _visualLocalOffset.y, _visualLocalOffset.z);
     }
 
     private void ConfigureVisualRendererMaterial(MeshRenderer targetRenderer, Material sourceMaterial)
