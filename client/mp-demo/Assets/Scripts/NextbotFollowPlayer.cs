@@ -3256,12 +3256,22 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (_healthBarPointTransform == null)
         {
-            return;
+            GameObject healthBarPointObject = new GameObject(_healthBarPointName);
+            healthBarPointObject.transform.SetParent(transform, false);
+            healthBarPointObject.transform.localPosition = new Vector3(0f, 2.6f, 0f);
+            healthBarPointObject.transform.localRotation = Quaternion.identity;
+            healthBarPointObject.transform.localScale = Vector3.one;
+            _healthBarPointTransform = healthBarPointObject.transform;
         }
 
         if (_healthBarCanvas == null)
         {
             Transform canvasTransform = _healthBarPointTransform.Find(_healthBarCanvasName);
+            if (canvasTransform == null)
+            {
+                canvasTransform = CreateHealthBarCanvas(_healthBarPointTransform).transform;
+            }
+
             if (canvasTransform != null)
             {
                 _healthBarCanvas = canvasTransform.GetComponent<Canvas>();
@@ -3271,6 +3281,11 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (_healthBarBackgroundImage == null && _healthBarCanvas != null)
         {
             Transform backgroundTransform = _healthBarCanvas.transform.Find(_healthBarBackgroundName);
+            if (backgroundTransform == null)
+            {
+                backgroundTransform = CreateHealthBarBackground(_healthBarCanvas.transform).transform;
+            }
+
             if (backgroundTransform != null)
             {
                 _healthBarBackgroundImage = backgroundTransform.GetComponent<Image>();
@@ -3283,6 +3298,10 @@ public class NextbotFollowPlayer : MonoBehaviour
             if (foregroundTransform == null && !string.Equals(_healthBarForegroundName, "Foreground", StringComparison.Ordinal))
             {
                 foregroundTransform = _healthBarBackgroundImage.transform.Find("Foreground");
+            }
+            if (foregroundTransform == null)
+            {
+                foregroundTransform = CreateHealthBarForeground(_healthBarBackgroundImage.transform).transform;
             }
             if (foregroundTransform != null)
             {
@@ -3302,6 +3321,53 @@ public class NextbotFollowPlayer : MonoBehaviour
             _healthBarForegroundImage.fillMethod = Image.FillMethod.Horizontal;
             _healthBarForegroundImage.fillOrigin = (int)Image.OriginHorizontal.Left;
         }
+    }
+
+    private GameObject CreateHealthBarCanvas(Transform parent)
+    {
+        GameObject canvasObject = new GameObject(_healthBarCanvasName, typeof(RectTransform), typeof(Canvas));
+        canvasObject.transform.SetParent(parent, false);
+        canvasObject.transform.localPosition = Vector3.zero;
+        canvasObject.transform.localRotation = Quaternion.identity;
+        canvasObject.transform.localScale = Vector3.one * 0.01f;
+
+        RectTransform rectTransform = canvasObject.GetComponent<RectTransform>();
+        rectTransform.sizeDelta = new Vector2(140f, 24f);
+
+        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        canvas.sortingOrder = 100;
+        canvasObject.SetActive(false);
+        return canvasObject;
+    }
+
+    private GameObject CreateHealthBarBackground(Transform parent)
+    {
+        GameObject backgroundObject = new GameObject(_healthBarBackgroundName, typeof(RectTransform), typeof(Image));
+        backgroundObject.transform.SetParent(parent, false);
+
+        RectTransform rectTransform = backgroundObject.GetComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        rectTransform.sizeDelta = new Vector2(120f, 16f);
+        rectTransform.anchoredPosition = Vector2.zero;
+
+        return backgroundObject;
+    }
+
+    private GameObject CreateHealthBarForeground(Transform parent)
+    {
+        GameObject foregroundObject = new GameObject(_healthBarForegroundName, typeof(RectTransform), typeof(Image));
+        foregroundObject.transform.SetParent(parent, false);
+
+        RectTransform rectTransform = foregroundObject.GetComponent<RectTransform>();
+        rectTransform.anchorMin = Vector2.zero;
+        rectTransform.anchorMax = Vector2.one;
+        rectTransform.offsetMin = new Vector2(2f, 2f);
+        rectTransform.offsetMax = new Vector2(-2f, -2f);
+
+        return foregroundObject;
     }
 
     private void UpdateHealthBarVisual()
@@ -3679,11 +3745,6 @@ public class NextbotFollowPlayer : MonoBehaviour
         bool foundNavMeshPosition = TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition);
         if (foundNavMeshPosition)
         {
-            if (TryResolveGroundedPosition(navMeshPosition, out Vector3 groundedNavMeshPosition))
-            {
-                navMeshPosition = groundedNavMeshPosition;
-            }
-
             transform.position = navMeshPosition;
             _lockedHeight = navMeshPosition.y;
         }
@@ -3725,6 +3786,9 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             return;
         }
+
+        transform.position = navMeshPosition;
+        _lockedHeight = navMeshPosition.y;
 
         if (!_navMeshAgent.enabled)
         {

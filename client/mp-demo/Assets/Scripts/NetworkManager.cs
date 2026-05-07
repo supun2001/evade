@@ -372,16 +372,11 @@ public class NetworkManager : MonoBehaviour
             return;
         }
 
-        // Only adopt server connection URLs from a scene-level NetworkManager when
-        // there is no active room.  Once connected, the server URL must stay stable
-        // so that any future reconnect uses the same endpoint, not whatever URL
-        // happens to be baked into a subsequently loaded game-scene's Inspector.
-        if (room == null)
-        {
-            localServerUrl = sceneManager.localServerUrl;
-            productionServerUrl = sceneManager.productionServerUrl;
-            useProductionServerInEditor = sceneManager.useProductionServerInEditor;
-        }
+        // Keep connection settings owned by the persistent singleton instead of
+        // inheriting per-scene Inspector values. Several gameplay scenes carry
+        // stale server URLs for authoring convenience, and copying them here can
+        // silently switch an in-editor localhost session over to a hosted endpoint
+        // during scene load.
 
         // Gameplay configuration is always absorbed from the scene's NetworkManager
         // so that each map's spawn / timing settings override the previous ones.
