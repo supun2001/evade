@@ -2727,10 +2727,10 @@ public class PlayerController : MonoBehaviour
         _currentArmRecoil = Mathf.Min(_currentArmRecoil + _armRecoilKick, _armRecoilKick * 2f);
         PlayGunshotSound();
 
-        Camera sourceCamera = _gameplayCamera != null ? _gameplayCamera : _playerCamera;
-        if (sourceCamera == null)
+        Transform shotOriginTransform = ResolveCombatShotOriginTransform();
+        if (shotOriginTransform == null)
         {
-            LogShootingDebug("FireCombatShot.Abort", "No source camera");
+            LogShootingDebug("FireCombatShot.Abort", "No shot origin");
             return;
         }
 
@@ -2738,22 +2738,22 @@ public class PlayerController : MonoBehaviour
         Ray shotRay;
         if (targetWorldPoint.HasValue)
         {
-            Vector3 targetDirection = targetWorldPoint.Value - sourceCamera.transform.position;
+            Vector3 targetDirection = targetWorldPoint.Value - shotOriginTransform.position;
             if (targetDirection.sqrMagnitude <= 0.0001f)
             {
-                targetDirection = sourceCamera.transform.forward;
+                targetDirection = shotOriginTransform.forward;
             }
 
-            shotRay = new Ray(sourceCamera.transform.position, targetDirection.normalized);
+            shotRay = new Ray(shotOriginTransform.position, targetDirection.normalized);
         }
         else
         {
-            shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            shotRay = new Ray(shotOriginTransform.position, shotOriginTransform.forward);
         }
 
         PlayMuzzleFlashEffect(shotRay.direction);
         PlayBulletParticleEffect(shotRay.direction);
-        LogShootingDebug("FireCombatShot.Visuals", $"camera={sourceCamera.gameObject.name}, dir={shotRay.direction}");
+        LogShootingDebug("FireCombatShot.Visuals", $"origin={shotOriginTransform.gameObject.name}, dir={shotRay.direction}");
         if (_debugShootingLogs)
         {
             Debug.DrawRay(shotRay.origin, shotRay.direction * shotRange, Color.red, 1.5f);
@@ -2801,6 +2801,39 @@ public class PlayerController : MonoBehaviour
         }
 
         LogShootingDebug("FireCombatShot.End", "No valid damage target found");
+    }
+
+    private Transform ResolveCombatShotOriginTransform()
+    {
+        if (_isSimulationControlled)
+        {
+            if (_remoteArmPointTransform == null)
+            {
+                CacheRemoteArmPointTransform();
+            }
+
+            if (_remoteArmPointTransform != null)
+            {
+                return _remoteArmPointTransform;
+            }
+
+            if (_playerCamera != null)
+            {
+                return _playerCamera.transform;
+            }
+        }
+
+        if (_gameplayCameraTransform != null)
+        {
+            return _gameplayCameraTransform;
+        }
+
+        if (_playerCamera != null)
+        {
+            return _playerCamera.transform;
+        }
+
+        return null;
     }
 
     private void HandleCombatReloadInput()
@@ -2910,7 +2943,8 @@ public class PlayerController : MonoBehaviour
             && offlineModeManager.IsOfflineModeActive
             && offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting)
         {
-            if (!nextbot.TryApplyOfflineCombatDamage(_ak47Damage))
+            string attackerSessionId = GetComponent<OfflinePlayerIdentity>()?.SessionId ?? string.Empty;
+            if (!nextbot.TryApplyOfflineCombatDamage(_ak47Damage, attackerSessionId))
             {
                 return false;
             }
@@ -6309,20 +6343,20 @@ public class PlayerController : MonoBehaviour
             1f - NextbotHitImpactForceRandomness,
             1f + NextbotHitImpactForceRandomness);
 
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive)
+        {
+            OfflinePlayerIdentity identity = GetComponent<OfflinePlayerIdentity>();
+            if (identity != null
+                && !string.IsNullOrWhiteSpace(identity.SessionId)
+                && offlineModeManager.TryEliminatePlayerInstantly(identity.SessionId))
+            {
+                return true;
+            }
+        }
+
         if (!_isSimulationControlled)
         {
-            if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
-                && offlineModeManager.IsOfflineModeActive)
-            {
-                OfflinePlayerIdentity identity = GetComponent<OfflinePlayerIdentity>();
-                if (identity != null
-                    && !string.IsNullOrWhiteSpace(identity.SessionId)
-                    && offlineModeManager.TryEliminatePlayerInstantly(identity.SessionId))
-                {
-                    return true;
-                }
-            }
-
             ApplyNetworkEliminated();
             return true;
         }

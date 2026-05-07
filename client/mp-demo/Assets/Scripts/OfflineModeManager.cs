@@ -622,6 +622,16 @@ public class OfflineModeManager : MonoBehaviour
             return true;
         }
 
+        if (!string.IsNullOrWhiteSpace(attackerSessionId)
+            && _offlinePlayerStates.TryGetValue(attackerSessionId, out OfflinePlayerRoundState attackerState)
+            && attackerState != null
+            && !string.Equals(attackerSessionId, targetSessionId, System.StringComparison.Ordinal))
+        {
+            attackerState.Kills += 1;
+            attackerState.PlayerState.kills = attackerState.Kills;
+            attackerState.Controller?.PlayGetKillSound();
+        }
+
         if (state.CurrentLifeStartUnscaledTime >= 0f)
         {
             int runTimeMs = Mathf.Max(0, Mathf.RoundToInt((Time.unscaledTime - state.CurrentLifeStartUnscaledTime) * 1000f));
@@ -632,9 +642,28 @@ public class OfflineModeManager : MonoBehaviour
         state.WasDowned = false;
         state.IsEliminated = true;
         state.EliminatedAtUnscaledTime = Time.unscaledTime;
+        state.Deaths += 1;
+        state.PlayerState.deaths = state.Deaths;
         state.Controller?.ApplyNetworkEliminated();
         ReleaseRescueAssignment(targetSessionId);
         ReleaseRescueAssignmentsForTarget(targetSessionId);
+        return true;
+    }
+
+    public bool TryRecordOfflineNextbotKill(string attackerSessionId)
+    {
+        if (!IsOfflineRoundActive
+            || CurrentPresentationMode != OfflinePresentationMode.Shooting
+            || string.IsNullOrWhiteSpace(attackerSessionId)
+            || !_offlinePlayerStates.TryGetValue(attackerSessionId, out OfflinePlayerRoundState attackerState)
+            || attackerState == null)
+        {
+            return false;
+        }
+
+        attackerState.Kills += 1;
+        attackerState.PlayerState.kills = attackerState.Kills;
+        attackerState.Controller?.PlayGetKillSound();
         return true;
     }
 
@@ -1626,6 +1655,9 @@ public class OfflineModeManager : MonoBehaviour
             state.BestTimeMs = 0;
             state.DownedCount = 0;
             state.RevivesDone = 0;
+            state.Kills = 0;
+            state.Deaths = 0;
+            state.Assists = 0;
         }
 
         ResetPlayerStateForPhase(state, resetPosition, resetYaw);
@@ -1819,6 +1851,9 @@ public class OfflineModeManager : MonoBehaviour
                 bestTimeMs = state.BestTimeMs,
                 downedCount = state.DownedCount,
                 revivesDone = state.RevivesDone,
+                kills = state.Kills,
+                deaths = state.Deaths,
+                assists = state.Assists,
                 joinOrder = state.JoinOrder,
                 rank = 0,
             });
@@ -1830,6 +1865,7 @@ public class OfflineModeManager : MonoBehaviour
             RoundResultEntryMessageData previous = i > 0 ? entries[i - 1] : null;
             RoundResultEntryMessageData current = entries[i];
             if (previous != null
+                && previous.kills == current.kills
                 && previous.bestTimeMs == current.bestTimeMs
                 && previous.downedCount == current.downedCount
                 && previous.revivesDone == current.revivesDone)
@@ -1852,6 +1888,12 @@ public class OfflineModeManager : MonoBehaviour
 
     private static int CompareRoundResultEntries(RoundResultEntryMessageData a, RoundResultEntryMessageData b)
     {
+        int killsCompare = b.kills.CompareTo(a.kills);
+        if (killsCompare != 0)
+        {
+            return killsCompare;
+        }
+
         int bestTimeCompare = b.bestTimeMs.CompareTo(a.bestTimeMs);
         if (bestTimeCompare != 0)
         {
@@ -1994,6 +2036,9 @@ public class OfflineModeManager : MonoBehaviour
         state.PlayerState.speedBoostTimeRemaining = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedSpeedBoostTimeRemaining() : 0f;
         state.PlayerState.jumpBoostMultiplier = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedJumpBoostMultiplier() : 1f;
         state.PlayerState.jumpBoostTimeRemaining = !isEliminated && IsOfflineRoundActive && controller != null ? controller.GetSyncedJumpBoostTimeRemaining() : 0f;
+        state.PlayerState.kills = state.Kills;
+        state.PlayerState.deaths = state.Deaths;
+        state.PlayerState.assists = state.Assists;
     }
 
     private int GetIntermissionDurationMs()
@@ -2601,6 +2646,8 @@ public class OfflineModeManager : MonoBehaviour
         state.IsEliminated = true;
         state.EliminatedAtUnscaledTime = Time.unscaledTime;
         state.CurrentHealth = 0f;
+        state.Deaths += 1;
+        state.PlayerState.deaths = state.Deaths;
         state.Controller?.SetCombatHealth(0f);
         state.Controller?.ApplyNetworkEliminated();
         ReleaseRescueAssignment(sessionId);
@@ -2653,6 +2700,9 @@ public class OfflineModeManager : MonoBehaviour
         public int BestTimeMs;
         public int DownedCount;
         public int RevivesDone;
+        public int Kills;
+        public int Deaths;
+        public int Assists;
         public float CurrentHealth;
         public float CurrentLifeStartUnscaledTime = -1f;
         public bool WasDowned;

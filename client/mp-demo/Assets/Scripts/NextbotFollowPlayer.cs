@@ -788,7 +788,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
     }
 
-    public bool TryApplyOfflineCombatDamage(float damage)
+    public bool TryApplyOfflineCombatDamage(float damage, string attackerSessionId = "")
     {
         if (!ShouldUseOfflineLocalSimulationRules() || !_offlineNextbotActive || damage <= 0f)
         {
@@ -798,6 +798,12 @@ public class NextbotFollowPlayer : MonoBehaviour
         _offlineCombatHealth = Mathf.Max(0f, _offlineCombatHealth - damage);
         if (_offlineCombatHealth <= 0f)
         {
+            if (!string.IsNullOrWhiteSpace(attackerSessionId)
+                && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager))
+            {
+                offlineModeManager.TryRecordOfflineNextbotKill(attackerSessionId);
+            }
+
             SetOfflineNextbotActive(false);
         }
 

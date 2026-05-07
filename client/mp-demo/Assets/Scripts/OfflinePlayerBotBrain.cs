@@ -496,6 +496,29 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
         ClearCombatTargetLock();
 
+        if (OfflineModeManager.Instance != null
+            && OfflineModeManager.Instance.TryGetAssignedActivePlayer(
+                _identity != null ? _identity.SessionId : string.Empty,
+                _botIndex + 1,
+                origin,
+                out Transform assignedTargetTransform,
+                out float assignedTargetDistance)
+            && assignedTargetTransform != null)
+        {
+            PlayerController assignedTargetController = assignedTargetTransform.GetComponent<PlayerController>();
+            if (IsCombatTargetStillValid(assignedTargetController)
+                && assignedTargetDistance <= _combatEngageDistance * 1.5f)
+            {
+                combatTarget = assignedTargetTransform;
+                combatTargetController = assignedTargetController;
+                combatTargetDistance = assignedTargetDistance;
+                _lockedCombatTarget = combatTarget;
+                _lockedCombatTargetController = combatTargetController;
+                _combatTargetLockedUntil = Time.time + _combatTargetLockDuration;
+                return true;
+            }
+        }
+
         PlayerController[] controllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
         float bestScore = float.NegativeInfinity;
         for (int i = 0; i < controllers.Length; i++)
