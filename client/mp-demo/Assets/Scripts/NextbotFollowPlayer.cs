@@ -285,22 +285,8 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (_navMeshAgent != null)
         {
+            _navMeshAgent.enabled = false;
             ConfigureAgentFromCurrentPosition();
-            _navMeshAgent.updatePosition = false;
-            _navMeshAgent.updateRotation = false;
-            _navMeshAgent.updateUpAxis = true;
-            _navMeshAgent.speed = _moveSpeed;
-            _navMeshAgent.acceleration = _acceleration;
-            _navMeshAgent.stoppingDistance = _stoppingDistance;
-            _navMeshAgent.angularSpeed = Mathf.Max(120f, _rotationSpeed * 45f);
-
-            if (_characterController != null)
-            {
-                // Give the agent a slightly smaller radius than the physical body (80%)
-                // to prevent it from getting stuck on the very edge of walls/gaps.
-                _navMeshAgent.radius = _characterController.radius * 0.8f;
-                _navMeshAgent.height = _characterController.height;
-            }
         }
 
         if (TryResolveGroundedPosition(transform.position, out Vector3 groundedStartPosition))
@@ -309,6 +295,8 @@ public class NextbotFollowPlayer : MonoBehaviour
             _lockedHeight = groundedStartPosition.y;
             _groundHeightVelocity = 0f;
         }
+
+        InitializeNavMeshAgentFromCurrentPosition();
     }
 
     private void OnDestroy()
@@ -496,6 +484,11 @@ public class NextbotFollowPlayer : MonoBehaviour
         SetOfflineLocalAuthority(true);
         _offlineNextbotActive = true;
         _offlineCombatHealth = _maxCombatHealth;
+
+        if (TryResolveGroundedPosition(spawnPosition, out Vector3 groundedSpawnPosition))
+        {
+            spawnPosition = groundedSpawnPosition;
+        }
 
         if (_characterController != null)
         {
@@ -1433,10 +1426,17 @@ public class NextbotFollowPlayer : MonoBehaviour
             return null;
         }
 
+        bool isClaimedByOtherNextbot = IsTargetClaimedByOtherNextbot(candidateTransform);
+
+        if (_forceOfflineLocalAuthority && isClaimedByOtherNextbot && !isCurrentTarget)
+        {
+            return null;
+        }
+
         if (!_forceOfflineLocalAuthority
             && ShouldUseMapLocalNavMeshPresentation()
             && !isCurrentTarget
-            && IsTargetClaimedByOtherNextbot(candidateTransform))
+            && isClaimedByOtherNextbot)
         {
             return null;
         }
@@ -1458,14 +1458,14 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             // Only one nextbot should chase the local player in offline mode.
             // If someone else is already chasing them, we don't apply the massive pressure bonus.
-            if (isCurrentTarget || !IsTargetClaimedByOtherNextbot(candidateTransform))
+            if (isCurrentTarget || !isClaimedByOtherNextbot)
             {
                 localPlayerPressureBonus = OfflineLocalPlayerPressureBonus;
             }
         }
         
         float targetPressurePenalty = _forceOfflineLocalAuthority
-            ? (IsTargetClaimedByOtherNextbot(candidateTransform) ? _sameTargetScorePenalty : 0f)
+            ? (isClaimedByOtherNextbot ? _sameTargetScorePenalty : 0f)
             : CountOtherNextbotsTargeting(candidateTransform) * _sameTargetScorePenalty;
 
         return new ScoredTarget
@@ -1977,6 +1977,10 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             Vector3 agentGroundPos = _navMeshAgent.nextPosition;
             Vector3 syncedPos = agentGroundPos;
+            if (TryResolveGroundedPosition(agentGroundPos, out Vector3 groundedAgentPosition))
+            {
+                syncedPos = groundedAgentPosition;
+            }
             transform.position = syncedPos;
             _navMeshAgent.nextPosition = syncedPos;
             _lockedHeight = syncedPos.y;
@@ -3277,9 +3281,59 @@ public class NextbotFollowPlayer : MonoBehaviour
         _agentVisualOffset = _navMeshAgent.baseOffset;
     }
 
+    private void InitializeNavMeshAgentFromCurrentPosition()
+    {
+        if (_navMeshAgent == null)
+        {
+            return;
+        }
+
+        ConfigureAgentFromCurrentPosition();
+
+        if (_characterController != null)
+        {
+            // Give the agent a slightly smaller radius than the physical body (80%)
+            // to prevent it from getting stuck on the very edge of walls/gaps.
+            _navMeshAgent.radius = _characterController.radius * 0.8f;
+            _navMeshAgent.height = _characterController.height;
+        }
+
+        bool foundNavMeshPosition = TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition);
+        if (foundNavMeshPosition)
+        {
+            if (TryResolveGroundedPosition(navMeshPosition, out Vector3 groundedNavMeshPosition))
+            {
+                navMeshPosition = groundedNavMeshPosition;
+            }
+
+            transform.position = navMeshPosition;
+            _lockedHeight = navMeshPosition.y;
+        }
+
+        if (!foundNavMeshPosition)
+        {
+            _navMeshAgent.enabled = false;
+            return;
+        }
+
+        _navMeshAgent.enabled = true;
+        _navMeshAgent.updatePosition = false;
+        _navMeshAgent.updateRotation = false;
+        _navMeshAgent.updateUpAxis = true;
+        _navMeshAgent.speed = _moveSpeed;
+        _navMeshAgent.acceleration = _acceleration;
+        _navMeshAgent.stoppingDistance = _stoppingDistance;
+        _navMeshAgent.angularSpeed = Mathf.Max(120f, _rotationSpeed * 45f);
+
+        if (_navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.Warp(transform.position);
+        }
+    }
+
     private void EnsureAgentOnNavMesh()
     {
-        if (_navMeshAgent == null || !_navMeshAgent.enabled || _navMeshAgent.isOnNavMesh)
+        if (_navMeshAgent == null || _navMeshAgent.isOnNavMesh)
         {
             return;
         }
@@ -3292,6 +3346,18 @@ public class NextbotFollowPlayer : MonoBehaviour
         if (!TryGetNearestNavMeshPosition(transform.position, out Vector3 navMeshPosition))
         {
             return;
+        }
+
+        if (!_navMeshAgent.enabled)
+        {
+            _navMeshAgent.enabled = true;
+            _navMeshAgent.updatePosition = false;
+            _navMeshAgent.updateRotation = false;
+            _navMeshAgent.updateUpAxis = true;
+            _navMeshAgent.speed = _moveSpeed;
+            _navMeshAgent.acceleration = _acceleration;
+            _navMeshAgent.stoppingDistance = _stoppingDistance;
+            _navMeshAgent.angularSpeed = Mathf.Max(120f, _rotationSpeed * 45f);
         }
 
         _navMeshAgent.Warp(navMeshPosition);

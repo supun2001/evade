@@ -72,6 +72,11 @@ public class PlayerLocomotionInput : MonoBehaviour,
 
     public void SetSimulatedInputEnabled(bool useSimulatedInput)
     {
+        if (_useSimulatedInput == useSimulatedInput)
+        {
+            return;
+        }
+
         _useSimulatedInput = useSimulatedInput;
 
         if (!useSimulatedInput)

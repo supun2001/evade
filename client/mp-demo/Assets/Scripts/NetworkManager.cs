@@ -65,10 +65,11 @@ public struct FloorHeightSampleConfig
 public class NetworkManager : MonoBehaviour
 {
     private const string DefaultLocalServerUrl = "ws://localhost:2567";
-    private const string DefaultProductionServerUrl = "wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev";
+    private const string HostedServerUrl = "wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev";
     private const string ServerUrlOverridePlayerPrefsKey = "NetworkManager.ServerUrlOverride";
     private const string ServerUrlOverrideQueryParameterName = "server";
     private const string ServerUrlOverrideCommandLineArgumentName = "-serverUrl";
+    private const int MatchmakingTimeoutMs = 60000;
     private const int PlayerUpdateFieldCount = 31;
     private const string WalkableLayerName = "Walkable";
     private const string RampLayerName = "Ramp";
@@ -103,7 +104,7 @@ public class NetworkManager : MonoBehaviour
     [SerializeField] private string localServerUrl = DefaultLocalServerUrl;
 
     [Tooltip("Production server URL (Render/Railway). Must use wss:// for WebGL.")]
-    [SerializeField] private string productionServerUrl = DefaultProductionServerUrl;
+    [SerializeField] private string productionServerUrl = HostedServerUrl;
     [Tooltip("Use the production URL even while running in the Unity Editor.")]
     [SerializeField] private bool useProductionServerInEditor = false;
     [Header("Gameplay Configuration")]
@@ -210,7 +211,7 @@ public class NetworkManager : MonoBehaviour
         Application.runInBackground = true;
     }
 
-    private async void Start()
+    private void Start()
     {
         client = CreateClient();
     }
@@ -371,9 +372,19 @@ public class NetworkManager : MonoBehaviour
             return;
         }
 
-        localServerUrl = sceneManager.localServerUrl;
-        productionServerUrl = sceneManager.productionServerUrl;
-        useProductionServerInEditor = sceneManager.useProductionServerInEditor;
+        // Only adopt server connection URLs from a scene-level NetworkManager when
+        // there is no active room.  Once connected, the server URL must stay stable
+        // so that any future reconnect uses the same endpoint, not whatever URL
+        // happens to be baked into a subsequently loaded game-scene's Inspector.
+        if (room == null)
+        {
+            localServerUrl = sceneManager.localServerUrl;
+            productionServerUrl = sceneManager.productionServerUrl;
+            useProductionServerInEditor = sceneManager.useProductionServerInEditor;
+        }
+
+        // Gameplay configuration is always absorbed from the scene's NetworkManager
+        // so that each map's spawn / timing settings override the previous ones.
         mapIdOverride = sceneManager.mapIdOverride;
         nextbotSpawnPoints = new List<NextbotSpawnPointConfig>(sceneManager.nextbotSpawnPoints);
         playerSpawnPoints = new List<PlayerSpawnPointConfig>(sceneManager.playerSpawnPoints);
@@ -870,7 +881,8 @@ public class NetworkManager : MonoBehaviour
     public async Task<string> CreateGame(){
         InitializeClient();
         try{
-            room = await client.Create<MyRoomState>(roomName, BuildJoinRoomOptions());
+            Debug.Log($"NetworkManager: creating room '{roomName}' on {serverUrl}");
+            room = await WaitForMatchmaking(client.Create<MyRoomState>(roomName, BuildJoinRoomOptions()), "Create room");
             OnRoomJoined();
             return null; // Success
 
@@ -887,7 +899,8 @@ public class NetworkManager : MonoBehaviour
         s_joinGameUsesShootingMode = false;
         try
         {
-            room = await client.JoinOrCreate<MyRoomState>(roomName, BuildJoinRoomOptions());
+            Debug.Log($"NetworkManager: joinOrCreate room '{roomName}' on {serverUrl}");
+            room = await WaitForMatchmaking(client.JoinOrCreate<MyRoomState>(roomName, BuildJoinRoomOptions()), "Join or create room");
             OnRoomJoined();
             return null;
         }
@@ -906,7 +919,8 @@ public class NetworkManager : MonoBehaviour
         s_joinGameUsesShootingMode = true;
         try
         {
-            room = await client.JoinById<MyRoomState>(targetRoomId, BuildJoinRoomOptions());
+            Debug.Log($"NetworkManager: joining room id '{targetRoomId}' on {serverUrl}");
+            room = await WaitForMatchmaking(client.JoinById<MyRoomState>(targetRoomId, BuildJoinRoomOptions()), "Join room by id");
             OnRoomJoined();
             return null; // Success
         }
@@ -916,6 +930,18 @@ public class NetworkManager : MonoBehaviour
             Debug.LogError(error); 
             return error;
         }
+    }
+
+    private async Task<ColyseusRoom<MyRoomState>> WaitForMatchmaking(Task<ColyseusRoom<MyRoomState>> matchmakingTask, string operation)
+    {
+        Task timeoutTask = Task.Delay(MatchmakingTimeoutMs);
+        Task completedTask = await Task.WhenAny(matchmakingTask, timeoutTask);
+        if (completedTask == timeoutTask)
+        {
+            throw new TimeoutException($"{operation} timed out after {MatchmakingTimeoutMs / 1000f:0.#} seconds.");
+        }
+
+        return await matchmakingTask;
     }
 
     private string FormatNetworkError(string prefix, Exception exception)
@@ -928,7 +954,7 @@ public class NetworkManager : MonoBehaviour
 
         if (isCodespacesTunnel)
         {
-            return $"{prefix}: {message} | server={activeServerUrl} | If this is GitHub Codespaces WebGL, make sure port 2567 is Public and the codespace server is still running. | details={detail}";
+            return $"{prefix}: {message} | server={activeServerUrl} | If this build is outside your GitHub Codespace browser session, use a public host or launch with -serverUrl / ?server=. | details={detail}";
         }
 
         return $"{prefix}: {message} | server={activeServerUrl} | details={detail}";
@@ -1608,14 +1634,14 @@ public class NetworkManager : MonoBehaviour
 
     private void MigrateLegacyServerUrls()
     {
-        if (string.IsNullOrWhiteSpace(localServerUrl))
+        if (IsLegacyHostedUrl(localServerUrl))
         {
-            localServerUrl = DefaultLocalServerUrl;
+            localServerUrl = HostedServerUrl;
         }
 
         if (IsLegacyHostedUrl(productionServerUrl) || string.IsNullOrWhiteSpace(productionServerUrl))
         {
-            productionServerUrl = DefaultProductionServerUrl;
+            productionServerUrl = HostedServerUrl;
         }
     }
 
@@ -1627,7 +1653,8 @@ public class NetworkManager : MonoBehaviour
         }
 
         return url.Contains("azurewebsites.net", StringComparison.OrdinalIgnoreCase)
-            || url.Contains("unity6-demo-mp.onrender.com", StringComparison.OrdinalIgnoreCase);
+            || url.Contains("unity6-demo-mp.onrender.com", StringComparison.OrdinalIgnoreCase)
+            || url.Contains("evade-6o6d.onrender.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private Uri BuildServerUri(string rawServerUrl)
@@ -1675,7 +1702,7 @@ public class NetworkManager : MonoBehaviour
             Debug.Log("Game Started!");
             
             // Notify LobbyUI to hide HUD
-            LobbyUI lobby = FindObjectOfType<LobbyUI>();
+            LobbyUI lobby = FindFirstObjectByType<LobbyUI>();
             if (lobby != null)
             {
                 lobby.HandleStartGameSignal();
@@ -1698,7 +1725,10 @@ public class NetworkManager : MonoBehaviour
 
         room.OnMessage<string>("playerRevived", (_) =>
         {
-            if (!players.TryGetValue(room.SessionId, out GameObject localPlayer) || localPlayer == null)
+            string localSessionId = room != null ? room.SessionId : string.Empty;
+            if (string.IsNullOrWhiteSpace(localSessionId)
+                || !players.TryGetValue(localSessionId, out GameObject localPlayer)
+                || localPlayer == null)
             {
                 return;
             }
@@ -1710,8 +1740,10 @@ public class NetworkManager : MonoBehaviour
         room.OnMessage<string>("playerRespawnCountdown", (json) =>
         {
             PlayerRespawnCountdownMessageData payload = ParseJsonMessage<PlayerRespawnCountdownMessageData>(json);
+            string localSessionId = room != null ? room.SessionId : string.Empty;
             if (payload == null
-                || !players.TryGetValue(room.SessionId, out GameObject localPlayer)
+                || string.IsNullOrWhiteSpace(localSessionId)
+                || !players.TryGetValue(localSessionId, out GameObject localPlayer)
                 || localPlayer == null)
             {
                 return;
@@ -1727,8 +1759,10 @@ public class NetworkManager : MonoBehaviour
         room.OnMessage<string>("roundPlayerReset", (json) =>
         {
             RoundPlayerResetMessageData payload = ParseJsonMessage<RoundPlayerResetMessageData>(json);
+            string localSessionId = room != null ? room.SessionId : string.Empty;
             if (payload != null
-                && players.TryGetValue(room.SessionId, out GameObject localPlayer)
+                && !string.IsNullOrWhiteSpace(localSessionId)
+                && players.TryGetValue(localSessionId, out GameObject localPlayer)
                 && localPlayer != null)
             {
                 NetworkPlayer networkPlayer = localPlayer.GetComponent<NetworkPlayer>();
@@ -1998,13 +2032,16 @@ public class NetworkManager : MonoBehaviour
 
         activeServerMapId = mapId;
         selectedMapId = mapId;
+        // Clear the loading flag BEFORE reconciling player representations so that
+        // OnPlayerAdded is not blocked by IsPreparingServerSelectedMap and the local
+        // player actually spawns (was causing permanent black screen after join).
+        _isLoadingServerMap = false;
+        _serverMapLoadCoroutine = null;
         SyncCurrentMapConfiguration();
         ReconcilePlayerRepresentations(room?.State);
         RestartLocalRoundResetCoroutine();
         LobbyUI.ForceClearJoinTransitionOverlay();
         Debug.Log($"NetworkManager: finished loading scene '{sceneName}'. Active scene is now '{SceneManager.GetActiveScene().name}'.");
-        _isLoadingServerMap = false;
-        _serverMapLoadCoroutine = null;
     }
 
     private void ClearSpawnedPlayerObjects()
@@ -2072,6 +2109,11 @@ public class NetworkManager : MonoBehaviour
 
     private void RestartLocalRoundResetCoroutine()
     {
+        if (this == null || Instance != this || !gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
         if (_localRoundResetCoroutine != null)
         {
             StopCoroutine(_localRoundResetCoroutine);
@@ -2184,6 +2226,11 @@ public class NetworkManager : MonoBehaviour
             StopCoroutine(_serverMapLoadCoroutine);
             _serverMapLoadCoroutine = null;
         }
+        if (_localRoundResetCoroutine != null)
+        {
+            StopCoroutine(_localRoundResetCoroutine);
+            _localRoundResetCoroutine = null;
+        }
         _hasReceivedRoundPhaseFromServer = false;
         StopFallbackRoundFlow();
 
@@ -2192,6 +2239,14 @@ public class NetworkManager : MonoBehaviour
         if (hadRoomState)
         {
             RoomLeftEvent?.Invoke();
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
         }
     }
 

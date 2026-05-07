@@ -738,7 +738,7 @@ public class RoundHudController : MonoBehaviour
         avatar.style.borderBottomLeftRadius = 2f;
         avatar.style.borderBottomRightRadius = 2f;
         avatar.style.backgroundColor = new Color(1f, 1f, 1f, 0.08f);
-        avatar.style.unityBackgroundScaleMode = ScaleMode.ScaleToFit;
+        avatar.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Contain));
         Texture2D avatarTexture = GetScoreboardIconTexture(index);
         if (avatarTexture != null)
         {
@@ -1276,7 +1276,7 @@ public class RoundHudController : MonoBehaviour
         icon.style.right = 0f;
         icon.style.top = 0f;
         icon.style.bottom = 0f;
-        icon.style.unityBackgroundScaleMode = ScaleMode.ScaleAndCrop;
+        icon.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Cover));
         Texture2D iconTexture = GetMapVoteIconTexture(candidate);
         if (iconTexture != null)
         {

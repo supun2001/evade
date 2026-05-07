@@ -154,6 +154,7 @@ public class LobbyUI : MonoBehaviour
     private const string BoomBoomMapId = "boomBoom";
     private const float JoinTransitionFadeDuration = 0.24f;
     private const float JoinTransitionLeadTime = 0.12f;
+    private const float JoinTransitionWatchdogSeconds = 70f;
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
@@ -319,7 +320,7 @@ public class LobbyUI : MonoBehaviour
             {
                 ActivateSpectateMode();
             }
-            else if (menuPanel.activeSelf)
+            else if (menuPanel != null && menuPanel.activeSelf)
             {
                 if (CanEnterJoinedRoomNow())
                 {
@@ -329,6 +330,15 @@ public class LobbyUI : MonoBehaviour
                 {
                     SetJoinTransitionVisible(false);
                 }
+            }
+            else if (!hasAutoReadiedCurrentRoom && CanEnterJoinedRoomNow())
+            {
+                // Fallback: the menu panel was already hidden because LobbyUI.Start()
+                // ran while the server-driven scene load was in progress
+                // (_isLoadingServerMap = true), so it couldn't call OnGameStarted().
+                // Now that the map is fully loaded and the local player has spawned,
+                // kick off gameplay here instead.
+                AutoStartJoinedRoom();
             }
         }
 
@@ -587,7 +597,7 @@ public class LobbyUI : MonoBehaviour
     private void StartOfflineMode()
     {
         StartOfflineMode(
-            OfflineModeManager.OfflinePresentationMode.Runner,
+            OfflineModeManager.OfflinePresentationMode.Shooting,
             "Offline mode started. Press O in the menu to launch it again later.");
     }
 
@@ -649,16 +659,29 @@ public class LobbyUI : MonoBehaviour
         await WaitForJoinTransitionLeadAsync();
 
         if (joinButton != null) joinButton.interactable = false;
-        if (NetworkManager.Instance != null)
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager == null)
         {
-            NetworkManager.Instance.SetMultiplayerShootingPresentationEnabled(true);
+            SetJoinTransitionVisible(false);
+            ShowNotification("Network manager is not ready.");
+            if (joinButton != null) joinButton.interactable = true;
+            return;
         }
-        string error = await NetworkManager.Instance.JoinGame(code);
+
+        networkManager.SetMultiplayerShootingPresentationEnabled(true);
+
+        Debug.Log($"LobbyUI: attempting room-code join '{code}'.");
+        string error = await networkManager.JoinGame(code);
+        Debug.Log(string.IsNullOrEmpty(error)
+            ? "LobbyUI: room-code join completed successfully."
+            : $"LobbyUI: room-code join failed: {error}");
 
         if (string.IsNullOrEmpty(error))
         {
+            networkManager.FinalizeLocalSelectedMapJoinIfReady(SceneManager.GetActiveScene().name);
             // Sync Skin Immediately on Join
             SaveAndSyncSkin();
+            OnGameStarted();
         }
         else
         {
@@ -1273,6 +1296,11 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
         GameObject overlayRoot = new GameObject("JoinTransitionOverlay");
         UnityEngine.Object.DontDestroyOnLoad(overlayRoot);
 
@@ -1306,7 +1334,7 @@ public class LobbyUI : MonoBehaviour
     {
         EnsureJoinTransitionOverlay();
         s_joinTransitionTargetAlpha = visible ? 1f : 0f;
-        s_joinTransitionVisibleUntilRealtime = visible ? Time.realtimeSinceStartup + 2.5f : -1f;
+        s_joinTransitionVisibleUntilRealtime = visible ? Time.realtimeSinceStartup + JoinTransitionWatchdogSeconds : -1f;
         if (s_joinTransitionCanvasGroup == null)
         {
             return;

@@ -2614,7 +2614,7 @@ public class PlayerController : MonoBehaviour
         if (_nextbotWarningArrowElement != null && _nextbotWarningArrowTexture != null)
         {
             _nextbotWarningArrowElement.style.backgroundImage = new StyleBackground(_nextbotWarningArrowTexture);
-            _nextbotWarningArrowElement.style.unityBackgroundScaleMode = ScaleMode.ScaleToFit;
+            _nextbotWarningArrowElement.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Contain));
         }
 
         if (_nextbotWarningSkullElement != null)
@@ -6267,6 +6267,18 @@ public class PlayerController : MonoBehaviour
 
         if (!_isSimulationControlled)
         {
+            if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+                && offlineModeManager.IsOfflineModeActive)
+            {
+                OfflinePlayerIdentity identity = GetComponent<OfflinePlayerIdentity>();
+                if (identity != null
+                    && !string.IsNullOrWhiteSpace(identity.SessionId)
+                    && offlineModeManager.TryEliminatePlayerInstantly(identity.SessionId))
+                {
+                    return true;
+                }
+            }
+
             ApplyNetworkEliminated();
             return true;
         }
