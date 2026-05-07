@@ -83,10 +83,11 @@ public class NextbotSpawner : MonoBehaviour
     {
         List<string> desiredNextbotIds = GetDesiredNextbotIds();
         List<NextbotFollowPlayer> sceneNextbots = GetSceneNextbots();
+        List<Vector3> desiredSpawnPositions = GetDesiredSpawnPositions(desiredNextbotIds.Count);
 
         if (sceneNextbots.Count == 0)
         {
-            NextbotFollowPlayer spawnedTemplate = SpawnTemplateNextbot();
+            NextbotFollowPlayer spawnedTemplate = SpawnTemplateNextbot(GetSpawnPositionForIndex(desiredSpawnPositions, 0));
             if (spawnedTemplate == null)
             {
                 return;
@@ -98,7 +99,8 @@ public class NextbotSpawner : MonoBehaviour
         NextbotFollowPlayer template = sceneNextbots[0];
         for (int index = sceneNextbots.Count; index < desiredNextbotIds.Count; index++)
         {
-            GameObject clone = Instantiate(template.gameObject, template.transform.position, template.transform.rotation);
+            Vector3 spawnPosition = GetSpawnPositionForIndex(desiredSpawnPositions, index);
+            GameObject clone = Instantiate(template.gameObject, spawnPosition, template.transform.rotation);
             clone.name = $"NextBots_{index + 1}";
             NextbotFollowPlayer nextbot = clone.GetComponent<NextbotFollowPlayer>();
             if (nextbot != null)
@@ -140,6 +142,41 @@ public class NextbotSpawner : MonoBehaviour
         }
 
         RemoveExistingNextbotAgents();
+    }
+
+    private static Vector3 GetSpawnPositionForIndex(List<Vector3> desiredSpawnPositions, int index)
+    {
+        if (desiredSpawnPositions == null || desiredSpawnPositions.Count == 0)
+        {
+            return Vector3.zero;
+        }
+
+        if (index < desiredSpawnPositions.Count)
+        {
+            return desiredSpawnPositions[index];
+        }
+
+        return desiredSpawnPositions[desiredSpawnPositions.Count - 1];
+    }
+
+    private static List<Vector3> GetDesiredSpawnPositions(int desiredCount)
+    {
+        if (NetworkManager.Instance != null)
+        {
+            List<Vector3> configuredSpawns = NetworkManager.Instance.GetConfiguredNextbotSpawnPositions();
+            if (configuredSpawns != null && configuredSpawns.Count > 0)
+            {
+                return configuredSpawns;
+            }
+        }
+
+        List<Vector3> fallback = new List<Vector3>(Mathf.Max(1, desiredCount));
+        for (int i = 0; i < Mathf.Max(1, desiredCount); i++)
+        {
+            fallback.Add(Vector3.zero);
+        }
+
+        return fallback;
     }
 
     private List<string> GetDesiredNextbotIds()
@@ -208,14 +245,14 @@ public class NextbotSpawner : MonoBehaviour
         return sceneNextbots;
     }
 
-    private NextbotFollowPlayer SpawnTemplateNextbot()
+    private NextbotFollowPlayer SpawnTemplateNextbot(Vector3 spawnPosition)
     {
         if (_nextbotPrefab == null)
         {
             return null;
         }
 
-        GameObject clone = Instantiate(_nextbotPrefab);
+        GameObject clone = Instantiate(_nextbotPrefab, spawnPosition, Quaternion.identity);
         clone.name = "NextBots_1";
         clone.SetActive(true);
         return clone.GetComponent<NextbotFollowPlayer>();
