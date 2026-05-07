@@ -138,7 +138,7 @@ public class OfflineModeManager : MonoBehaviour
 
             if (Time.unscaledTime - state.EliminatedAtUnscaledTime >= 5f)
             {
-                ResetSingleOfflinePlayer(state, state.SessionId, true, reservedSpawnPositions);
+                ResetSingleOfflinePlayer(state, state.SessionId, resetRoundStats: false, startLifeTimer: true, reservedSpawnPositions);
             }
         }
     }
@@ -1575,7 +1575,7 @@ public class OfflineModeManager : MonoBehaviour
         // Priority 1: Process local player first to ensure they get the primary spawn point
         if (_offlinePlayerStates.TryGetValue("offline_local", out OfflinePlayerRoundState localState))
         {
-            ResetSingleOfflinePlayer(localState, "offline_local", roundStarted, reservedSpawnPositions);
+            ResetSingleOfflinePlayer(localState, "offline_local", roundStarted, roundStarted, reservedSpawnPositions);
         }
 
         // Priority 2: Process all other players (bots)
@@ -1586,11 +1586,16 @@ public class OfflineModeManager : MonoBehaviour
                 continue;
             }
 
-            ResetSingleOfflinePlayer(pair.Value, pair.Key, roundStarted, reservedSpawnPositions);
+            ResetSingleOfflinePlayer(pair.Value, pair.Key, roundStarted, roundStarted, reservedSpawnPositions);
         }
     }
 
-    private void ResetSingleOfflinePlayer(OfflinePlayerRoundState state, string sessionId, bool roundStarted, List<Vector3> reservedSpawnPositions)
+    private void ResetSingleOfflinePlayer(
+        OfflinePlayerRoundState state,
+        string sessionId,
+        bool resetRoundStats,
+        bool startLifeTimer,
+        List<Vector3> reservedSpawnPositions)
     {
         if (state == null || state.PlayerObject == null)
         {
@@ -1649,8 +1654,8 @@ public class OfflineModeManager : MonoBehaviour
         state.IsEliminated = false;
         state.EliminatedAtUnscaledTime = -1f;
         state.CurrentHealth = controller != null ? controller.MaxHealth : 100f;
-        state.CurrentLifeStartUnscaledTime = roundStarted ? Time.unscaledTime : -1f;
-        if (roundStarted)
+        state.CurrentLifeStartUnscaledTime = startLifeTimer ? Time.unscaledTime : -1f;
+        if (resetRoundStats)
         {
             state.BestTimeMs = 0;
             state.DownedCount = 0;

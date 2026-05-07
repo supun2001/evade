@@ -327,7 +327,8 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             return;
         }
 
-        _controller.SnapRemoteVisualYaw(RunnerVisualYaw);
+        float targetVisualYaw = Mathf.Repeat(transform.eulerAngles.y + RunnerVisualYaw, 360f);
+        _controller.SnapRemoteVisualYaw(targetVisualYaw);
     }
 
     private Vector3 DetermineDestination(

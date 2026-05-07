@@ -5100,7 +5100,22 @@ public class PlayerController : MonoBehaviour
             return false;
         }
 
-        return !hitTransform.IsChildOf(_transform) && !IsCarryLinkedTransform(hitTransform);
+        if (hitTransform.IsChildOf(_transform) || IsCarryLinkedTransform(hitTransform))
+        {
+            return false;
+        }
+
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive)
+        {
+            PlayerController hitPlayerController = hit.collider.GetComponentInParent<PlayerController>();
+            if (hitPlayerController != null && hitPlayerController != this)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private bool IsCarryLinkedTransform(Transform candidate)
