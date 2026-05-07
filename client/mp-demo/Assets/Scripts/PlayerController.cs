@@ -2352,7 +2352,39 @@ public class PlayerController : MonoBehaviour
             view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
         }
 
-        // Nextbot health bars removed as requested.
+        NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        for (int i = 0; i < nextbots.Length; i++)
+        {
+            NextbotFollowPlayer nextbot = nextbots[i];
+            if (nextbot == null
+                || !nextbot.IsCombatActive
+                || !nextbot.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            string nextbotKey = $"nextbot:{(string.IsNullOrWhiteSpace(nextbot.NetworkNextbotId) ? i.ToString() : nextbot.NetworkNextbotId)}";
+            Vector3 worldAnchor = nextbot.transform.position + Vector3.up * 1.9f;
+            if (!TryGetEnemyHealthBarScreenPoint(worldAnchor, out float uiX, out float uiY))
+            {
+                continue;
+            }
+
+            activeSessionIds.Add(nextbotKey);
+            EnemyHealthBarView view = GetOrCreateEnemyHealthBar(nextbotKey);
+            if (view == null)
+            {
+                continue;
+            }
+
+            float normalizedHealth = Mathf.Clamp01(nextbot.CurrentCombatHealth / Mathf.Max(1f, nextbot.MaxCombatHealth));
+            view.Root.style.display = DisplayStyle.Flex;
+            view.Root.style.left = uiX;
+            view.Root.style.top = uiY;
+            view.Label.text = $"{nextbot.CombatDisplayName}  {Mathf.CeilToInt(nextbot.CurrentCombatHealth)}";
+            view.Fill.style.width = Length.Percent(normalizedHealth * 100f);
+            view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
+        }
 
         foreach (System.Collections.Generic.KeyValuePair<string, EnemyHealthBarView> pair in _enemyHealthBarViews)
         {

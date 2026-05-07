@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.UI;
 
 public class NextbotFollowPlayer : MonoBehaviour
 {
@@ -159,6 +160,14 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _visualGroundPadding = 0.02f;
     [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
 
+    [Header("Health Bar")]
+    [SerializeField] private string _healthBarPointName = "HealthBarPoint";
+    [SerializeField] private string _healthBarCanvasName = "Healthbar Canvas";
+    [SerializeField] private string _healthBarBackgroundName = "Background";
+    [SerializeField] private string _healthBarForegroundName = "Forground";
+    [SerializeField] private Color _healthBarBackgroundColor = new Color(0.86f, 0.12f, 0.12f, 1f);
+    [SerializeField] private Color _healthBarFillColor = new Color(0.12f, 0.9f, 0.2f, 1f);
+
     [Header("Audio")]
     [SerializeField] private AudioSource _loopAudioSource;
     [SerializeField] private AudioClip _loopClip;
@@ -205,6 +214,10 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Renderer[] _renderers = System.Array.Empty<Renderer>();
     private Collider[] _colliders = System.Array.Empty<Collider>();
     private Transform _visualTransform;
+    private Transform _healthBarPointTransform;
+    private Canvas _healthBarCanvas;
+    private Image _healthBarBackgroundImage;
+    private Image _healthBarForegroundImage;
     private MeshRenderer _rootMeshRenderer;
     private MeshRenderer _visualMeshRenderer;
     private CapsuleCollider _combatHitboxCollider;
@@ -280,6 +293,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _pathBuffer = new NavMeshPath();
         _lockedHeight = transform.position.y;
         EnsureVisualBillboardChild();
+        EnsureHealthBarVisual();
         EnsureCombatHitbox();
         EnsureLoopAudioSource();
         _nextbotColliders = GetComponentsInChildren<Collider>(true);
@@ -346,6 +360,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         if (ShouldUseTargetFacingVisuals() && UpdateTargetFacingRotation())
         {
+            UpdateHealthBarVisual();
             return;
         }
 
@@ -353,6 +368,8 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             UpdateBillboardRotation();
         }
+
+        UpdateHealthBarVisual();
     }
 
     private bool ShouldUseTargetFacingVisuals()
@@ -473,7 +490,9 @@ public class NextbotFollowPlayer : MonoBehaviour
             _offlineCombatHealth = _maxCombatHealth;
         }
 
+        SetOfflineDirectDriverActive(isActive);
         SetServerVisualState(isActive);
+        UpdateHealthBarVisual();
         if (isActive)
         {
             EnsureAgentOnNavMesh();
@@ -493,6 +512,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         _isJumping = false;
         _jumpVelocity = Vector3.zero;
         _isTraversingOffMeshLink = false;
+        UpdateHealthBarVisual();
     }
 
     public void PrepareOfflineNextbot(Vector3 spawnPosition)
@@ -796,6 +816,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         _offlineCombatHealth = Mathf.Max(0f, _offlineCombatHealth - damage);
+        UpdateHealthBarVisual();
         if (_offlineCombatHealth <= 0f)
         {
             if (!string.IsNullOrWhiteSpace(attackerSessionId)
@@ -808,6 +829,15 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         return true;
+    }
+
+    private void SetOfflineDirectDriverActive(bool isActive)
+    {
+        OfflineNextbotDirectDriver offlineDirectDriver = GetComponent<OfflineNextbotDirectDriver>();
+        if (offlineDirectDriver != null)
+        {
+            offlineDirectDriver.SetDriverActive(isActive);
+        }
     }
 
     private void SetRoomStateAuthorityActive(bool isActive)
@@ -3215,6 +3245,99 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         rootMeshRenderer.enabled = false;
         _visualTransform = visualObject.transform;
+    }
+
+    private void EnsureHealthBarVisual()
+    {
+        if (_healthBarPointTransform == null)
+        {
+            _healthBarPointTransform = transform.Find(_healthBarPointName);
+        }
+
+        if (_healthBarPointTransform == null)
+        {
+            return;
+        }
+
+        if (_healthBarCanvas == null)
+        {
+            Transform canvasTransform = _healthBarPointTransform.Find(_healthBarCanvasName);
+            if (canvasTransform != null)
+            {
+                _healthBarCanvas = canvasTransform.GetComponent<Canvas>();
+            }
+        }
+
+        if (_healthBarBackgroundImage == null && _healthBarCanvas != null)
+        {
+            Transform backgroundTransform = _healthBarCanvas.transform.Find(_healthBarBackgroundName);
+            if (backgroundTransform != null)
+            {
+                _healthBarBackgroundImage = backgroundTransform.GetComponent<Image>();
+            }
+        }
+
+        if (_healthBarForegroundImage == null && _healthBarBackgroundImage != null)
+        {
+            Transform foregroundTransform = _healthBarBackgroundImage.transform.Find(_healthBarForegroundName);
+            if (foregroundTransform == null && !string.Equals(_healthBarForegroundName, "Foreground", StringComparison.Ordinal))
+            {
+                foregroundTransform = _healthBarBackgroundImage.transform.Find("Foreground");
+            }
+            if (foregroundTransform != null)
+            {
+                _healthBarForegroundImage = foregroundTransform.GetComponent<Image>();
+            }
+        }
+
+        if (_healthBarBackgroundImage != null)
+        {
+            _healthBarBackgroundImage.color = _healthBarBackgroundColor;
+        }
+
+        if (_healthBarForegroundImage != null)
+        {
+            _healthBarForegroundImage.color = _healthBarFillColor;
+            _healthBarForegroundImage.type = Image.Type.Filled;
+            _healthBarForegroundImage.fillMethod = Image.FillMethod.Horizontal;
+            _healthBarForegroundImage.fillOrigin = (int)Image.OriginHorizontal.Left;
+        }
+    }
+
+    private void UpdateHealthBarVisual()
+    {
+        EnsureHealthBarVisual();
+        if (_healthBarPointTransform == null || _healthBarCanvas == null)
+        {
+            return;
+        }
+
+        bool shouldShow = IsCombatActive && gameObject.activeInHierarchy;
+        if (_healthBarCanvas.gameObject.activeSelf != shouldShow)
+        {
+            _healthBarCanvas.gameObject.SetActive(shouldShow);
+        }
+
+        if (!shouldShow)
+        {
+            return;
+        }
+
+        Camera targetCamera = ResolveTargetCamera();
+        if (targetCamera != null)
+        {
+            Vector3 toCamera = _healthBarCanvas.transform.position - targetCamera.transform.position;
+            if (toCamera.sqrMagnitude > 0.0001f)
+            {
+                _healthBarCanvas.transform.rotation = Quaternion.LookRotation(toCamera.normalized, Vector3.up);
+            }
+        }
+
+        float normalizedHealth = Mathf.Clamp01(GetCurrentCombatHealth() / Mathf.Max(1f, GetMaxCombatHealth()));
+        if (_healthBarForegroundImage != null)
+        {
+            _healthBarForegroundImage.fillAmount = normalizedHealth;
+        }
     }
 
     private void ConfigureVisualRendererMaterial(MeshRenderer targetRenderer, Material sourceMaterial)

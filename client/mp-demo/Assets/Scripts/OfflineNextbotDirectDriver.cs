@@ -60,8 +60,10 @@ public class OfflineNextbotDirectDriver : MonoBehaviour
         if (!_active
             || _nextbot == null
             || !OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
-            || !offlineModeManager.IsOfflineModeActive)
+            || !offlineModeManager.IsOfflineModeActive
+            || !_nextbot.IsCombatActive)
         {
+            _velocity = Vector3.zero;
             return;
         }
 
