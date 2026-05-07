@@ -1382,8 +1382,11 @@ public class LobbyUI : MonoBehaviour
 
     private static async Task WaitForJoinTransitionLeadAsync()
     {
-        int delayMs = Mathf.Max(1, Mathf.RoundToInt(JoinTransitionLeadTime * 1000f));
-        await Task.Delay(delayMs);
+        float endTime = Time.realtimeSinceStartup + Mathf.Max(0.001f, JoinTransitionLeadTime);
+        while (Time.realtimeSinceStartup < endTime)
+        {
+            await Task.Yield();
+        }
     }
 
     internal static void UpdateJoinTransitionOverlay()

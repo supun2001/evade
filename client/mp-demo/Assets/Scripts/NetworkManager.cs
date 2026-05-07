@@ -1539,6 +1539,17 @@ public class NetworkManager : MonoBehaviour
             return;
         }
 
+        #if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL builds should default to the configured hosted endpoint unless the
+        // page explicitly provides ?server=. Reusing a saved browser-side override
+        // can strand players on an old localhost or temporary tunnel URL.
+        _runtimeServerUrlOverride = string.Empty;
+        PlayerPrefs.DeleteKey(ServerUrlOverridePlayerPrefsKey);
+        PlayerPrefs.Save();
+        Debug.Log($"NetworkManager: using WebGL default hosted server {productionServerUrl}");
+        return;
+        #endif
+
         string savedOverride = PlayerPrefs.GetString(ServerUrlOverridePlayerPrefsKey, string.Empty);
         if (!string.IsNullOrWhiteSpace(savedOverride))
         {
