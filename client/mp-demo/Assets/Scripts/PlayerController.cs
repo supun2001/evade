@@ -2657,6 +2657,19 @@ public class PlayerController : MonoBehaviour
         _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
     }
 
+    public void TryFireCombatShotAtWorldPoint(Vector3 targetWorldPoint)
+    {
+        if (!CanProcessCombatShot(out string blockReason, requirePointerFireInput: false))
+        {
+            LogShootingDebug("ExternalTargetFire.Blocked", blockReason);
+            return;
+        }
+
+        LogShootingDebug("ExternalTargetFire.Fire", $"target={targetWorldPoint}");
+        FireCombatShot(targetWorldPoint);
+        _nextAllowedShotTime = Time.time + Mathf.Max(0.01f, _ak47FireInterval);
+    }
+
     private bool CanProcessCombatShot(out string blockReason, bool requirePointerFireInput = true)
     {
         if (!_combatModeActive
@@ -2702,6 +2715,11 @@ public class PlayerController : MonoBehaviour
 
     private void FireCombatShot()
     {
+        FireCombatShot(null);
+    }
+
+    private void FireCombatShot(Vector3? targetWorldPoint)
+    {
         LogShootingDebug("FireCombatShot.Begin", "Shot started");
         _currentMagazineAmmo = Mathf.Max(0, _currentMagazineAmmo - 1);
         _shotTriggerId += 1f;
@@ -2717,7 +2735,22 @@ public class PlayerController : MonoBehaviour
         }
 
         float shotRange = Mathf.Max(1f, _ak47Range);
-        Ray shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        Ray shotRay;
+        if (targetWorldPoint.HasValue)
+        {
+            Vector3 targetDirection = targetWorldPoint.Value - sourceCamera.transform.position;
+            if (targetDirection.sqrMagnitude <= 0.0001f)
+            {
+                targetDirection = sourceCamera.transform.forward;
+            }
+
+            shotRay = new Ray(sourceCamera.transform.position, targetDirection.normalized);
+        }
+        else
+        {
+            shotRay = sourceCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        }
+
         PlayMuzzleFlashEffect(shotRay.direction);
         PlayBulletParticleEffect(shotRay.direction);
         LogShootingDebug("FireCombatShot.Visuals", $"camera={sourceCamera.gameObject.name}, dir={shotRay.direction}");
@@ -2842,7 +2875,6 @@ public class PlayerController : MonoBehaviour
             && offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting)
         {
             if (targetIdentity == null
-                || targetIdentity.IsLocalPlayer
                 || string.IsNullOrWhiteSpace(targetIdentity.SessionId)
                 || string.Equals(targetIdentity.SessionId, attackerSessionId, StringComparison.Ordinal))
             {
@@ -6020,6 +6052,18 @@ public class PlayerController : MonoBehaviour
         Quaternion targetLocalRotation = Quaternion.Euler(0f, visualYaw, 0f) * _injuredVisualRootBaseLocalRotation;
         float blend = 1f - Mathf.Exp(-_injuredRotationSharpness * Time.deltaTime);
         _injuredVisualRoot.localRotation = Quaternion.Slerp(_injuredVisualRoot.localRotation, targetLocalRotation, blend);
+    }
+
+    public void SnapRemoteVisualYaw(float visualYaw)
+    {
+        CacheInjuredVisualRoot();
+
+        if (_injuredVisualRoot == null)
+        {
+            return;
+        }
+
+        _injuredVisualRoot.localRotation = Quaternion.Euler(0f, visualYaw, 0f) * _injuredVisualRootBaseLocalRotation;
     }
 
     public void GetHitReactionSyncState(

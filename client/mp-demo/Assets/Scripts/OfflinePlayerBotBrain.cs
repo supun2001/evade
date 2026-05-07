@@ -4,11 +4,21 @@ using UnityEngine.AI;
 [DefaultExecutionOrder(-3)]
 public class OfflinePlayerBotBrain : MonoBehaviour
 {
+    private const float RunnerVisualYaw = 180f;
+
     [Header("Combat")]
     [SerializeField] private float _combatEngageDistance = 26f;
     [SerializeField] private float _combatDesiredDistance = 11f;
     [SerializeField] private float _combatStrafeDistance = 4f;
     [SerializeField] private float _combatFireAngle = 14f;
+    [SerializeField] private float _combatAimHeight = 1.05f;
+    [SerializeField] private float _combatPitchFireTolerance = 6f;
+    [SerializeField] private float _combatRepositionIntervalMin = 0.8f;
+    [SerializeField] private float _combatRepositionIntervalMax = 1.8f;
+    [SerializeField] private float _combatStrafeJitter = 2.2f;
+    [SerializeField] private float _combatTargetLockDuration = 1.6f;
+    [SerializeField] private float _combatLineOfSightBonus = 18f;
+    [SerializeField] private float _combatCurrentTargetBonus = 12f;
     [SerializeField] private LayerMask _combatSightLayers = ~0;
     [SerializeField] private float _rescueDistance = 2.5f;
     [SerializeField] private float _evadeDistance = 18f;
@@ -67,6 +77,12 @@ public class OfflinePlayerBotBrain : MonoBehaviour
     private float _nextSocialRetargetAt;
     private Vector3 _socialTarget;
     private bool _hasSocialTarget;
+    private float _nextCombatRepositionAt;
+    private float _combatStrafeSign = 1f;
+    private float _combatDistanceBias;
+    private Transform _lockedCombatTarget;
+    private PlayerController _lockedCombatTargetController;
+    private float _combatTargetLockedUntil;
 
     public void Initialize(int botIndex)
     {
@@ -81,6 +97,8 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         _nextSocialRetargetAt = 0f;
         _socialTarget = Vector3.zero;
         _hasSocialTarget = false;
+        ResetCombatStyle();
+        ClearCombatTargetLock();
     }
 
     public void ResetOpeningRoute()
@@ -97,8 +115,24 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         _idlePauseUntil = 0f;
         _nextSocialRetargetAt = 0f;
         _hasSocialTarget = false;
+        ResetCombatStyle();
+        ClearCombatTargetLock();
         ResetReviveHold();
         ReleaseCurrentPatrolAssignment();
+    }
+
+    private void ResetCombatStyle()
+    {
+        _nextCombatRepositionAt = 0f;
+        _combatStrafeSign = ((_botIndex & 1) == 0) ? 1f : -1f;
+        _combatDistanceBias = 0f;
+    }
+
+    private void ClearCombatTargetLock()
+    {
+        _lockedCombatTarget = null;
+        _lockedCombatTargetController = null;
+        _combatTargetLockedUntil = 0f;
     }
 
     private void ReleaseCurrentPatrolAssignment()
@@ -133,6 +167,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
         if (_controller.IsBeingCarried())
         {
+            EnforceRunnerVisualFacing();
             ResetReviveHold();
             _movementBlockedSince = -1f;
             ReleaseCurrentPatrolAssignment();
@@ -147,6 +182,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
 
         if (_controller.IsInjuredOrHitReacting())
         {
+            EnforceRunnerVisualFacing();
             ResetReviveHold();
             _movementBlockedSince = -1f;
             ReleaseCurrentPatrolAssignment();
@@ -175,18 +211,15 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         Transform combatTarget = null;
         PlayerController combatTargetController = null;
         float combatTargetDistance = float.PositiveInfinity;
-        if (isShootingMode
-            && OfflineModeManager.Instance.TryGetNearestActivePlayer(_identity.SessionId, origin, out Transform nearestPlayerTransform, out float nearestPlayerDistance)
-            && nearestPlayerTransform != null)
+        if (isShootingMode && TrySelectCombatTarget(origin, out Transform selectedCombatTarget, out PlayerController selectedCombatController, out float selectedCombatDistance))
         {
-            combatTarget = nearestPlayerTransform;
-            combatTargetController = nearestPlayerTransform.GetComponent<PlayerController>();
-            if (combatTargetController == null)
-            {
-                combatTargetController = nearestPlayerTransform.GetComponentInParent<PlayerController>();
-            }
-
-            combatTargetDistance = nearestPlayerDistance;
+            combatTarget = selectedCombatTarget;
+            combatTargetController = selectedCombatController;
+            combatTargetDistance = selectedCombatDistance;
+        }
+        else if (!isShootingMode)
+        {
+            ClearCombatTargetLock();
         }
 
         bool hasDownedTarget = false;
@@ -236,7 +269,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         Vector2 lookInput = BuildLookInput(toDestination);
         if (isShootingMode && combatTarget != null)
         {
-            lookInput = BuildLookInput(combatTarget.position - origin);
+            lookInput = BuildCombatLookInput(origin, combatTargetController);
         }
 
         if (isHoldingRevive
@@ -283,7 +316,18 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         _locomotionInput.ApplySimulatedInput(movementInput, lookInput, jumpHeld, jumpPressed, crouchHeld, crouchPressedThisFrame);
+        EnforceRunnerVisualFacing();
         TryHandleCombatFire(isShootingMode, combatTarget, combatTargetController, combatTargetDistance);
+    }
+
+    private void EnforceRunnerVisualFacing()
+    {
+        if (_controller == null)
+        {
+            return;
+        }
+
+        _controller.SnapRemoteVisualYaw(RunnerVisualYaw);
     }
 
     private Vector3 DetermineDestination(
@@ -384,6 +428,8 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             return origin;
         }
 
+        RefreshCombatStyle();
+
         Vector3 targetPosition = combatTarget.position;
         Vector3 toTarget = targetPosition - origin;
         toTarget.y = 0f;
@@ -393,20 +439,137 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         Vector3 targetDirection = toTarget.normalized;
-        Vector3 strafeDirection = Quaternion.Euler(0f, ((_botIndex & 1) == 0 ? 1f : -1f) * 90f, 0f) * targetDirection;
-        float preferredDistance = Mathf.Max(4f, _combatDesiredDistance * _personalityAggression);
+        Vector3 strafeDirection = Quaternion.Euler(0f, _combatStrafeSign * 90f, 0f) * targetDirection;
+        float preferredDistance = Mathf.Max(4f, _combatDesiredDistance * _personalityAggression + _combatDistanceBias);
+        float strafeDistance = _combatStrafeDistance + Random.Range(-_combatStrafeJitter, _combatStrafeJitter) * 0.25f;
+        bool hasLineOfSight = _lockedCombatTargetController != null && HasCombatLineOfSight(_lockedCombatTargetController);
+
+        if (!hasLineOfSight)
+        {
+            return targetPosition - targetDirection * Mathf.Max(3.5f, preferredDistance * 0.6f) + strafeDirection * (strafeDistance * 0.5f);
+        }
 
         if (combatTargetDistance > preferredDistance + 2f)
         {
-            return targetPosition - targetDirection * preferredDistance + strafeDirection * _combatStrafeDistance;
+            return targetPosition - targetDirection * preferredDistance + strafeDirection * strafeDistance;
         }
 
         if (combatTargetDistance < preferredDistance * 0.6f)
         {
-            return origin - targetDirection * (_combatStrafeDistance * 0.75f) + strafeDirection * _combatStrafeDistance;
+            return origin - targetDirection * (strafeDistance * 0.75f) + strafeDirection * strafeDistance;
         }
 
-        return origin + strafeDirection * _combatStrafeDistance;
+        return origin + strafeDirection * strafeDistance;
+    }
+
+    private void RefreshCombatStyle()
+    {
+        if (Time.time < _nextCombatRepositionAt)
+        {
+            return;
+        }
+
+        if (Random.value < 0.65f)
+        {
+            _combatStrafeSign *= -1f;
+        }
+
+        _combatDistanceBias = Random.Range(-2.25f, 2f);
+        _nextCombatRepositionAt = Time.time + Random.Range(_combatRepositionIntervalMin, _combatRepositionIntervalMax);
+    }
+
+    private bool TrySelectCombatTarget(Vector3 origin, out Transform combatTarget, out PlayerController combatTargetController, out float combatTargetDistance)
+    {
+        combatTarget = null;
+        combatTargetController = null;
+        combatTargetDistance = float.PositiveInfinity;
+
+        if (IsCombatTargetStillValid(_lockedCombatTargetController)
+            && _lockedCombatTarget != null
+            && Time.time < _combatTargetLockedUntil)
+        {
+            combatTarget = _lockedCombatTarget;
+            combatTargetController = _lockedCombatTargetController;
+            combatTargetDistance = GetPlanarDistance(origin, combatTarget.position);
+            return true;
+        }
+
+        ClearCombatTargetLock();
+
+        PlayerController[] controllers = FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+        float bestScore = float.NegativeInfinity;
+        for (int i = 0; i < controllers.Length; i++)
+        {
+            PlayerController candidate = controllers[i];
+            if (!IsCombatTargetStillValid(candidate))
+            {
+                continue;
+            }
+
+            Transform candidateTransform = candidate.transform;
+            if (candidateTransform == null)
+            {
+                continue;
+            }
+
+            float distance = GetPlanarDistance(origin, candidateTransform.position);
+            if (distance > _combatEngageDistance * 1.35f)
+            {
+                continue;
+            }
+
+            float score = -distance;
+            if (HasCombatLineOfSight(candidate))
+            {
+                score += _combatLineOfSightBonus;
+            }
+
+            if (candidateTransform == _lockedCombatTarget)
+            {
+                score += _combatCurrentTargetBonus;
+            }
+
+            score += Random.Range(-1.5f, 1.5f);
+            if (score <= bestScore)
+            {
+                continue;
+            }
+
+            bestScore = score;
+            combatTarget = candidateTransform;
+            combatTargetController = candidate;
+            combatTargetDistance = distance;
+        }
+
+        if (combatTarget == null || combatTargetController == null)
+        {
+            return false;
+        }
+
+        _lockedCombatTarget = combatTarget;
+        _lockedCombatTargetController = combatTargetController;
+        _combatTargetLockedUntil = Time.time + _combatTargetLockDuration;
+        return true;
+    }
+
+    private bool IsCombatTargetStillValid(PlayerController candidate)
+    {
+        if (candidate == null
+            || candidate == _controller
+            || !candidate.enabled
+            || candidate.IsInjuredOrHitReacting()
+            || candidate.IsEliminatedStateActive)
+        {
+            return false;
+        }
+
+        OfflinePlayerIdentity candidateIdentity = candidate.GetComponent<OfflinePlayerIdentity>();
+        if (candidateIdentity == null || _identity == null)
+        {
+            return false;
+        }
+
+        return !string.Equals(candidateIdentity.SessionId, _identity.SessionId, System.StringComparison.Ordinal);
     }
 
     private Vector3 DetermineCarryingDestination(Vector3 origin, bool hasThreat, Transform threatTransform, float threatDistance)
@@ -650,10 +813,35 @@ public class OfflinePlayerBotBrain : MonoBehaviour
             return Vector2.zero;
         }
 
-        float targetYaw = Quaternion.LookRotation(toDestination.normalized, Vector3.up).eulerAngles.y;
+        Vector3 normalizedDirection = toDestination.normalized;
+        float targetYaw = Quaternion.LookRotation(normalizedDirection, Vector3.up).eulerAngles.y;
         float yawDelta = Mathf.DeltaAngle(transform.eulerAngles.y, targetYaw);
         float lookX = Mathf.Clamp(yawDelta / Mathf.Max(0.01f, _controller.lookSenseH), -35f, 35f);
-        return new Vector2(lookX, 0f);
+        float planarDistance = new Vector2(toDestination.x, toDestination.z).magnitude;
+        float targetPitch = planarDistance > 0.001f
+            ? -Mathf.Atan2(toDestination.y, planarDistance) * Mathf.Rad2Deg
+            : 0f;
+        float currentPitch = _controller != null ? _controller.GetCameraRotation().y : 0f;
+        float pitchDelta = Mathf.DeltaAngle(currentPitch, targetPitch);
+        float lookY = Mathf.Clamp(-pitchDelta / Mathf.Max(0.01f, _controller.lookSenseV), -24f, 24f);
+        return new Vector2(lookX, lookY);
+    }
+
+    private Vector2 BuildCombatLookInput(Vector3 origin, PlayerController combatTargetController)
+    {
+        if (combatTargetController == null)
+        {
+            return Vector2.zero;
+        }
+
+        Vector3 aimPoint = GetCombatAimPoint(combatTargetController);
+        return BuildLookInput(aimPoint - origin);
+    }
+
+    private Vector3 GetCombatAimPoint(PlayerController targetController)
+    {
+        Vector3 basePosition = targetController != null ? targetController.transform.position : Vector3.zero;
+        return basePosition + Vector3.up * _combatAimHeight;
     }
 
     private bool ShouldJump(Vector2 movementInput, bool hasThreat, float threatDistance)
@@ -1002,19 +1190,31 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         Vector3 toTarget = combatTarget.position - transform.position;
-        toTarget.y = 0f;
+        Vector3 aimPoint = GetCombatAimPoint(combatTargetController);
+        toTarget = aimPoint - (transform.position + Vector3.up * 1.4f);
         if (toTarget.sqrMagnitude <= 0.001f)
         {
             return;
         }
 
-        float aimAngle = Vector3.Angle(transform.forward, toTarget.normalized);
-        if (aimAngle > _combatFireAngle || !HasCombatLineOfSight(combatTargetController))
+        Vector3 planarToTarget = new Vector3(toTarget.x, 0f, toTarget.z);
+        if (planarToTarget.sqrMagnitude <= 0.001f)
+        {
+            planarToTarget = transform.forward;
+        }
+
+        float aimAngle = Vector3.Angle(transform.forward, planarToTarget.normalized);
+        float desiredPitch = -Mathf.Atan2(toTarget.y, planarToTarget.magnitude) * Mathf.Rad2Deg;
+        float currentPitch = _controller.GetCameraRotation().y;
+        float pitchError = Mathf.Abs(Mathf.DeltaAngle(currentPitch, desiredPitch));
+        if (aimAngle > _combatFireAngle
+            || pitchError > _combatPitchFireTolerance
+            || !HasCombatLineOfSight(combatTargetController))
         {
             return;
         }
 
-        _controller.TryFireCombatShotFromExternalInput();
+        _controller.TryFireCombatShotAtWorldPoint(aimPoint);
     }
 
     private bool HasCombatLineOfSight(PlayerController targetController)
@@ -1025,7 +1225,7 @@ public class OfflinePlayerBotBrain : MonoBehaviour
         }
 
         Vector3 origin = transform.position + Vector3.up * 1.4f;
-        Vector3 target = targetController.transform.position + Vector3.up * 1.2f;
+        Vector3 target = GetCombatAimPoint(targetController);
         Vector3 direction = target - origin;
         float distance = direction.magnitude;
         if (distance <= 0.001f)

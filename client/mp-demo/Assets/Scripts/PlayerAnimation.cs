@@ -716,7 +716,7 @@ public class PlayerAnimation : MonoBehaviour
     private void ApplyAnimationState(Animator targetAnimator, float inputX, float inputY, bool isGrounded, bool isJumping, float verticalSpeed)
     {
         // Procedural animation state handler
-        if (targetAnimator == null)
+        if (targetAnimator == null || targetAnimator.runtimeAnimatorController == null)
         {
             return;
         }
@@ -728,19 +728,19 @@ public class PlayerAnimation : MonoBehaviour
 
         targetAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
         targetAnimator.speed = 1f;
-        targetAnimator.SetFloat(_inputXHash, inputX);
-        targetAnimator.SetFloat(_inputYHash, inputY);
-        targetAnimator.SetBool(_groundedHash, isGrounded);
-        targetAnimator.SetBool(_jumpHash, isJumping);
-        targetAnimator.SetFloat(_verticalSpeedHash, verticalSpeed);
+        SetFloatIfPresent(targetAnimator, _inputXHash, inputX);
+        SetFloatIfPresent(targetAnimator, _inputYHash, inputY);
+        SetBoolIfPresent(targetAnimator, _groundedHash, isGrounded);
+        SetBoolIfPresent(targetAnimator, _jumpHash, isJumping);
+        SetFloatIfPresent(targetAnimator, _verticalSpeedHash, verticalSpeed);
         bool isCarryingActive = IsCarryingActive;
         bool isBeingCarriedActive = IsBeingCarriedActive;
         bool isInjuredActive = IsInjuredActive && !isCarryingActive && !isBeingCarriedActive && !(_playerController != null && _playerController.IsEliminated());
         bool isCrouchingActive = IsCrouchingActive && !isCarryingActive && !isBeingCarriedActive;
         bool isCrouchRunningActive = !_useNetworkAnimationState && _playerController != null && _playerController.IsCrouchRunAnimationActive();
-        targetAnimator.SetBool(_injuredHash, isInjuredActive);
-        targetAnimator.SetBool(_crouchHash, !isInjuredActive && isCrouchingActive && !isCrouchRunningActive);
-        targetAnimator.SetBool(_shootingModeHash, _presentationMode == PresentationMode.Shooting);
+        SetBoolIfPresent(targetAnimator, _injuredHash, isInjuredActive);
+        SetBoolIfPresent(targetAnimator, _crouchHash, !isInjuredActive && isCrouchingActive && !isCrouchRunningActive);
+        SetBoolIfPresent(targetAnimator, _shootingModeHash, _presentationMode == PresentationMode.Shooting);
 
         if (isInjuredActive)
         {
@@ -1243,6 +1243,11 @@ public class PlayerAnimation : MonoBehaviour
 
     private static void CrossFadeIfNeeded(Animator targetAnimator, string stateName, float duration)
     {
+        if (targetAnimator == null || targetAnimator.runtimeAnimatorController == null)
+        {
+            return;
+        }
+
         int targetStateHash = Animator.StringToHash(stateName);
         if (targetAnimator.GetCurrentAnimatorStateInfo(0).fullPathHash == targetStateHash)
         {
@@ -1255,6 +1260,41 @@ public class PlayerAnimation : MonoBehaviour
         }
 
         targetAnimator.CrossFadeInFixedTime(targetStateHash, duration, 0);
+    }
+
+    private static void SetFloatIfPresent(Animator targetAnimator, int parameterHash, float value)
+    {
+        if (HasParameter(targetAnimator, parameterHash, AnimatorControllerParameterType.Float))
+        {
+            targetAnimator.SetFloat(parameterHash, value);
+        }
+    }
+
+    private static void SetBoolIfPresent(Animator targetAnimator, int parameterHash, bool value)
+    {
+        if (HasParameter(targetAnimator, parameterHash, AnimatorControllerParameterType.Bool))
+        {
+            targetAnimator.SetBool(parameterHash, value);
+        }
+    }
+
+    private static bool HasParameter(Animator targetAnimator, int parameterHash, AnimatorControllerParameterType parameterType)
+    {
+        if (targetAnimator == null)
+        {
+            return false;
+        }
+
+        AnimatorControllerParameter[] parameters = targetAnimator.parameters;
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            if (parameters[i].nameHash == parameterHash && parameters[i].type == parameterType)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnAnimatorMove()

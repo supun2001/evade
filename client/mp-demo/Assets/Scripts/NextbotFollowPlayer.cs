@@ -355,8 +355,13 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         MyRoomState roomState = GetRoomState();
         NextbotState assignedNextbotState = null;
+        bool allowOfflineLocalSimulationWithoutRoomState = !_forceOfflineLocalAuthority
+            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive
+            && offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting;
         bool useRoomStateAuthority = !_forceOfflineLocalAuthority
             && _useRoomStateAuthority
+            && !allowOfflineLocalSimulationWithoutRoomState
             && roomState != null
             && TryGetAssignedNextbotState(roomState, out assignedNextbotState);
         SetRoomStateAuthorityActive(useRoomStateAuthority);
@@ -385,7 +390,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
-        if (_useRoomStateAuthority && roomState != null)
+        if (_useRoomStateAuthority && roomState != null && !allowOfflineLocalSimulationWithoutRoomState)
         {
             SetServerVisualState(false);
             ClearTarget();
@@ -457,15 +462,15 @@ public class NextbotFollowPlayer : MonoBehaviour
             _offlineCombatHealth = _maxCombatHealth;
         }
 
-        if (!_forceOfflineLocalAuthority)
-        {
-            return;
-        }
-
         SetServerVisualState(isActive);
         if (isActive)
         {
             EnsureAgentOnNavMesh();
+            if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+            {
+                _navMeshAgent.isStopped = false;
+                _navMeshAgent.ResetPath();
+            }
             return;
         }
 
@@ -481,7 +486,34 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     public void PrepareOfflineNextbot(Vector3 spawnPosition)
     {
-        SetOfflineLocalAuthority(true);
+        PrepareSpawnedNextbot(spawnPosition, useOfflineLocalAuthority: true);
+    }
+
+    public void PrepareLocalSimulationNextbot(Vector3 spawnPosition)
+    {
+        PrepareSpawnedNextbot(spawnPosition, useOfflineLocalAuthority: false);
+    }
+
+    private bool IsOfflineShootingLocalSimulation()
+    {
+        return !_forceOfflineLocalAuthority
+            && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
+            && offlineModeManager.IsOfflineModeActive
+            && offlineModeManager.CurrentPresentationMode == OfflineModeManager.OfflinePresentationMode.Shooting;
+    }
+
+    private bool ShouldUseOfflineLocalSimulationRules()
+    {
+        return _forceOfflineLocalAuthority || IsOfflineShootingLocalSimulation();
+    }
+
+    private void PrepareSpawnedNextbot(Vector3 spawnPosition, bool useOfflineLocalAuthority)
+    {
+        _forceOfflineLocalAuthority = useOfflineLocalAuthority;
+        SetRoomStateAuthorityActive(false);
+        SetServerVisualState(true);
+        ApplyOfflineMultiplayerTuning();
+        _hasAppliedRoomState = false;
         _offlineNextbotActive = true;
         _offlineCombatHealth = _maxCombatHealth;
 
@@ -495,20 +527,58 @@ public class NextbotFollowPlayer : MonoBehaviour
             bool wasEnabled = _characterController.enabled;
             _characterController.enabled = false;
             transform.position = spawnPosition;
+            transform.rotation = Quaternion.identity;
             _characterController.enabled = wasEnabled;
         }
         else
         {
             transform.position = spawnPosition;
+            transform.rotation = Quaternion.identity;
         }
+
+        if (_visualTransform != null)
+        {
+            _visualTransform.localRotation = Quaternion.Euler(_billboardRotationOffsetEuler);
+        }
+
+        ApplyImmediateVisualOrientation();
 
         _lockedHeight = spawnPosition.y;
         _horizontalVelocity = Vector3.zero;
         _verticalVelocity = 0f;
+        _nextTargetRefreshTime = 0f;
+        _targetLockedUntil = 0f;
         ClearTarget();
         ResetOfflinePatrolTarget();
         StopAgent();
         EnsureAgentOnNavMesh();
+        if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
+        {
+            _navMeshAgent.isStopped = false;
+            _navMeshAgent.ResetPath();
+        }
+    }
+
+    private void ApplyImmediateVisualOrientation()
+    {
+        if (_visualTransform == null)
+        {
+            return;
+        }
+
+        Camera targetCamera = ResolveTargetCamera();
+        Vector3 flattenedDirection = targetCamera != null
+            ? targetCamera.transform.position - transform.position
+            : transform.forward;
+        flattenedDirection.y = 0f;
+
+        if (flattenedDirection.sqrMagnitude <= 0.0001f)
+        {
+            flattenedDirection = Vector3.forward;
+        }
+
+        Quaternion lookRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up);
+        _visualTransform.rotation = lookRotation * Quaternion.Euler(_billboardRotationOffsetEuler);
     }
 
     public void ApplyRegistryEntry(NextbotRegistryEntry entry)
@@ -578,7 +648,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     public bool TryApplyOfflineCombatDamage(float damage)
     {
-        if (!_forceOfflineLocalAuthority || !_offlineNextbotActive || damage <= 0f)
+        if (!ShouldUseOfflineLocalSimulationRules() || !_offlineNextbotActive || damage <= 0f)
         {
             return false;
         }
@@ -1188,7 +1258,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool GetIsCombatActive()
     {
-        if (_forceOfflineLocalAuthority)
+        if (ShouldUseOfflineLocalSimulationRules())
         {
             return _offlineNextbotActive;
         }
@@ -1202,7 +1272,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private float GetCurrentCombatHealth()
     {
-        if (_forceOfflineLocalAuthority)
+        if (ShouldUseOfflineLocalSimulationRules())
         {
             return _offlineCombatHealth;
         }
@@ -1220,7 +1290,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private float GetMaxCombatHealth()
     {
-        if (_forceOfflineLocalAuthority)
+        if (ShouldUseOfflineLocalSimulationRules())
         {
             return _maxCombatHealth;
         }
@@ -1309,7 +1379,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        if (_forceOfflineLocalAuthority && IsOfflineLocalPlayerTarget(bestTarget.Value.Transform))
+        if (ShouldUseOfflineLocalSimulationRules() && IsOfflineLocalPlayerTarget(bestTarget.Value.Transform))
         {
             AssignTarget(bestTarget.Value.Transform, bestTarget.Value.Controller);
             return;
@@ -1428,12 +1498,12 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         bool isClaimedByOtherNextbot = IsTargetClaimedByOtherNextbot(candidateTransform);
 
-        if (_forceOfflineLocalAuthority && isClaimedByOtherNextbot && !isCurrentTarget)
+        if (ShouldUseOfflineLocalSimulationRules() && isClaimedByOtherNextbot && !isCurrentTarget)
         {
             return null;
         }
 
-        if (!_forceOfflineLocalAuthority
+        if (!ShouldUseOfflineLocalSimulationRules()
             && ShouldUseMapLocalNavMeshPresentation()
             && !isCurrentTarget
             && isClaimedByOtherNextbot)
@@ -1454,7 +1524,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         float frontBonus = IsTargetInFront(candidateTransform.position) ? _frontBonus : 0f;
         float currentTargetBonus = isCurrentTarget ? _currentTargetBonus : 0f;
         float localPlayerPressureBonus = 0f;
-        if (_forceOfflineLocalAuthority && IsOfflineLocalPlayerTarget(candidateTransform))
+        if (ShouldUseOfflineLocalSimulationRules() && IsOfflineLocalPlayerTarget(candidateTransform))
         {
             // Only one nextbot should chase the local player in offline mode.
             // If someone else is already chasing them, we don't apply the massive pressure bonus.
@@ -1464,7 +1534,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             }
         }
         
-        float targetPressurePenalty = _forceOfflineLocalAuthority
+        float targetPressurePenalty = ShouldUseOfflineLocalSimulationRules()
             ? (isClaimedByOtherNextbot ? _sameTargetScorePenalty : 0f)
             : CountOtherNextbotsTargeting(candidateTransform) * _sameTargetScorePenalty;
 
@@ -1511,7 +1581,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
-        if ((_forceOfflineLocalAuthority || ShouldUseMapLocalNavMeshPresentation())
+        if ((ShouldUseOfflineLocalSimulationRules() || ShouldUseMapLocalNavMeshPresentation())
             && IsTargetClaimedByOtherNextbot(_target))
         {
             return false;
@@ -1697,7 +1767,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool TryUpdateOfflinePatrolMovement()
     {
-        if (!_forceOfflineLocalAuthority || !_offlineNextbotActive)
+        if (!ShouldUseOfflineLocalSimulationRules() || !_offlineNextbotActive)
         {
             ResetOfflinePatrolTarget();
             return false;
@@ -1946,6 +2016,12 @@ public class NextbotFollowPlayer : MonoBehaviour
             {
                 _navMeshAgent.SetDestination(navMeshPatrolPosition);
             }
+            else
+            {
+                ApplySmoothFallbackMovement(patrolTarget);
+                EnsureAgentOnNavMesh();
+                return;
+            }
 
             bool pathBlocked = !_navMeshAgent.pathPending
                 && (_navMeshAgent.pathStatus == NavMeshPathStatus.PathPartial
@@ -1964,29 +2040,42 @@ public class NextbotFollowPlayer : MonoBehaviour
 
             Vector3 velocity = _navMeshAgent.desiredVelocity;
             velocity.y = 0f;
+            float planarDistance = GetPlanarDistance(transform.position, patrolTarget);
+
+            if (velocity.sqrMagnitude < 0.05f
+                && planarDistance > _stoppingDistance + 0.5f)
+            {
+                Vector3 directDir = patrolTarget - transform.position;
+                directDir.y = 0f;
+                if (directDir.sqrMagnitude > 0.0001f)
+                {
+                    directDir.Normalize();
+                    _navMeshAgent.Move(directDir * _moveSpeed * 0.5f * Time.deltaTime);
+                    velocity = directDir * _moveSpeed * 0.5f;
+                }
+            }
+
             _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, velocity, _acceleration * Time.deltaTime);
 
-            float planarDistance = GetPlanarDistance(transform.position, patrolTarget);
-            if (ShouldUseMapLocalNavMeshPresentation()
-                && _horizontalVelocity.sqrMagnitude < 0.05f
+            if (_horizontalVelocity.sqrMagnitude < 0.05f
                 && planarDistance > _stoppingDistance + 0.5f)
             {
                 ApplySmoothFallbackMovement(patrolTarget);
+                EnsureAgentOnNavMesh();
                 return;
             }
 
-            Vector3 agentGroundPos = _navMeshAgent.nextPosition;
-            Vector3 syncedPos = agentGroundPos;
-            if (TryResolveGroundedPosition(agentGroundPos, out Vector3 groundedAgentPosition))
-            {
-                syncedPos = groundedAgentPosition;
-            }
-            transform.position = syncedPos;
-            _navMeshAgent.nextPosition = syncedPos;
-            _lockedHeight = syncedPos.y;
+            Vector3 agentPos = _navMeshAgent.nextPosition;
+            Vector3 horizontalMove = agentPos - transform.position;
+            horizontalMove.y = 0f;
+
+            ApplyFallbackMovement(horizontalMove / Mathf.Max(0.0001f, Time.deltaTime));
+            _navMeshAgent.nextPosition = transform.position;
+            _lockedHeight = transform.position.y;
 
             UpdateBodyRotation(_horizontalVelocity);
             ApplySolidObstaclePush();
+            EnsureAgentOnNavMesh();
             return;
         }
 
@@ -2684,7 +2773,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        if (_forceOfflineLocalAuthority
+        if (ShouldUseOfflineLocalSimulationRules()
             && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager)
             && !offlineModeManager.CanOfflineNextbotsDamagePlayers)
         {
@@ -2699,7 +2788,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (targetController.TriggerNextbotHit(transform.position))
         {
-            if (!_forceOfflineLocalAuthority && NetworkManager.Instance != null && targetController.IsSimulationControlled() == false)
+            if (!ShouldUseOfflineLocalSimulationRules() && NetworkManager.Instance != null && targetController.IsSimulationControlled() == false)
             {
                 if (!string.IsNullOrWhiteSpace(_networkNextbotId))
                 {
@@ -2857,8 +2946,10 @@ public class NextbotFollowPlayer : MonoBehaviour
             return false;
         }
 
-        Quaternion targetRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up)
-            * Quaternion.Euler(_billboardRotationOffsetEuler);
+        Quaternion lookRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up);
+        Quaternion targetRotation = _visualTransform != null
+            ? lookRotation * Quaternion.Euler(_billboardRotationOffsetEuler)
+            : lookRotation;
         float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
         ApplyVisualRotation(targetRotation, rotationBlend);
         return true;
@@ -2881,8 +2972,10 @@ public class NextbotFollowPlayer : MonoBehaviour
             return;
         }
 
-        Quaternion targetRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up)
-            * Quaternion.Euler(_billboardRotationOffsetEuler);
+        Quaternion lookRotation = Quaternion.LookRotation(-flattenedDirection.normalized, Vector3.up);
+        Quaternion targetRotation = _visualTransform != null
+            ? lookRotation * Quaternion.Euler(_billboardRotationOffsetEuler)
+            : lookRotation;
         float rotationBlend = 1f - Mathf.Exp(-_rotationSpeed * Time.deltaTime);
         ApplyVisualRotation(targetRotation, rotationBlend);
     }
@@ -2910,6 +3003,8 @@ public class NextbotFollowPlayer : MonoBehaviour
         {
             _visualTransform = existingVisual;
             _visualTransform.localPosition = GetVisualLocalPosition(rootMeshFilter.sharedMesh);
+            _visualTransform.localRotation = Quaternion.Euler(_billboardRotationOffsetEuler);
+            _visualTransform.localScale = Vector3.one;
             _visualMeshRenderer = existingVisual.GetComponent<MeshRenderer>();
             if (_defaultBaseMap == null && _visualMeshRenderer != null && _visualMeshRenderer.sharedMaterial != null)
             {
@@ -2930,7 +3025,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         GameObject visualObject = new GameObject("NextbotVisual");
         visualObject.transform.SetParent(transform, false);
         visualObject.transform.localPosition = GetVisualLocalPosition(rootMeshFilter.sharedMesh);
-        visualObject.transform.localRotation = Quaternion.identity;
+        visualObject.transform.localRotation = Quaternion.Euler(_billboardRotationOffsetEuler);
         visualObject.transform.localScale = Vector3.one;
 
         MeshFilter visualMeshFilter = visualObject.AddComponent<MeshFilter>();
