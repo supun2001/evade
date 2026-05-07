@@ -1351,12 +1351,22 @@ public class NetworkManager : MonoBehaviour
     public bool TryGetLocalPlayerSpawnPoint(out Vector3 spawnPosition)
     {
         spawnPosition = Vector3.zero;
-        if (playerSpawnPoints == null || playerSpawnPoints.Count == 0 || string.IsNullOrEmpty(LocalSessionId))
+        if (string.IsNullOrEmpty(LocalSessionId))
         {
             return false;
         }
 
-        int spawnIndex = GetStableSpawnIndex(LocalSessionId, playerSpawnPoints.Count);
+        if (TryGetAuthoritativeLocalPlayerSpawnPoint(out spawnPosition))
+        {
+            return true;
+        }
+
+        if (playerSpawnPoints == null || playerSpawnPoints.Count == 0)
+        {
+            return false;
+        }
+
+        int spawnIndex = UnityEngine.Random.Range(0, playerSpawnPoints.Count);
         spawnPosition = ResolveGroundedSpawnPosition(playerSpawnPoints[spawnIndex].GetWorldPosition());
         return true;
     }
@@ -1364,13 +1374,40 @@ public class NetworkManager : MonoBehaviour
     public bool TryGetLocalPlayerGroundedSpawnPoint(out Vector3 spawnPosition)
     {
         spawnPosition = Vector3.zero;
-        if (playerSpawnPoints == null || playerSpawnPoints.Count == 0 || string.IsNullOrEmpty(LocalSessionId))
+        if (string.IsNullOrEmpty(LocalSessionId))
         {
             return false;
         }
 
-        int spawnIndex = GetStableSpawnIndex(LocalSessionId, playerSpawnPoints.Count);
+        if (TryGetAuthoritativeLocalPlayerSpawnPoint(out Vector3 authoritativeSpawnPosition))
+        {
+            return TryResolveGroundedSpawnPosition(authoritativeSpawnPosition, out spawnPosition);
+        }
+
+        if (playerSpawnPoints == null || playerSpawnPoints.Count == 0)
+        {
+            return false;
+        }
+
+        int spawnIndex = UnityEngine.Random.Range(0, playerSpawnPoints.Count);
         return TryResolveGroundedSpawnPosition(playerSpawnPoints[spawnIndex].GetWorldPosition(), out spawnPosition);
+    }
+
+    private bool TryGetAuthoritativeLocalPlayerSpawnPoint(out Vector3 spawnPosition)
+    {
+        spawnPosition = Vector3.zero;
+        if (room?.State?.players == null || string.IsNullOrEmpty(LocalSessionId))
+        {
+            return false;
+        }
+
+        if (!room.State.players.TryGetValue(LocalSessionId, out Player localPlayer) || localPlayer == null)
+        {
+            return false;
+        }
+
+        spawnPosition = new Vector3(localPlayer.x, localPlayer.y, localPlayer.z);
+        return true;
     }
 
     private Vector3 ResolveGroundedSpawnPosition(Vector3 desiredPosition)
@@ -1486,23 +1523,6 @@ public class NetworkManager : MonoBehaviour
         }
 
         return configuredMask != 0 ? configuredMask : ~0;
-    }
-
-    private static int GetStableSpawnIndex(string sessionId, int spawnPointCount)
-    {
-        if (spawnPointCount <= 0)
-        {
-            return 0;
-        }
-
-        int hash = 0;
-        for (int i = 0; i < sessionId.Length; i++)
-        {
-            hash = unchecked((hash * 31) + sessionId[i]);
-        }
-
-        int normalizedIndex = hash % spawnPointCount;
-        return normalizedIndex < 0 ? normalizedIndex + spawnPointCount : normalizedIndex;
     }
 
     private ColyseusClient CreateClient()

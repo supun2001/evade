@@ -2073,8 +2073,8 @@ export class MyRoom extends Room<MyRoomState> {
 
   private getPlayerSpawnPosition(sessionId: string) {
     const spawnPoints = this.playerSpawnPoints.length > 0 ? this.playerSpawnPoints : DEFAULT_PLAYER_SPAWN_POINTS;
-    const normalizedIndex = this.getStableSpawnIndex(sessionId, spawnPoints.length);
-    const spawnPoint = spawnPoints[normalizedIndex];
+    const randomIndex = Math.floor(Math.random() * spawnPoints.length);
+    const spawnPoint = spawnPoints[randomIndex] ?? spawnPoints[0];
     return {
       x: spawnPoint.x,
       y: spawnPoint.y,
@@ -3901,17 +3901,4 @@ export class MyRoom extends Room<MyRoomState> {
     return Math.max(1000, Math.round(value));
   }
 
-  private getStableSpawnIndex(sessionId: string, spawnPointCount: number) {
-    if (spawnPointCount <= 0) {
-      return 0;
-    }
-
-    let hash = 0;
-    for (let i = 0; i < sessionId.length; i++) {
-      hash = ((hash * 31) + sessionId.charCodeAt(i)) | 0;
-    }
-
-    const normalized = hash % spawnPointCount;
-    return normalized < 0 ? normalized + spawnPointCount : normalized;
-  }
 }

@@ -591,15 +591,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 89bdeed4550ae41409696559877e4b41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
-  localServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
+  localServerUrl: ws://localhost:2567
   productionServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
-  useProductionServerInEditor: 1
+  useProductionServerInEditor: 0
   mapIdOverride: 
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
     position: {x: -676.82, y: 2.5, z: 200.91}
   playerSpawnPoints:
   - anchor: {fileID: 1827652803}
+    position: {x: -675.5, y: 2.5, z: 211.6}
+  - anchor: {fileID: 1766460833}
+    position: {x: -675.5, y: 2.5, z: 211.6}
+  - anchor: {fileID: 1310719867}
+    position: {x: -675.5, y: 2.5, z: 211.6}
+  - anchor: {fileID: 1571580129}
     position: {x: -675.5, y: 2.5, z: 211.6}
   spawnGroundProbeHeight: 30
   spawnGroundProbeDistance: 120
@@ -1125,6 +1131,37 @@ Transform:
   - {fileID: 1028608920}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1310719866
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1310719867}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (2)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1310719867
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1310719866}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -611.8, y: 2.5, z: 251.8}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1456026832
 GameObject:
   m_ObjectHideFlags: 0
@@ -1322,6 +1359,68 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: -676.82, y: 2.5, z: 200.91}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1571580128
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1571580129}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (3)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1571580129
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1571580128}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -631.2, y: 2.5, z: 142.3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1766460832
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1766460833}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (1)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1766460833
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1766460832}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -731.2, y: 2.5, z: 162.9}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -1558,6 +1657,9 @@ SceneRoots:
   - {fileID: 1297590461}
   - {fileID: 1549373509}
   - {fileID: 1827652803}
+  - {fileID: 1766460833}
+  - {fileID: 1310719867}
+  - {fileID: 1571580129}
   - {fileID: 1456026833}
   - {fileID: 627969018}
   - {fileID: 526007149}

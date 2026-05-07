@@ -7029,6 +7029,60 @@ public class PlayerController : MonoBehaviour
         return _shotTriggerId;
     }
 
+    public void PlayRemoteCombatShotPresentation()
+    {
+        Transform shotOriginTransform = ResolveCombatShotOriginTransform();
+        if (shotOriginTransform == null)
+        {
+            LogShootingDebug("RemoteShotPresentation.Abort", "No shot origin");
+            return;
+        }
+
+        Vector3 shotDirection = ResolveCombatShotDirection();
+
+        _currentArmRecoil = Mathf.Min(_currentArmRecoil + _armRecoilKick, _armRecoilKick * 2f);
+        PlayMuzzleFlashEffect(shotDirection);
+        PlayBulletParticleEffect(shotDirection);
+        LogShootingDebug("RemoteShotPresentation.Play", $"origin={shotOriginTransform.gameObject.name}, dir={shotDirection}");
+    }
+
+    private Vector3 ResolveCombatShotDirection()
+    {
+        if (_isSimulationControlled)
+        {
+            if (_gameplayCameraTransform != null)
+            {
+                Vector3 direction = _gameplayCameraTransform.forward;
+                if (direction.sqrMagnitude > 0.0001f)
+                {
+                    return direction.normalized;
+                }
+            }
+
+            if (_playerCamera != null)
+            {
+                Vector3 direction = _playerCamera.transform.forward;
+                if (direction.sqrMagnitude > 0.0001f)
+                {
+                    return direction.normalized;
+                }
+            }
+        }
+
+        if (_remoteArmPointTransform != null)
+        {
+            Vector3 direction = _remoteArmPointTransform.forward;
+            if (direction.sqrMagnitude > 0.0001f)
+            {
+                return direction.normalized;
+            }
+        }
+
+        return transform.forward.sqrMagnitude > 0.0001f
+            ? transform.forward.normalized
+            : Vector3.forward;
+    }
+
     public void SetCombatModeActive(bool isActive)
     {
         _combatModeActive = isActive;

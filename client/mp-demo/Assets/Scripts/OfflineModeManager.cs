@@ -224,7 +224,7 @@ public class OfflineModeManager : MonoBehaviour
             sessionId: "offline_local",
             displayName: _localDisplayName,
             skinIndex: _localSkinIndex,
-            spawnIndex: 0,
+            spawnIndex: GetRandomOfflinePlayerSpawnIndex(),
             isLocalPlayer: true,
             botIndex: -1,
             reservedSpawnPositions: reservedSpawnPositions);
@@ -322,12 +322,13 @@ public class OfflineModeManager : MonoBehaviour
         _nextbotSpawnPositions.AddRange(networkManager.GetConfiguredNextbotSpawnPositions());
         BuildOfflinePatrolPositions(networkManager);
         List<Vector3> reservedSpawnPositions = new List<Vector3>();
+        List<int> randomizedSpawnIndices = BuildRandomizedPlayerSpawnIndices(_offlineTotalPlayerCount);
 
         SpawnOfflinePlayer(
             sessionId: "offline_local",
             displayName: _localDisplayName,
             skinIndex: _localSkinIndex,
-            spawnIndex: 0,
+            spawnIndex: randomizedSpawnIndices.Count > 0 ? randomizedSpawnIndices[0] : 0,
             isLocalPlayer: true,
             botIndex: -1,
             reservedSpawnPositions: reservedSpawnPositions);
@@ -335,7 +336,9 @@ public class OfflineModeManager : MonoBehaviour
         int botCount = Mathf.Max(0, _offlineTotalPlayerCount - 1);
         for (int botIndex = 0; botIndex < botCount; botIndex++)
         {
-            int spawnIndex = botIndex + 1;
+            int spawnIndex = randomizedSpawnIndices.Count > botIndex + 1
+                ? randomizedSpawnIndices[botIndex + 1]
+                : botIndex + 1;
             int botSkinIndex = ResolveBotSkinIndex(_localSkinIndex, botIndex);
             SpawnOfflinePlayer(
                 sessionId: $"offline_bot_{botIndex + 1}",
@@ -2498,6 +2501,54 @@ public class OfflineModeManager : MonoBehaviour
         }
 
         return Mathf.Abs(localSkinIndex + botIndex + 1) % skinCount;
+    }
+
+    private List<int> BuildRandomizedPlayerSpawnIndices(int totalPlayerCount)
+    {
+        List<int> randomizedIndices = new List<int>(Mathf.Max(0, totalPlayerCount));
+        int spawnPointCount = Mathf.Max(1, _spawnPositions.Count);
+        int cycles = Mathf.CeilToInt(Mathf.Max(0, totalPlayerCount) / (float)spawnPointCount);
+
+        for (int cycle = 0; cycle < cycles; cycle++)
+        {
+            List<int> cycleIndices = new List<int>(spawnPointCount);
+            for (int spawnPointIndex = 0; spawnPointIndex < spawnPointCount; spawnPointIndex++)
+            {
+                cycleIndices.Add((cycle * spawnPointCount) + spawnPointIndex);
+            }
+
+            ShuffleSpawnIndices(cycleIndices);
+            randomizedIndices.AddRange(cycleIndices);
+        }
+
+        if (randomizedIndices.Count > totalPlayerCount)
+        {
+            randomizedIndices.RemoveRange(totalPlayerCount, randomizedIndices.Count - totalPlayerCount);
+        }
+
+        return randomizedIndices;
+    }
+
+    private int GetRandomOfflinePlayerSpawnIndex()
+    {
+        int spawnPointCount = Mathf.Max(1, _spawnPositions.Count);
+        return Random.Range(0, spawnPointCount);
+    }
+
+    private static void ShuffleSpawnIndices(List<int> indices)
+    {
+        if (indices == null || indices.Count <= 1)
+        {
+            return;
+        }
+
+        for (int i = indices.Count - 1; i > 0; i--)
+        {
+            int swapIndex = Random.Range(0, i + 1);
+            int currentValue = indices[i];
+            indices[i] = indices[swapIndex];
+            indices[swapIndex] = currentValue;
+        }
     }
 
     private Vector3 ResolveSpawnPosition(int spawnIndex, List<Vector3> reservedSpawnPositions = null)

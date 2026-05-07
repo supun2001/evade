@@ -119,6 +119,37 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!1 &94872500
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 94872501}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (1)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &94872501
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 94872500}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -602.37, y: 18.29, z: 304.73}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &282920868
 GameObject:
   m_ObjectHideFlags: 0
@@ -481,15 +512,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 89bdeed4550ae41409696559877e4b41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
-  localServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
+  localServerUrl: ws://localhost:2567
   productionServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
-  useProductionServerInEditor: 1
+  useProductionServerInEditor: 0
   mapIdOverride: 
   nextbotSpawnPoints:
   - anchor: {fileID: 1549373509}
     position: {x: -676.82, y: 2.5, z: 200.91}
   playerSpawnPoints:
   - anchor: {fileID: 1827652803}
+    position: {x: -675.5, y: 2.5, z: 211.6}
+  - anchor: {fileID: 94872501}
+    position: {x: -675.5, y: 2.5, z: 211.6}
+  - anchor: {fileID: 1155007380}
+    position: {x: -675.5, y: 2.5, z: 211.6}
+  - anchor: {fileID: 864881403}
     position: {x: -675.5, y: 2.5, z: 211.6}
   spawnGroundProbeHeight: 30
   spawnGroundProbeDistance: 120
@@ -647,6 +684,37 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &864881402
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 864881403}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (2)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &864881403
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 864881402}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -733.6, y: 18.29, z: 69.3}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -913,6 +981,37 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 6362824255574453043, guid: 6aee23a8b85444e2e87c1e789619a034, type: 3}
   m_PrefabInstance: {fileID: 1119325455}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &1155007379
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1155007380}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (3)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1155007380
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1155007379}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -685.71, y: 3.26, z: 87.8}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1218418246
 GameObject:
   m_ObjectHideFlags: 0
@@ -1509,6 +1608,9 @@ SceneRoots:
   - {fileID: 1297590461}
   - {fileID: 1549373509}
   - {fileID: 1827652803}
+  - {fileID: 1155007380}
+  - {fileID: 94872501}
+  - {fileID: 864881403}
   - {fileID: 1456026833}
   - {fileID: 627969018}
   - {fileID: 791096642}

@@ -158,7 +158,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private bool _billboardToCamera = true;
     [SerializeField] private Vector3 _visualLocalOffset = Vector3.zero;
     [SerializeField] private float _visualGroundPadding = 0.02f;
-    [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 90f, -90f);
+    [SerializeField] private Vector3 _billboardRotationOffsetEuler = new Vector3(0f, 270f, -90f);
 
     [Header("Health Bar")]
     [SerializeField] private string _healthBarPointName = "HealthBarPoint";
@@ -374,7 +374,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private bool ShouldUseTargetFacingVisuals()
     {
-        return _target != null && (_faceTargetPlayer || _roomStateAuthorityActive);
+        return _faceTargetPlayer && _target != null;
     }
 
     private bool UpdateActivationState()

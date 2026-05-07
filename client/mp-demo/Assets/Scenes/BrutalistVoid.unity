@@ -48313,7 +48313,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 89bdeed4550ae41409696559877e4b41, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::NetworkManager
-  localServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
+  localServerUrl: ws://localhost:2567
   productionServerUrl: wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev
   useProductionServerInEditor: 0
   mapIdOverride: brutilistVoid
@@ -48322,6 +48322,10 @@ MonoBehaviour:
     position: {x: -577.45, y: 2.5, z: -65.31}
   playerSpawnPoints:
   - anchor: {fileID: 1827652803}
+    position: {x: -612.25, y: 2.75, z: -35.31}
+  - anchor: {fileID: 1131190698}
+    position: {x: -612.25, y: 2.75, z: -35.31}
+  - anchor: {fileID: 1604402210}
     position: {x: -612.25, y: 2.75, z: -35.31}
   spawnGroundProbeHeight: 30
   spawnGroundProbeDistance: 120
@@ -78691,6 +78695,37 @@ Mesh:
       - serializedVersion: 1
         m_IndexStart: 0
         m_IndexCount: 0
+--- !u!1 &1131190697
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1131190698}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (1)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1131190698
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1131190697}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -113.4, y: 2.75, z: -112.1}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1138590410
 GameObject:
   m_ObjectHideFlags: 0
@@ -103137,6 +103172,37 @@ MonoBehaviour:
   m_SelectedFaces: 
   m_SelectedEdges: []
   m_SelectedVertices: 
+--- !u!1 &1604402209
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1604402210}
+  m_Layer: 0
+  m_Name: PlayerSpawnPoints (2)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1604402210
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1604402209}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -86.3, y: 2.75, z: 69.4}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!43 &1608176638
 Mesh:
   m_ObjectHideFlags: 0
@@ -135993,63 +136059,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 794391640}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1001 &4799511277117775204
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -1.5071
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 23.72779
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 98.9619
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 0.7071068
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: -0.7071068
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: -90
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 1421777535667468556, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 3019008969410093966, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
-      propertyPath: m_Name
-      value: MuzzleFlash
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: b7bd3c83da8474e4fb6c0f31de0579d0, type: 3}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -136063,10 +136072,11 @@ SceneRoots:
   - {fileID: 1297590461}
   - {fileID: 1549373509}
   - {fileID: 1827652803}
+  - {fileID: 1131190698}
+  - {fileID: 1604402210}
   - {fileID: 1456026833}
   - {fileID: 627969018}
   - {fileID: 1639859043}
   - {fileID: 1971912846}
   - {fileID: 1309555392}
   - {fileID: 929531113}
-  - {fileID: 4799511277117775204}

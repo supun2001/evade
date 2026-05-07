@@ -8,6 +8,7 @@ public class NetworkPlayer : MonoBehaviour
 {
     private const float MaxAcceptedServerHitDistance = 1.85f;
     private const float DebugClickLogCooldown = 0.2f;
+    private const float RemoteRotationYawOffset = 180f;
 
     private Player playerState;
     private bool isLocal;
@@ -413,23 +414,25 @@ public class NetworkPlayer : MonoBehaviour
         _remoteVelocity = new Vector3(playerState.velocityX, playerState.velocityY, playerState.velocityZ);
         Vector3 extrapolatedOffset = new Vector3(_remoteVelocity.x, 0f, _remoteVelocity.z) * sendInterval;
         targetPos = new Vector3(playerState.x, playerState.y, playerState.z) + extrapolatedOffset;
-        targetRot = Quaternion.Euler(0, playerState.rotationY, 0);
+        float displayedRemoteRotationY = playerState.rotationY + RemoteRotationYawOffset;
+        targetRot = Quaternion.Euler(0, displayedRemoteRotationY, 0);
+
+        bool remoteShootingMode = playerState.isShootingMode;
+        bool hasNewShotTrigger = playerState.shotTriggerId > 0f && playerState.shotTriggerId > _lastProcessedShotTriggerId;
 
         if (animator)
         {
             if (anim != null)
             {
-                bool remoteShootingMode = playerState.isShootingMode;
                 anim.SetShootingModeActive(remoteShootingMode);
                 if (controller != null && controller.IsCombatModeActive != remoteShootingMode)
                 {
                     controller.SetCombatModeActive(remoteShootingMode);
                 }
 
-                if (remoteShootingMode && playerState.shotTriggerId > 0f && playerState.shotTriggerId > _lastProcessedShotTriggerId)
+                if (hasNewShotTrigger && remoteShootingMode)
                 {
                     anim.PlayShootAnimation();
-                    _lastProcessedShotTriggerId = playerState.shotTriggerId;
                 }
 
                 anim.ApplyNetworkState(
@@ -451,6 +454,17 @@ public class NetworkPlayer : MonoBehaviour
                 animator.SetBool(JumpHash, playerState.isJumping);
                 animator.SetFloat(VerticalSpeedHash, playerState.velocityY);
             }
+        }
+
+        if (controller != null && controller.IsCombatModeActive != remoteShootingMode)
+        {
+            controller.SetCombatModeActive(remoteShootingMode);
+        }
+
+        if (hasNewShotTrigger)
+        {
+            controller?.PlayRemoteCombatShotPresentation();
+            _lastProcessedShotTriggerId = playerState.shotTriggerId;
         }
 
         if (controller != null)
@@ -534,8 +548,9 @@ public class NetworkPlayer : MonoBehaviour
         }
 
         Vector3 authoritativePosition = new Vector3(playerState.x, playerState.y, playerState.z);
-        controller.ApplyNetworkRoundReset(authoritativePosition, playerState.rotationY);
-        transform.SetPositionAndRotation(authoritativePosition, Quaternion.Euler(0f, playerState.rotationY, 0f));
+        float displayedRemoteRotationY = playerState.rotationY + RemoteRotationYawOffset;
+        controller.ApplyNetworkRoundReset(authoritativePosition, displayedRemoteRotationY);
+        transform.SetPositionAndRotation(authoritativePosition, Quaternion.Euler(0f, displayedRemoteRotationY, 0f));
         _jumpQueued = false;
         nextSendTime = Time.time + sendInterval;
         return true;
