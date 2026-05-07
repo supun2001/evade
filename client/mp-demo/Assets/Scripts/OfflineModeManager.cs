@@ -404,6 +404,7 @@ public class OfflineModeManager : MonoBehaviour
 
         // Reset player states for the current phase if we are in one
         ResetOfflinePlayersForPhase(string.Equals(_currentPhase, RoundPhase, System.StringComparison.OrdinalIgnoreCase));
+        EnsureOfflineNextbots(activeOverride: IsOfflineNextbotPatrolActive);
     }
 
     public void StopOfflineMode()
@@ -418,6 +419,7 @@ public class OfflineModeManager : MonoBehaviour
             {
                 nextbots[i].SetOfflineNextbotActive(true);
                 nextbots[i].SetOfflineLocalAuthority(false);
+                ConfigureOfflineNextbotDirectDriver(nextbots[i], i, false);
             }
         }
 
@@ -887,6 +889,71 @@ public class OfflineModeManager : MonoBehaviour
         }
 
         return playerTransform != null;
+    }
+
+    public bool TryGetAssignedActivePlayer(
+        string requesterSessionId,
+        int requesterIndex,
+        Vector3 origin,
+        out Transform playerTransform,
+        out float distance)
+    {
+        playerTransform = null;
+        distance = float.PositiveInfinity;
+
+        int activeCandidateCount = 0;
+        foreach (KeyValuePair<string, GameObject> pair in _offlinePlayers)
+        {
+            if (IsActiveTargetCandidate(pair, requesterSessionId))
+            {
+                activeCandidateCount += 1;
+            }
+        }
+
+        if (activeCandidateCount <= 0)
+        {
+            return false;
+        }
+
+        int assignedOrdinal = PositiveModulo(requesterIndex, activeCandidateCount);
+        int currentOrdinal = 0;
+        foreach (KeyValuePair<string, GameObject> pair in _offlinePlayers)
+        {
+            if (!IsActiveTargetCandidate(pair, requesterSessionId))
+            {
+                continue;
+            }
+
+            if (currentOrdinal != assignedOrdinal)
+            {
+                currentOrdinal += 1;
+                continue;
+            }
+
+            PlayerController candidateController = pair.Value.GetComponent<PlayerController>();
+            playerTransform = candidateController.transform;
+            distance = GetPlanarDistance(origin, playerTransform.position);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsActiveTargetCandidate(KeyValuePair<string, GameObject> pair, string requesterSessionId)
+    {
+        if (string.Equals(pair.Key, requesterSessionId, System.StringComparison.Ordinal)
+            || pair.Value == null
+            || IsOfflinePlayerEliminated(pair.Key))
+        {
+            return false;
+        }
+
+        PlayerController candidateController = pair.Value.GetComponent<PlayerController>();
+        return candidateController != null
+            && candidateController.enabled
+            && !candidateController.IsInjuredOrHitReacting()
+            && !candidateController.IsBeingCarried()
+            && !candidateController.IsEliminatedStateActive;
     }
 
     public Vector3 GetActivePlayerSeparationVector(string requesterSessionId, Vector3 origin, float radius)
@@ -1630,7 +1697,25 @@ public class OfflineModeManager : MonoBehaviour
 
             nextbot.PrepareOfflineNextbot(ResolveNextbotSpawnPosition(i));
             nextbot.SetOfflineNextbotActive(active);
+            ConfigureOfflineNextbotDirectDriver(nextbot, i, active);
         }
+    }
+
+    private static void ConfigureOfflineNextbotDirectDriver(NextbotFollowPlayer nextbot, int index, bool active)
+    {
+        if (nextbot == null)
+        {
+            return;
+        }
+
+        OfflineNextbotDirectDriver driver = nextbot.GetComponent<OfflineNextbotDirectDriver>();
+        if (driver == null)
+        {
+            driver = nextbot.gameObject.AddComponent<OfflineNextbotDirectDriver>();
+        }
+
+        driver.Configure(nextbot, index);
+        driver.SetDriverActive(active);
     }
 
     private void PollRoundStats()
@@ -1968,16 +2053,9 @@ public class OfflineModeManager : MonoBehaviour
 
             Vector3 preferredPosition = ResolveNextbotSpawnPosition(i);
             Vector3 spawnPosition = ResolveAvailableSpawnPosition(preferredPosition, reservedSpawnPositions);
-            if (CurrentPresentationMode == OfflinePresentationMode.Shooting)
-            {
-                nextbot.PrepareLocalSimulationNextbot(spawnPosition);
-            }
-            else
-            {
-                nextbot.PrepareOfflineNextbot(spawnPosition);
-            }
-
+            nextbot.PrepareOfflineNextbot(spawnPosition);
             nextbot.SetOfflineNextbotActive(shouldActivateNextbots);
+            ConfigureOfflineNextbotDirectDriver(nextbot, i, shouldActivateNextbots);
         }
     }
 

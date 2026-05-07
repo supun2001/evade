@@ -52,6 +52,7 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private float _remoteRoomStateVerticalAscentLerpSpeed = 18f;
     [SerializeField] private float _remoteRoomStateClimbHeightBias = 0.04f;
     [SerializeField] private bool _logRemoteRoomStateDiagnostics = true;
+    [SerializeField] private bool _logOfflineSimulationDiagnostics = true;
 
     [Header("Follow")]
     [SerializeField] private float _moveSpeed = 10f;
@@ -256,6 +257,8 @@ public class NextbotFollowPlayer : MonoBehaviour
     private float _roomStateServerGapMax;
     private int _roomStateDiagnosticSampleCount;
     private float _nextRoomStateDiagnosticLogTime;
+    private float _nextOfflineSimulationDiagnosticLogTime;
+    private Vector3 _lastOfflineSimulationDiagnosticPosition;
     private Vector3 _remotePresentationVelocity;
     private float _offlineCombatHealth;
     private string _displayName = string.Empty;
@@ -312,6 +315,13 @@ public class NextbotFollowPlayer : MonoBehaviour
     {
         SyncIgnoredTargets();
 
+        if (ShouldUseOfflineLocalSimulationRules())
+        {
+            SetServerVisualState(_offlineNextbotActive);
+            UpdateOfflineDirectSimulation();
+            return;
+        }
+
         if (UpdateActivationState())
         {
             return;
@@ -328,7 +338,6 @@ public class NextbotFollowPlayer : MonoBehaviour
             UpdateOffMeshLinkTraversal();
             return;
         }
-
         RefreshTargetIfNeeded();
         UpdateMovement();
     }
@@ -364,6 +373,7 @@ public class NextbotFollowPlayer : MonoBehaviour
             && !allowOfflineLocalSimulationWithoutRoomState
             && roomState != null
             && TryGetAssignedNextbotState(roomState, out assignedNextbotState);
+        SetOfflineDirectMovementComponentsActive(false);
         SetRoomStateAuthorityActive(useRoomStateAuthority);
 
         if (useRoomStateAuthority)
@@ -371,8 +381,9 @@ public class NextbotFollowPlayer : MonoBehaviour
             return UpdateFromRoomState(assignedNextbotState);
         }
 
-        if (_forceOfflineLocalAuthority)
+        if (ShouldUseOfflineLocalSimulationRules())
         {
+            SetOfflineDirectMovementComponentsActive(true);
             SetServerVisualState(_offlineNextbotActive);
             if (!_offlineNextbotActive)
             {
@@ -505,6 +516,137 @@ public class NextbotFollowPlayer : MonoBehaviour
     private bool ShouldUseOfflineLocalSimulationRules()
     {
         return _forceOfflineLocalAuthority || IsOfflineShootingLocalSimulation();
+    }
+
+    private void SetOfflineDirectMovementComponentsActive(bool useOfflineDirectMovement)
+    {
+        if (_characterController != null)
+        {
+            _characterController.enabled = !useOfflineDirectMovement;
+        }
+
+        if (_navMeshAgent == null)
+        {
+            return;
+        }
+
+        if (useOfflineDirectMovement)
+        {
+            if (_navMeshAgent.enabled)
+            {
+                if (_navMeshAgent.isOnNavMesh)
+                {
+                    _navMeshAgent.ResetPath();
+                }
+
+                _navMeshAgent.enabled = false;
+            }
+
+            return;
+        }
+
+        if (!_navMeshAgent.enabled)
+        {
+            InitializeNavMeshAgentFromCurrentPosition();
+        }
+    }
+
+    private void UpdateOfflineDirectSimulation()
+    {
+        SetOfflineDirectMovementComponentsActive(true);
+
+        if (!_offlineNextbotActive)
+        {
+            EmitOfflineSimulationDiagnostic("inactive");
+            ClearTarget();
+            StopAgent();
+            return;
+        }
+
+        if (!OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager))
+        {
+            EmitOfflineSimulationDiagnostic("no_offline_manager");
+            ClearTarget();
+            StopAgent();
+            return;
+        }
+
+        if (offlineModeManager.TryGetNearestActivePlayer(_networkNextbotId, transform.position, out Transform nearestPlayer, out _)
+            && nearestPlayer != null)
+        {
+            PlayerController nearestController = ResolvePlayerController(nearestPlayer);
+            if (nearestController != null && nearestController.enabled && !nearestController.IsInjuredOrHitReacting())
+            {
+                if (_target != nearestPlayer || _targetController != nearestController)
+                {
+                    AssignTarget(nearestPlayer, nearestController);
+                }
+
+                Vector3 chasePosition = ResolveTargetChasePosition();
+                ApplyOfflineDirectGroundMovement(chasePosition);
+                EmitOfflineSimulationDiagnostic($"chasing:{nearestPlayer.name}");
+                return;
+            }
+        }
+
+        ClearTarget();
+        if (TryUpdateOfflinePatrolMovement())
+        {
+            EmitOfflineSimulationDiagnostic("patrolling");
+            return;
+        }
+
+        EmitOfflineSimulationDiagnostic("stopped");
+        StopAgent();
+    }
+
+    private void EmitOfflineSimulationDiagnostic(string state)
+    {
+        if (!_logOfflineSimulationDiagnostics || Time.unscaledTime < _nextOfflineSimulationDiagnosticLogTime)
+        {
+            return;
+        }
+
+        string targetName = _target != null ? _target.name : "none";
+        float movedDistance = Vector3.Distance(transform.position, _lastOfflineSimulationDiagnosticPosition);
+        string navInfo = _navMeshAgent == null
+            ? "nav:null"
+            : $"nav:enabled={_navMeshAgent.enabled},onMesh={_navMeshAgent.isOnNavMesh},stopped={_navMeshAgent.isStopped}";
+        string controllerInfo = _characterController == null
+            ? "cc:null"
+            : $"cc:enabled={_characterController.enabled},grounded={_characterController.isGrounded}";
+        Debug.Log(
+            $"[OfflineNextbotDebug] {_networkNextbotId} state={state} target={targetName} " +
+            $"pos={transform.position} moved={movedDistance:0.###} vel={_horizontalVelocity} " +
+            $"active={_offlineNextbotActive} {navInfo} {controllerInfo}");
+        _lastOfflineSimulationDiagnosticPosition = transform.position;
+        _nextOfflineSimulationDiagnosticLogTime = Time.unscaledTime + 1.5f;
+    }
+
+    private void ApplyOfflineDirectGroundMovement(Vector3 targetPosition)
+    {
+        Vector3 planarOffset = targetPosition - transform.position;
+        planarOffset.y = 0f;
+        float planarDistance = planarOffset.magnitude;
+        Vector3 moveDirection = planarDistance > 0.001f ? planarOffset / planarDistance : Vector3.zero;
+        Vector3 desiredVelocity = planarDistance > _stoppingDistance ? moveDirection * _moveSpeed : Vector3.zero;
+        _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, _acceleration * Time.deltaTime);
+
+        Vector3 nextPosition = transform.position + _horizontalVelocity * Time.deltaTime;
+        if (TryResolveGroundedPosition(nextPosition, out Vector3 groundedNextPosition))
+        {
+            nextPosition = SmoothGroundedPosition(transform.position, groundedNextPosition);
+            _lockedHeight = nextPosition.y;
+        }
+        else if (_lockToStartingHeight)
+        {
+            nextPosition.y = _lockedHeight;
+        }
+
+        transform.position = nextPosition;
+        UpdateBodyRotation(_horizontalVelocity);
+        ApplySolidObstaclePush();
+        TryHitTarget(planarDistance);
     }
 
     private void PrepareSpawnedNextbot(Vector3 spawnPosition, bool useOfflineLocalAuthority)
@@ -1594,7 +1736,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private float GetTargetSelectionDistance(Vector3 destination)
     {
-        if (ShouldUseMapLocalNavMeshPresentation())
+        if (ShouldUseMapLocalNavMeshPresentation() || ShouldUseOfflineLocalSimulationRules())
         {
             return GetPlanarDistance(transform.position, destination);
         }
@@ -2003,6 +2145,12 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void MoveTowardOfflinePatrolTarget(Vector3 patrolTarget)
     {
+        if (ShouldUseOfflineLocalSimulationRules())
+        {
+            ApplyOfflineDirectGroundMovement(patrolTarget);
+            return;
+        }
+
         if (_navMeshAgent != null && _navMeshAgent.enabled && _navMeshAgent.isOnNavMesh)
         {
             _navMeshAgent.speed = _moveSpeed;
@@ -2206,6 +2354,12 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         Vector3 targetPosition = ResolveTargetChasePosition();
         bool shouldUseParkourLocalPresentation = ShouldUseMapLocalNavMeshPresentation();
+
+        if (ShouldUseOfflineLocalSimulationRules())
+        {
+            ApplyOfflineDirectGroundMovement(targetPosition);
+            return;
+        }
 
         if (_navMeshAgent != null && _navMeshAgent.enabled)
         {
