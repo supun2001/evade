@@ -1565,9 +1565,30 @@ public class NetworkManager : MonoBehaviour
         // page explicitly provides ?server=. Reusing a saved browser-side override
         // can strand players on an old localhost or temporary tunnel URL.
         _runtimeServerUrlOverride = string.Empty;
-        PlayerPrefs.DeleteKey(ServerUrlOverridePlayerPrefsKey);
-        PlayerPrefs.Save();
-        Debug.Log($"NetworkManager: using WebGL default hosted server {productionServerUrl}");
+
+        // Auto-detect local development environment
+        string absoluteUrl = Application.absoluteURL;
+        if (!string.IsNullOrWhiteSpace(absoluteUrl) && Uri.TryCreate(absoluteUrl, UriKind.Absolute, out Uri uri))
+        {
+            if (uri.Host == "localhost" || uri.Host == "127.0.0.1")
+            {
+                _runtimeServerUrlOverride = localServerUrl;
+                Debug.Log($"NetworkManager: local development detected on {uri.Host}, auto-overriding server to {_runtimeServerUrlOverride}");
+            }
+        }
+
+        if (string.IsNullOrEmpty(_runtimeServerUrlOverride))
+        {
+            PlayerPrefs.DeleteKey(ServerUrlOverridePlayerPrefsKey);
+            PlayerPrefs.Save();
+            Debug.Log($"NetworkManager: using WebGL default hosted server {productionServerUrl}");
+        }
+        else
+        {
+            PlayerPrefs.SetString(ServerUrlOverridePlayerPrefsKey, _runtimeServerUrlOverride);
+            PlayerPrefs.Save();
+        }
+#else
         return;
         #endif
 
