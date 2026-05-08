@@ -189,6 +189,11 @@ public class LobbyUI : MonoBehaviour
     #endregion
 
     #region Class Methods
+    private VisualElement _loadingScreen;
+    private VisualElement _loadingBarFill;
+    private Label _loadingStatusLabel;
+    private Label _loadingPercentLabel;
+
     private void Start()
     {
         EnsureJoinTransitionOverlay();
@@ -552,8 +557,9 @@ public class LobbyUI : MonoBehaviour
     private async void StartSelectedMapJoin()
     {
         SetStartButtonEnabled(false);
-        SetJoinTransitionVisible(true);
-        await WaitForJoinTransitionLeadAsync();
+        
+        // Show the new premium loading screen for 6 seconds
+        await ShowLoadingScreenAsync(6f);
 
         if (createButton != null) createButton.interactable = false;
         if (joinButton != null) joinButton.interactable = false;
@@ -576,7 +582,7 @@ public class LobbyUI : MonoBehaviour
         }
         else
         {
-            SetJoinTransitionVisible(false);
+            if (_loadingScreen != null) _loadingScreen.style.display = DisplayStyle.None;
             ShowNotification($"Start Failed: {error}");
         }
 
@@ -608,14 +614,18 @@ public class LobbyUI : MonoBehaviour
             "Shooting mode started with AK47 movement animations.");
     }
 
-    private void StartOfflineMode(
+    private async void StartOfflineMode(
         OfflineModeManager.OfflinePresentationMode presentationMode,
         string startedMessage)
     {
+        // Show the new premium loading screen for 6 seconds
+        await ShowLoadingScreenAsync(6f);
+
         OfflineModeManager offlineModeManager = OfflineModeManager.Instance;
         bool started = offlineModeManager.StartOfflineMode(GetOfflineDisplayName(), currentSkinIndex, presentationMode);
         if (!started)
         {
+            if (_loadingScreen != null) _loadingScreen.style.display = DisplayStyle.None;
             ShowNotification($"{presentationMode} mode could not start.");
             return;
         }
@@ -713,6 +723,12 @@ public class LobbyUI : MonoBehaviour
 
     public void OnGameStarted()
     {
+        if (_loadingScreen != null)
+        {
+            _loadingScreen.style.display = DisplayStyle.None;
+        }
+
+        SetJoinTransitionVisible(false);
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = false;
         SetMapSelectionVisible(false);
@@ -1409,6 +1425,76 @@ public class LobbyUI : MonoBehaviour
         if (nextAlpha <= 0.001f && s_joinTransitionTargetAlpha <= 0f)
         {
             s_joinTransitionCanvasGroup.blocksRaycasts = false;
+        }
+    }
+
+    private async Task ShowLoadingScreenAsync(float durationSeconds)
+    {
+        if (_loadingScreen == null)
+        {
+            VisualTreeAsset loadingAsset = Resources.Load<VisualTreeAsset>("UI/LoadingScreen");
+            if (loadingAsset != null)
+            {
+                _loadingScreen = loadingAsset.Instantiate();
+                _loadingScreen.style.position = Position.Absolute;
+                _loadingScreen.style.left = 0;
+                _loadingScreen.style.top = 0;
+                _loadingScreen.style.right = 0;
+                _loadingScreen.style.bottom = 0;
+                _loadingBarFill = _loadingScreen.Q<VisualElement>("loading-bar-fill");
+                _loadingStatusLabel = _loadingScreen.Q<Label>("loading-status");
+                _loadingPercentLabel = _loadingScreen.Q<Label>("loading-percent");
+                
+                _menuDocument.rootVisualElement.Add(_loadingScreen);
+                _loadingScreen.BringToFront();
+            }
+        }
+
+        if (_loadingScreen != null)
+        {
+            _loadingScreen.style.display = DisplayStyle.Flex;
+            _loadingScreen.style.opacity = 1;
+            
+            float elapsed = 0;
+            string[] statuses = { 
+                "INITIALIZING SYSTEMS...", 
+                "CONNECTING TO SERVER...", 
+                "LOADING WORLD DATA...", 
+                "SYNCING PLAYER STATE...", 
+                "PREPARING ENVIRONMENT...",
+                "ALMOST THERE..." 
+            };
+            
+            while (elapsed < durationSeconds)
+            {
+                elapsed += Time.deltaTime;
+                float progress = Mathf.Clamp01(elapsed / durationSeconds);
+                
+                if (_loadingBarFill != null)
+                {
+                    _loadingBarFill.style.width = Length.Percent(progress * 100);
+                }
+                
+                if (_loadingPercentLabel != null)
+                {
+                    _loadingPercentLabel.text = $"{(int)(progress * 100)}%";
+                }
+                
+                if (_loadingStatusLabel != null)
+                {
+                    int statusIndex = Mathf.FloorToInt(progress * (statuses.Length));
+                    statusIndex = Mathf.Clamp(statusIndex, 0, statuses.Length - 1);
+                    _loadingStatusLabel.text = statuses[statusIndex];
+                }
+                
+                await Task.Yield();
+            }
+            
+            if (_loadingBarFill != null) _loadingBarFill.style.width = Length.Percent(100);
+            if (_loadingPercentLabel != null) _loadingPercentLabel.text = "100%";
+            if (_loadingStatusLabel != null) _loadingStatusLabel.text = "MATCH READY";
+            
+            await Task.Delay(500);
         }
     }
 
