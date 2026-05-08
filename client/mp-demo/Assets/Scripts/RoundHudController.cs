@@ -14,8 +14,17 @@ public class RoundHudController : MonoBehaviour
     private const string RoundStartSfxResourcePath = "SFX/RoundStart";
     private const string GreenScoreboardIconResourcePath = "UI/green_icon";
     private const string PinkScoreboardIconResourcePath = "UI/pink_icon";
+    private const float KillFeedEntryLifetimeSeconds = 6f;
+    private const int MaxKillFeedEntries = 6;
+
+    private sealed class KillFeedEntryViewModel
+    {
+        public KillFeedMessageData Message;
+        public float ExpiresAt;
+    }
 
     private NetworkManager _networkManager;
+    private OfflineModeManager _offlineModeManager;
     private UIDocument _hudDocument;
     private VisualElement _hudRoot;
     private LobbyUI _lobbyUi;
@@ -36,6 +45,7 @@ public class RoundHudController : MonoBehaviour
     private VisualElement _roundAnnouncementContainer;
     private Label _roundAnnouncementTitleLabel;
     private Label _roundAnnouncementSubtitleLabel;
+    private VisualElement _killFeedContainer;
     private VisualElement _roundResultsOverlay;
     private Label _roundResultsTitleLabel;
     private Label _roundResultsBestTimeValue;
@@ -80,6 +90,7 @@ public class RoundHudController : MonoBehaviour
     private float _mapVoteEndsAtUnscaledTime;
     private string _localVotedMapId = string.Empty;
     private bool _showMapVoteResultsView;
+    private readonly List<KillFeedEntryViewModel> _killFeedEntries = new List<KillFeedEntryViewModel>();
 
     private void Awake()
     {
@@ -125,6 +136,14 @@ public class RoundHudController : MonoBehaviour
             RebindNetworkManager(NetworkManager.Instance);
         }
 
+        OfflineModeManager currentOfflineModeManager = OfflineModeManager.TryGetExisting(out OfflineModeManager offlineManager)
+            ? offlineManager
+            : null;
+        if (_offlineModeManager != currentOfflineModeManager)
+        {
+            RebindOfflineModeManager(currentOfflineModeManager);
+        }
+
         if (_lobbyUi == null)
         {
             _lobbyUi = FindFirstObjectByType<LobbyUI>();
@@ -138,6 +157,7 @@ public class RoundHudController : MonoBehaviour
         HandleMapVoteInput();
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
+        RefreshKillFeedDisplay();
         RefreshResultsDisplay();
         RefreshMapVoteDisplay();
     }
@@ -145,6 +165,7 @@ public class RoundHudController : MonoBehaviour
     private void OnDestroy()
     {
         RebindNetworkManager(null);
+        RebindOfflineModeManager(null);
     }
 
     private void RebindNetworkManager(NetworkManager manager)
@@ -156,6 +177,7 @@ public class RoundHudController : MonoBehaviour
             _networkManager.RoundResultsReceived -= HandleRoundResultsReceived;
             _networkManager.MapVoteStateReceived -= HandleMapVoteStateReceived;
             _networkManager.MapSelectedReceived -= HandleMapSelectedReceived;
+            _networkManager.KillFeedReceived -= HandleKillFeedReceived;
             _networkManager.RoomLeftEvent -= HandleRoomLeft;
         }
 
@@ -168,7 +190,23 @@ public class RoundHudController : MonoBehaviour
             _networkManager.RoundResultsReceived += HandleRoundResultsReceived;
             _networkManager.MapVoteStateReceived += HandleMapVoteStateReceived;
             _networkManager.MapSelectedReceived += HandleMapSelectedReceived;
+            _networkManager.KillFeedReceived += HandleKillFeedReceived;
             _networkManager.RoomLeftEvent += HandleRoomLeft;
+        }
+    }
+
+    private void RebindOfflineModeManager(OfflineModeManager manager)
+    {
+        if (_offlineModeManager != null)
+        {
+            _offlineModeManager.KillFeedReceived -= HandleKillFeedReceived;
+        }
+
+        _offlineModeManager = manager;
+
+        if (_offlineModeManager != null)
+        {
+            _offlineModeManager.KillFeedReceived += HandleKillFeedReceived;
         }
     }
 
@@ -190,6 +228,7 @@ public class RoundHudController : MonoBehaviour
         _roundAnnouncementContainer = _hudRoot?.Q<VisualElement>("round-announcement-container");
         _roundAnnouncementTitleLabel = _hudRoot?.Q<Label>("round-announcement-title-label");
         _roundAnnouncementSubtitleLabel = _hudRoot?.Q<Label>("round-announcement-subtitle-label");
+        _killFeedContainer = _hudRoot?.Q<VisualElement>("kill-feed-container");
         _roundResultsOverlay = _hudRoot?.Q<VisualElement>("round-results-overlay");
         _roundResultsTitleLabel = _hudRoot?.Q<Label>("round-results-title-label");
         _roundResultsBestTimeValue = _hudRoot?.Q<Label>("round-results-best-time-value");
@@ -220,6 +259,7 @@ public class RoundHudController : MonoBehaviour
 
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
+        RefreshKillFeedDisplay();
         RefreshResultsDisplay();
         RefreshTabScoreboardDisplay();
         RefreshMapVoteDisplay();
@@ -353,6 +393,27 @@ public class RoundHudController : MonoBehaviour
         RefreshMapVoteDisplay();
     }
 
+    private void HandleKillFeedReceived(KillFeedMessageData message)
+    {
+        if (message == null)
+        {
+            return;
+        }
+
+        _killFeedEntries.Add(new KillFeedEntryViewModel
+        {
+            Message = message,
+            ExpiresAt = Time.unscaledTime + KillFeedEntryLifetimeSeconds,
+        });
+
+        if (_killFeedEntries.Count > MaxKillFeedEntries)
+        {
+            _killFeedEntries.RemoveRange(0, _killFeedEntries.Count - MaxKillFeedEntries);
+        }
+
+        RefreshKillFeedDisplay();
+    }
+
     private void HandleRoomLeft()
     {
         _currentPhase = null;
@@ -366,8 +427,10 @@ public class RoundHudController : MonoBehaviour
         _mapVoteEndsAtUnscaledTime = 0f;
         _localVotedMapId = string.Empty;
         _showMapVoteResultsView = false;
+        _killFeedEntries.Clear();
         RefreshPhaseDisplay();
         RefreshAnnouncementDisplay();
+        RefreshKillFeedDisplay();
         RefreshResultsDisplay();
         RefreshMapVoteDisplay();
     }
@@ -380,6 +443,87 @@ public class RoundHudController : MonoBehaviour
             _announcementSubtitle = string.Empty;
             _announcementHideAt = 0f;
         }
+    }
+
+    private void RefreshKillFeedDisplay()
+    {
+        if (_killFeedEntries.Count > 0)
+        {
+            float now = Time.unscaledTime;
+            _killFeedEntries.RemoveAll((entry) => entry == null || entry.Message == null || entry.ExpiresAt <= now);
+        }
+
+        if (_killFeedContainer == null)
+        {
+            return;
+        }
+
+        _killFeedContainer.Clear();
+        _killFeedContainer.style.display = _killFeedEntries.Count > 0 ? DisplayStyle.Flex : DisplayStyle.None;
+        for (int i = _killFeedEntries.Count - 1; i >= 0; i--)
+        {
+            KillFeedMessageData message = _killFeedEntries[i].Message;
+
+            VisualElement row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.marginBottom = 6f;
+            row.style.paddingLeft = 12f;
+            row.style.paddingRight = 12f;
+            row.style.paddingTop = 7f;
+            row.style.paddingBottom = 7f;
+            row.style.backgroundColor = new Color(0.05f, 0.06f, 0.09f, 0.82f);
+            row.style.borderTopLeftRadius = 10f;
+            row.style.borderTopRightRadius = 10f;
+            row.style.borderBottomLeftRadius = 10f;
+            row.style.borderBottomRightRadius = 10f;
+            row.style.borderLeftWidth = 1f;
+            row.style.borderRightWidth = 1f;
+            row.style.borderTopWidth = 1f;
+            row.style.borderBottomWidth = 1f;
+            row.style.borderLeftColor = new Color(1f, 1f, 1f, 0.08f);
+            row.style.borderRightColor = new Color(1f, 1f, 1f, 0.08f);
+            row.style.borderTopColor = new Color(1f, 1f, 1f, 0.08f);
+            row.style.borderBottomColor = new Color(1f, 1f, 1f, 0.08f);
+
+            string killerName = FormatKillFeedName(message.killerType, message.killerName, message.killerId);
+            string victimName = FormatKillFeedName(message.victimType, message.victimName, message.victimId);
+            Label label = new Label($"<color=green>{victimName}</color> <color=red>killed by</color> <color=green>{killerName}</color>");
+            label.enableRichText = true;
+            label.style.color = Color.white;
+            label.style.fontSize = 15f;
+            label.style.unityFontStyleAndWeight = FontStyle.Bold;
+            label.style.whiteSpace = WhiteSpace.Normal;
+            row.Add(label);
+            _killFeedContainer.Add(row);
+        }
+    }
+
+    private static string FormatKillFeedName(string actorType, string actorName, string actorId)
+    {
+        if (!string.IsNullOrWhiteSpace(actorName))
+        {
+            return actorName;
+        }
+
+        if (string.Equals(actorType, "nextbot", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(actorId))
+            {
+                return "Nextbot";
+            }
+
+            return actorId.StartsWith("nextbot", StringComparison.OrdinalIgnoreCase)
+                ? actorId
+                : $"Nextbot {actorId}";
+        }
+
+        if (string.Equals(actorType, "hazard", StringComparison.OrdinalIgnoreCase))
+        {
+            return "World";
+        }
+
+        return string.IsNullOrWhiteSpace(actorId) ? "Unknown" : actorId;
     }
 
     private void RefreshBackgroundMusic()

@@ -167,8 +167,12 @@ public class NextbotFollowPlayer : MonoBehaviour
     [SerializeField] private string _healthBarForegroundName = "Forground";
     [SerializeField] private Color _healthBarBackgroundColor = new Color(0.86f, 0.12f, 0.12f, 1f);
     [SerializeField] private Color _healthBarFillColor = new Color(0.12f, 0.9f, 0.2f, 1f);
+    [SerializeField] private float _healthBarHeightOffset = 2.0f;
 
-    [Header("Audio")]
+    [Header("Health Bar References")]
+    [SerializeField] private Canvas _healthBarCanvas;
+    [SerializeField] private Image _healthBarBackgroundImage;
+    [SerializeField] private Image _healthBarForeground;
     [SerializeField] private AudioSource _loopAudioSource;
     [SerializeField] private AudioClip _loopClip;
     [SerializeField] private bool _playLoopWhileActive = true;
@@ -215,9 +219,6 @@ public class NextbotFollowPlayer : MonoBehaviour
     private Collider[] _colliders = System.Array.Empty<Collider>();
     private Transform _visualTransform;
     private Transform _healthBarPointTransform;
-    private Canvas _healthBarCanvas;
-    private Image _healthBarBackgroundImage;
-    private Image _healthBarForegroundImage;
     private MeshRenderer _rootMeshRenderer;
     private MeshRenderer _visualMeshRenderer;
     private CapsuleCollider _combatHitboxCollider;
@@ -338,6 +339,7 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (UpdateActivationState())
         {
+            if (Time.frameCount % 180 == 0 && !IsCombatActive) Debug.Log($"[MOVEMENT DEBUG] {gameObject.name} is waiting for Combat to activate.");
             return;
         }
 
@@ -608,6 +610,10 @@ public class NextbotFollowPlayer : MonoBehaviour
                 return;
             }
         }
+        else if (_target == null)
+        {
+            if (Time.frameCount % 180 == 0) Debug.Log($"[MOVEMENT DEBUG] {gameObject.name} cannot find any nearby players to chase.");
+        }
 
         ClearTarget();
         if (TryUpdateOfflinePatrolMovement())
@@ -816,13 +822,14 @@ public class NextbotFollowPlayer : MonoBehaviour
         }
 
         _offlineCombatHealth = Mathf.Max(0f, _offlineCombatHealth - damage);
+        Debug.Log($"[OFFLINE DAMAGE] Nextbot {gameObject.name} (ID: {_networkNextbotId}) took {damage} damage. Current Health: {_offlineCombatHealth}/{GetMaxCombatHealth()}");
         UpdateHealthBarVisual();
         if (_offlineCombatHealth <= 0f)
         {
             if (!string.IsNullOrWhiteSpace(attackerSessionId)
                 && OfflineModeManager.TryGetExisting(out OfflineModeManager offlineModeManager))
             {
-                offlineModeManager.TryRecordOfflineNextbotKill(attackerSessionId);
+                offlineModeManager.TryRecordOfflineNextbotKill(attackerSessionId, _networkNextbotId, CombatDisplayName);
             }
 
             SetOfflineNextbotActive(false);
@@ -2384,6 +2391,7 @@ public class NextbotFollowPlayer : MonoBehaviour
                 return;
             }
 
+            if (Time.frameCount % 180 == 0) Debug.Log($"[MOVEMENT DEBUG] {gameObject.name} has no chase target and no patrol routes available.");
             StopAgent();
             return;
         }
@@ -3264,25 +3272,53 @@ public class NextbotFollowPlayer : MonoBehaviour
             _healthBarPointTransform = healthBarPointObject.transform;
         }
 
+        if (_healthBarCanvas != null && _healthBarPointTransform != null && _healthBarCanvas.transform.parent != _healthBarPointTransform)
+        {
+            // If the user assigned a canvas manually, don't move it unless it's not already a child
+            // but we should ensure it's positioned at the point
+        }
+
         UpdateHealthBarAnchorPosition();
 
         if (_healthBarCanvas == null)
         {
+            // Try to find the canvas by name first
             Transform canvasTransform = _healthBarPointTransform.Find(_healthBarCanvasName);
-            if (canvasTransform == null)
-            {
-                canvasTransform = CreateHealthBarCanvas(_healthBarPointTransform).transform;
-            }
-
             if (canvasTransform != null)
             {
                 _healthBarCanvas = canvasTransform.GetComponent<Canvas>();
+            }
+
+            // Fallback: If not found, look for ANY canvas in children
+            if (_healthBarCanvas == null)
+            {
+                _healthBarCanvas = GetComponentInChildren<Canvas>(true);
+            }
+            
+            // Last resort: Create one if absolutely missing
+            if (_healthBarCanvas == null)
+            {
+                _healthBarCanvas = CreateHealthBarCanvas(_healthBarPointTransform).GetComponent<Canvas>();
             }
         }
 
         if (_healthBarBackgroundImage == null && _healthBarCanvas != null)
         {
             Transform backgroundTransform = _healthBarCanvas.transform.Find(_healthBarBackgroundName);
+            if (backgroundTransform == null)
+            {
+                // Fallback: Search all children of the canvas for the background name
+                Image[] allImages = _healthBarCanvas.GetComponentsInChildren<Image>(true);
+                foreach (Image img in allImages)
+                {
+                    if (string.Equals(img.gameObject.name, _healthBarBackgroundName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        backgroundTransform = img.transform;
+                        break;
+                    }
+                }
+            }
+
             if (backgroundTransform == null)
             {
                 backgroundTransform = CreateHealthBarBackground(_healthBarCanvas.transform).transform;
@@ -3294,20 +3330,26 @@ public class NextbotFollowPlayer : MonoBehaviour
             }
         }
 
-        if (_healthBarForegroundImage == null && _healthBarBackgroundImage != null)
+        if (_healthBarForeground == null)
         {
-            Transform foregroundTransform = _healthBarBackgroundImage.transform.Find(_healthBarForegroundName);
-            if (foregroundTransform == null && !string.Equals(_healthBarForegroundName, "Foreground", StringComparison.Ordinal))
+            // Search all images in the nextbot to find one named "Foreground" or "Fill"
+            Image[] allImages = GetComponentsInChildren<Image>(true);
+            foreach (Image img in allImages)
             {
-                foregroundTransform = _healthBarBackgroundImage.transform.Find("Foreground");
+                string imgName = img.gameObject.name;
+                if (imgName.Contains("Forground", StringComparison.OrdinalIgnoreCase) 
+                    || imgName.Contains("Foreground", StringComparison.OrdinalIgnoreCase)
+                    || imgName.Contains("Fill", StringComparison.OrdinalIgnoreCase))
+                {
+                    _healthBarForeground = img;
+                    break;
+                }
             }
-            if (foregroundTransform == null)
+
+            // Fallback: Create if still missing
+            if (_healthBarForeground == null && _healthBarBackgroundImage != null)
             {
-                foregroundTransform = CreateHealthBarForeground(_healthBarBackgroundImage.transform).transform;
-            }
-            if (foregroundTransform != null)
-            {
-                _healthBarForegroundImage = foregroundTransform.GetComponent<Image>();
+                _healthBarForeground = CreateHealthBarForeground(_healthBarBackgroundImage.transform).GetComponent<Image>();
             }
         }
 
@@ -3316,12 +3358,13 @@ public class NextbotFollowPlayer : MonoBehaviour
             _healthBarBackgroundImage.color = _healthBarBackgroundColor;
         }
 
-        if (_healthBarForegroundImage != null)
+        if (_healthBarForeground != null)
         {
-            _healthBarForegroundImage.color = _healthBarFillColor;
-            _healthBarForegroundImage.type = Image.Type.Filled;
-            _healthBarForegroundImage.fillMethod = Image.FillMethod.Horizontal;
-            _healthBarForegroundImage.fillOrigin = (int)Image.OriginHorizontal.Left;
+            _healthBarForeground.color = _healthBarFillColor;
+            _healthBarForeground.type = Image.Type.Filled;
+            _healthBarForeground.fillMethod = Image.FillMethod.Horizontal;
+            _healthBarForeground.fillOrigin = (int)Image.OriginHorizontal.Left;
+            _healthBarForeground.raycastTarget = false; // Optimization
         }
     }
 
@@ -3401,10 +3444,23 @@ public class NextbotFollowPlayer : MonoBehaviour
             }
         }
 
-        float normalizedHealth = Mathf.Clamp01(GetCurrentCombatHealth() / Mathf.Max(1f, GetMaxCombatHealth()));
-        if (_healthBarForegroundImage != null)
+        float currentHealth = GetCurrentCombatHealth();
+        float maxHealth = Mathf.Max(1f, GetMaxCombatHealth());
+        float normalizedHealth = Mathf.Clamp01(currentHealth / maxHealth);
+
+        if (_healthBarForeground != null)
         {
-            _healthBarForegroundImage.fillAmount = normalizedHealth;
+            // Ensure the image is set up for filling
+            if (_healthBarForeground.type != Image.Type.Filled)
+            {
+                _healthBarForeground.type = Image.Type.Filled;
+                _healthBarForeground.fillMethod = Image.FillMethod.Horizontal;
+            }
+            
+            _healthBarForeground.fillAmount = normalizedHealth;
+
+            // Log once per damage event to confirm we are hitting the right object
+            // Debug.Log($"[HEALTH UPDATE] Object: {_healthBarForeground.gameObject.name}, Fill: {normalizedHealth:P0}, Health: {currentHealth}/{maxHealth}");
         }
     }
 
@@ -3423,7 +3479,7 @@ public class NextbotFollowPlayer : MonoBehaviour
                 Vector3 localVisualTop = GetVisualTopLocalPosition(visualMeshFilter.sharedMesh);
                 _healthBarPointTransform.localPosition = new Vector3(
                     _visualTransform.localPosition.x,
-                    _visualTransform.localPosition.y + localVisualTop.y - -2f,
+                    _visualTransform.localPosition.y + localVisualTop.y + _healthBarHeightOffset,
                     _visualTransform.localPosition.z);
 
             
@@ -3461,13 +3517,13 @@ public class NextbotFollowPlayer : MonoBehaviour
 
         if (!hasVisualBounds)
         {
-            _healthBarPointTransform.localPosition = new Vector3(0f, 5.6f, 0f);
+            _healthBarPointTransform.localPosition = new Vector3(0f, 5.6f + _healthBarHeightOffset, 0f);
             return;
         }
 
         Vector3 worldAnchor = new Vector3(
             visualBounds.center.x,
-            visualBounds.center.y + Mathf.Max(0.7f, visualBounds.size.y * 0.3f),
+            visualBounds.center.y + Mathf.Max(0.7f, visualBounds.size.y * 0.3f) + _healthBarHeightOffset,
             visualBounds.center.z);
         _healthBarPointTransform.localPosition = transform.InverseTransformPoint(worldAnchor);
     }

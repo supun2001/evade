@@ -86,6 +86,7 @@ public class OfflineModeManager : MonoBehaviour
     public bool IsOfflineNextbotPatrolActive => IsOfflineModeActive && (IsOfflineRoundActive || IsOfflineIntermissionActive);
     public bool CanOfflineNextbotsDamagePlayers => IsOfflineRoundActive && Time.unscaledTime >= _nextbotDamageEnabledAtUnscaledTime;
     public OfflinePresentationMode CurrentPresentationMode { get; private set; } = OfflinePresentationMode.Shooting;
+    public event System.Action<KillFeedMessageData> KillFeedReceived;
 
     private void Awake()
     {
@@ -633,6 +634,24 @@ public class OfflineModeManager : MonoBehaviour
             attackerState.Kills += 1;
             attackerState.PlayerState.kills = attackerState.Kills;
             attackerState.Controller?.PlayGetKillSound();
+            SetPreferredSpectateTargetForVictim(targetSessionId, "player", attackerSessionId);
+            EmitKillFeed(
+                "player",
+                attackerSessionId,
+                attackerState.DisplayName,
+                "player",
+                targetSessionId,
+                state.DisplayName);
+        }
+        else
+        {
+            EmitKillFeed(
+                "hazard",
+                string.Empty,
+                "World",
+                "player",
+                targetSessionId,
+                state.DisplayName);
         }
 
         if (state.CurrentLifeStartUnscaledTime >= 0f)
@@ -653,7 +672,7 @@ public class OfflineModeManager : MonoBehaviour
         return true;
     }
 
-    public bool TryRecordOfflineNextbotKill(string attackerSessionId)
+    public bool TryRecordOfflineNextbotKill(string attackerSessionId, string nextbotId, string nextbotName)
     {
         if (!IsOfflineRoundActive
             || CurrentPresentationMode != OfflinePresentationMode.Shooting
@@ -667,6 +686,13 @@ public class OfflineModeManager : MonoBehaviour
         attackerState.Kills += 1;
         attackerState.PlayerState.kills = attackerState.Kills;
         attackerState.Controller?.PlayGetKillSound();
+        EmitKillFeed(
+            "player",
+            attackerSessionId,
+            attackerState.DisplayName,
+            "nextbot",
+            nextbotId,
+            nextbotName);
         return true;
     }
 
@@ -1807,6 +1833,13 @@ public class OfflineModeManager : MonoBehaviour
         {
             state.IsEliminated = true;
             state.EliminatedAtUnscaledTime = Time.unscaledTime;
+            EmitKillFeed(
+                "hazard",
+                string.Empty,
+                "World",
+                "player",
+                state.SessionId,
+                state.DisplayName);
             state.Controller?.ApplyNetworkEliminated();
             ReleaseRescueAssignmentsForTarget(state.SessionId);
         }
@@ -2677,7 +2710,7 @@ public class OfflineModeManager : MonoBehaviour
         return controller != null;
     }
 
-    public bool TryEliminatePlayerInstantly(string sessionId)
+    public bool TryEliminatePlayerInstantly(string sessionId, string killerNextbotId = "", string killerNextbotName = "")
     {
         if (!IsOfflineRoundActive || string.IsNullOrWhiteSpace(sessionId))
         {
@@ -2705,6 +2738,14 @@ public class OfflineModeManager : MonoBehaviour
         state.Deaths += 1;
         state.PlayerState.deaths = state.Deaths;
         state.Controller?.SetCombatHealth(0f);
+        SetPreferredSpectateTargetForVictim(sessionId, "nextbot", killerNextbotId);
+        EmitKillFeed(
+            "nextbot",
+            killerNextbotId,
+            killerNextbotName,
+            "player",
+            sessionId,
+            state.DisplayName);
         state.Controller?.ApplyNetworkEliminated();
         ReleaseRescueAssignment(sessionId);
         ReleaseRescueAssignmentsForTarget(sessionId);
@@ -2717,6 +2758,47 @@ public class OfflineModeManager : MonoBehaviour
             && _offlinePlayerStates.TryGetValue(sessionId, out OfflinePlayerRoundState state)
             && state != null
             && state.IsEliminated;
+    }
+
+    private void EmitKillFeed(
+        string killerType,
+        string killerId,
+        string killerName,
+        string victimType,
+        string victimId,
+        string victimName)
+    {
+        KillFeedReceived?.Invoke(new KillFeedMessageData
+        {
+            killerType = killerType ?? string.Empty,
+            killerId = killerId ?? string.Empty,
+            killerName = killerName ?? string.Empty,
+            victimType = victimType ?? string.Empty,
+            victimId = victimId ?? string.Empty,
+            victimName = victimName ?? string.Empty,
+        });
+    }
+
+    private void SetPreferredSpectateTargetForVictim(string victimSessionId, string killerType, string killerId)
+    {
+        if (string.IsNullOrWhiteSpace(victimSessionId)
+            || !_offlinePlayerStates.TryGetValue(victimSessionId, out OfflinePlayerRoundState victimState)
+            || victimState?.Controller == null)
+        {
+            return;
+        }
+
+        string targetKey = null;
+        if (string.Equals(killerType, "player", System.StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(killerId))
+        {
+            targetKey = $"player:{killerId}";
+        }
+        else if (string.Equals(killerType, "nextbot", System.StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(killerId))
+        {
+            targetKey = $"nextbot:{killerId}";
+        }
+
+        victimState.Controller.SetPreferredSpectateTargetByKey(targetKey, snapIfSpectating: true);
     }
 
     private float GetNearestThreatDistance(Vector3 position)

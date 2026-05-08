@@ -332,6 +332,16 @@ MonoBehaviour:
   _visualLocalOffset: {x: 0, y: 0, z: 0}
   _visualGroundPadding: 0.02
   _billboardRotationOffsetEuler: {x: 0, y: 270, z: -90}
+  _healthBarPointName: HealthBarPoint
+  _healthBarCanvasName: Healthbar Canvas
+  _healthBarBackgroundName: Background
+  _healthBarForegroundName: Forground
+  _healthBarBackgroundColor: {r: 0.86, g: 0.12, b: 0.12, a: 1}
+  _healthBarFillColor: {r: 0.12, g: 0.9, b: 0.2, a: 1}
+  _healthBarHeightOffset: -2
+  _healthBarCanvas: {fileID: 0}
+  _healthBarBackgroundImage: {fileID: 0}
+  _healthBarForeground: {fileID: 0}
   _loopAudioSource: {fileID: 0}
   _loopClip: {fileID: 8300000, guid: a2b8a2a41f0c941e2bb3718e19135072, type: 3}
   _playLoopWhileActive: 1

@@ -223,6 +223,7 @@ public class NetworkManager : MonoBehaviour
     public event Action<RoundResultsMessageData> RoundResultsReceived;
     public event Action<MapVoteStateMessageData> MapVoteStateReceived;
     public event Action<MapSelectedMessageData> MapSelectedReceived;
+    public event Action<KillFeedMessageData> KillFeedReceived;
     public event Action RoomLeftEvent;
     public string LocalSessionId => room != null ? room.SessionId : simulatedLocalSessionId;
     public string CurrentMapId => ResolveCurrentMapId();
@@ -1839,6 +1840,33 @@ public class NetworkManager : MonoBehaviour
                 RestartLocalRoundResetCoroutine();
                 RoundResultsReceived?.Invoke(payload);
             }
+        });
+
+        room.OnMessage<string>("killFeedEvent", (json) =>
+        {
+            KillFeedMessageData payload = ParseJsonMessage<KillFeedMessageData>(json);
+            if (payload == null)
+            {
+                return;
+            }
+
+            KillFeedReceived?.Invoke(payload);
+
+            string localSessionId = room != null ? room.SessionId : string.Empty;
+            if (string.IsNullOrWhiteSpace(localSessionId)
+                || !string.Equals(payload.victimType, "player", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(payload.victimId, localSessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!players.TryGetValue(localSessionId, out GameObject localPlayer) || localPlayer == null)
+            {
+                return;
+            }
+
+            PlayerController controller = localPlayer.GetComponent<PlayerController>();
+            controller?.SetPreferredSpectateTargetFromKillFeed(payload);
         });
 
         room.OnMessage<string>("mapVoteState", (json) =>

@@ -1711,6 +1711,14 @@ export class MyRoom extends Room<MyRoomState> {
       controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
       this.clearCarryStateForPlayer(target.sessionId);
       this.applyPlayerEliminationState(target, false);
+      this.broadcastKillFeedEvent(
+        "nextbot",
+        controller.id,
+        controller.id,
+        "player",
+        target.sessionId,
+        target.displayName,
+      );
       target.isHitReacting = false;
       target.hitReactionTimeRemaining = 0;
       target.hitReactionPitch = 0;
@@ -1739,6 +1747,14 @@ export class MyRoom extends Room<MyRoomState> {
     controller.nextInjuryAt = now + NEXTBOT_INJURY_COOLDOWN_MS;
     this.clearCarryStateForPlayer(target.sessionId);
     this.applyPlayerEliminationState(target, false);
+    this.broadcastKillFeedEvent(
+      "nextbot",
+      controller.id,
+      controller.id,
+      "player",
+      target.sessionId,
+      target.displayName,
+    );
     target.isHitReacting = false;
     target.hitReactionTimeRemaining = 0;
     target.hitReactionPitch = 0;
@@ -1810,6 +1826,14 @@ export class MyRoom extends Room<MyRoomState> {
 
     console.log(`[room ${this.roomId}] nextbot ${nextbotId} died from combat hit`);
     attacker.kills += 1;
+    this.broadcastKillFeedEvent(
+      "player",
+      attacker.sessionId,
+      attacker.displayName,
+      "nextbot",
+      nextbotId,
+      nextbotId,
+    );
     nextbot.isActive = false;
     nextbot.targetSessionId = "";
     nextbot.velocityX = 0;
@@ -3730,6 +3754,26 @@ export class MyRoom extends Room<MyRoomState> {
     }
   }
 
+  private broadcastKillFeedEvent(
+    killerType: string,
+    killerId: string,
+    killerName: string,
+    victimType: string,
+    victimId: string,
+    victimName: string,
+  ) {
+    const payload = JSON.stringify({
+      killerType,
+      killerId,
+      killerName,
+      victimType,
+      victimId,
+      victimName,
+    });
+
+    this.broadcast("killFeedEvent", payload);
+  }
+
   private recordPlayerHazardElimination(sessionId: string, now: number, attackerSessionId?: string) {
     if (this.currentPhase === "waiting") {
       return;
@@ -3752,7 +3796,24 @@ export class MyRoom extends Room<MyRoomState> {
       const attacker = this.state.players.get(attackerSessionId);
       if (attacker) {
         attacker.kills += 1;
+        this.broadcastKillFeedEvent(
+          "player",
+          attacker.sessionId,
+          attacker.displayName,
+          "player",
+          player.sessionId,
+          player.displayName,
+        );
       }
+    } else {
+      this.broadcastKillFeedEvent(
+        "hazard",
+        "",
+        "World",
+        "player",
+        player.sessionId,
+        player.displayName,
+      );
     }
 
     this.applyPlayerEliminationState(player, false);

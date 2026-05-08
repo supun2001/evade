@@ -497,6 +497,7 @@ public class PlayerController : MonoBehaviour
     private bool _isTemporaryThirdPersonForced;
     private bool _isSimulationControlled;
     private bool _spectateModeSyncedToServer;
+    private string _preferredSpectateTargetKeyOverride;
     private CapsuleCollider _simulationCombatHitbox;
     private const float HIDE_HEAD_PROGRESS = 0.85f;
     private const float SHOW_HEAD_PROGRESS = 0.2f;
@@ -2294,8 +2295,9 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        OfflinePlayerIdentity[] identities = FindObjectsByType<OfflinePlayerIdentity>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         System.Collections.Generic.HashSet<string> activeSessionIds = new();
+        /* 
+        OfflinePlayerIdentity[] identities = FindObjectsByType<OfflinePlayerIdentity>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
 
         for (int i = 0; i < identities.Length; i++)
         {
@@ -2385,6 +2387,7 @@ public class PlayerController : MonoBehaviour
             view.Fill.style.width = Length.Percent(normalizedHealth * 100f);
             view.Fill.style.backgroundColor = GetHealthColor(normalizedHealth);
         }
+        */
 
         foreach (System.Collections.Generic.KeyValuePair<string, EnemyHealthBarView> pair in _enemyHealthBarViews)
         {
@@ -4191,6 +4194,7 @@ public class PlayerController : MonoBehaviour
     public void ApplyNetworkRevive()
     {
         ApplyNetworkCarryState(false, false, string.Empty, string.Empty);
+        _preferredSpectateTargetKeyOverride = null;
         _isPauseMenuOpen = false;
         SetPauseMenuDisplay(false);
         _isEliminatedState = false;
@@ -6394,9 +6398,32 @@ public class PlayerController : MonoBehaviour
             && offlineModeManager.IsOfflineModeActive)
         {
             OfflinePlayerIdentity identity = GetComponent<OfflinePlayerIdentity>();
+            string killerNextbotId = string.Empty;
+            string killerNextbotName = string.Empty;
+            NextbotFollowPlayer[] nextbots = FindObjectsByType<NextbotFollowPlayer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            float closestSqrDistance = float.PositiveInfinity;
+            for (int i = 0; i < nextbots.Length; i++)
+            {
+                NextbotFollowPlayer nextbot = nextbots[i];
+                if (nextbot == null || !nextbot.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+
+                float sqrDistance = (nextbot.transform.position - sourcePosition).sqrMagnitude;
+                if (sqrDistance >= closestSqrDistance)
+                {
+                    continue;
+                }
+
+                closestSqrDistance = sqrDistance;
+                killerNextbotId = nextbot.NetworkNextbotId;
+                killerNextbotName = nextbot.CombatDisplayName;
+            }
+
             if (identity != null
                 && !string.IsNullOrWhiteSpace(identity.SessionId)
-                && offlineModeManager.TryEliminatePlayerInstantly(identity.SessionId))
+                && offlineModeManager.TryEliminatePlayerInstantly(identity.SessionId, killerNextbotId, killerNextbotName))
             {
                 return true;
             }
@@ -7024,6 +7051,42 @@ public class PlayerController : MonoBehaviour
     public bool IsCombatModeActive => _combatModeActive;
     public bool IsEliminatedStateActive => _isEliminatedState;
 
+    public void SetPreferredSpectateTargetByKey(string targetKey, bool snapIfSpectating = true)
+    {
+        _preferredSpectateTargetKeyOverride = string.IsNullOrWhiteSpace(targetKey) ? null : targetKey;
+        _nextSpectateRefreshTime = 0f;
+
+        if (!_isSpectating)
+        {
+            return;
+        }
+
+        RefreshSpectateTargets(forceReselect: true);
+        UpdateSpectateCameraFollow(forceSnap: snapIfSpectating);
+    }
+
+    public void SetPreferredSpectateTargetFromKillFeed(KillFeedMessageData payload, bool snapIfSpectating = true)
+    {
+        if (payload == null)
+        {
+            return;
+        }
+
+        string targetKey = null;
+        if (string.Equals(payload.killerType, "player", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(payload.killerId))
+        {
+            targetKey = $"player:{payload.killerId}";
+        }
+        else if (string.Equals(payload.killerType, "nextbot", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(payload.killerId))
+        {
+            targetKey = $"nextbot:{payload.killerId}";
+        }
+
+        SetPreferredSpectateTargetByKey(targetKey, snapIfSpectating);
+    }
+
     public float GetCombatShotTriggerId()
     {
         return _shotTriggerId;
@@ -7098,6 +7161,7 @@ public class PlayerController : MonoBehaviour
         _spectateModeSyncedToServer = false;
         _spectateTargets.Clear();
         _spectateTargetKey = null;
+        _preferredSpectateTargetKeyOverride = null;
         _nextSpectateRefreshTime = 0f;
         SetSpectateCameraActive(false);
         SetLocalSpectatorBodyVisible(true);
@@ -8098,6 +8162,17 @@ public class PlayerController : MonoBehaviour
 
     private string GetPreferredInitialSpectateTargetKey()
     {
+        if (!string.IsNullOrWhiteSpace(_preferredSpectateTargetKeyOverride))
+        {
+            for (int i = 0; i < _spectateTargets.Count; i++)
+            {
+                if (string.Equals(_spectateTargets[i].Key, _preferredSpectateTargetKeyOverride, StringComparison.Ordinal))
+                {
+                    return _spectateTargets[i].Key;
+                }
+            }
+        }
+
         for (int i = 0; i < _spectateTargets.Count; i++)
         {
             if (!_spectateTargets[i].IsNextbot)

@@ -92,3 +92,14 @@ public class PlayerRespawnCountdownMessageData
 {
     public int durationMs;
 }
+
+[Serializable]
+public class KillFeedMessageData
+{
+    public string killerType;
+    public string killerId;
+    public string killerName;
+    public string victimType;
+    public string victimId;
+    public string victimName;
+}

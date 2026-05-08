@@ -227,5 +227,4 @@ QualitySettings:
     - Android
     - iPhone
   m_TextureMipmapLimitGroupNames: []
-  m_PerPlatformDefaultQuality:
-    Nintendo Switch 2: 3
+  m_PerPlatformDefaultQuality: {}
