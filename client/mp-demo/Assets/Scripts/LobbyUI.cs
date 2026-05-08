@@ -551,7 +551,7 @@ public class LobbyUI : MonoBehaviour
 
     public void OnStartClicked()
     {
-        HandleRandomMapButtonClicked();
+        SetMapSelectionVisible(true);
     }
 
     private async void StartSelectedMapJoin()
@@ -578,7 +578,7 @@ public class LobbyUI : MonoBehaviour
                 NetworkManager.Instance.FinalizeLocalSelectedMapJoinIfReady(SceneManager.GetActiveScene().name);
             }
             SaveAndSyncSkin();
-            // OnGameStarted(); // Removed to allow Update loop to wait for player spawn
+            OnGameStarted();
         }
         else
         {
@@ -630,26 +630,9 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        string randomScene = GetRandomMapSceneName();
-        UnityEngine.SceneManagement.SceneManager.LoadScene(randomScene);
-
         hasAutoReadiedCurrentRoom = true;
         OnGameStarted();
         ShowNotification(startedMessage);
-    }
-
-    private string GetRandomMapSceneName()
-    {
-        string[] scenes = {
-            ClassicMapSceneName,
-            BackroomMapSceneName,
-            BrutilistVoidMapSceneName,
-            ParkourMapSceneName,
-            VitaminBMapSceneName,
-            VillageMapSceneName,
-            BoomBoomMapSceneName
-        };
-        return scenes[UnityEngine.Random.Range(0, scenes.Length)];
     }
 
     private string GetOfflineDisplayName()
@@ -708,7 +691,7 @@ public class LobbyUI : MonoBehaviour
             networkManager.FinalizeLocalSelectedMapJoinIfReady(SceneManager.GetActiveScene().name);
             // Sync Skin Immediately on Join
             SaveAndSyncSkin();
-            // OnGameStarted(); // Removed to allow Update loop to wait for player spawn
+            OnGameStarted();
         }
         else
         {
@@ -1174,7 +1157,7 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        HandleRandomMapButtonClicked();
+        SetMapSelectionVisible(true);
     }
 
     private void HandleRandomMapButtonClicked()
@@ -1182,24 +1165,9 @@ public class LobbyUI : MonoBehaviour
         SetMapSelectionVisible(false);
         if (NetworkManager.Instance != null)
         {
-            string randomMapId = GetRandomMapId();
-            NetworkManager.Instance.SetSelectedMapId(randomMapId);
+            NetworkManager.Instance.UseServerRandomMap();
         }
         StartSelectedMapJoin();
-    }
-
-    private string GetRandomMapId()
-    {
-        string[] mapIds = {
-            ClassicMapId,
-            BackroomMapId,
-            BrutilistVoidMapId,
-            ParkourMapId,
-            VitaminBMapId,
-            VillageMapId,
-            BoomBoomMapId
-        };
-        return mapIds[UnityEngine.Random.Range(0, mapIds.Length)];
     }
 
     private void HandleClassicMapButtonClicked()
