@@ -651,17 +651,47 @@ public class NextbotFollowPlayer : MonoBehaviour
 
     private void ApplyOfflineDirectGroundMovement(Vector3 targetPosition)
     {
-        Vector3 planarOffset = targetPosition - transform.position;
-        planarOffset.y = 0f;
-        float planarDistance = planarOffset.magnitude;
-        Vector3 moveDirection = planarDistance > 0.001f ? planarOffset / planarDistance : Vector3.zero;
-        Vector3 desiredVelocity = planarDistance > _stoppingDistance ? moveDirection * _moveSpeed : Vector3.zero;
+        bool hasNavMesh = _navMeshAgent != null && _navMeshAgent.isOnNavMesh;
+        
+        // If we have a NavMesh, use the Agent for high-quality movement
+        if (hasNavMesh)
+        {
+            if (!_navMeshAgent.enabled) _navMeshAgent.enabled = true;
+            _navMeshAgent.SetDestination(targetPosition);
+            _navMeshAgent.speed = _moveSpeed;
+            _navMeshAgent.acceleration = _acceleration;
+            
+            // Sync transform and body rotation
+            UpdateBodyRotation(_navMeshAgent.velocity);
+            ApplySolidObstaclePush();
+            TryHitTarget(Vector3.Distance(transform.position, targetPosition));
+            return;
+        }
+
+        // Fallback: If no NavMesh, use direct transform movement
+        if (_navMeshAgent != null && _navMeshAgent.enabled)
+        {
+            _navMeshAgent.enabled = false;
+        }
+
+        Vector3 currentPosition = transform.position;
+        Vector3 delta = targetPosition - currentPosition;
+        delta.y = 0f;
+        float dist = delta.magnitude;
+
+        Vector3 desiredVelocity = Vector3.zero;
+        if (dist > 0.01f)
+        {
+            desiredVelocity = (delta / dist) * _moveSpeed;
+        }
+
         _horizontalVelocity = Vector3.MoveTowards(_horizontalVelocity, desiredVelocity, _acceleration * Time.deltaTime);
 
-        Vector3 nextPosition = transform.position + _horizontalVelocity * Time.deltaTime;
+        Vector3 nextPosition = currentPosition + _horizontalVelocity * Time.deltaTime;
+        
         if (TryResolveGroundedPosition(nextPosition, out Vector3 groundedNextPosition))
         {
-            nextPosition = SmoothGroundedPosition(transform.position, groundedNextPosition);
+            nextPosition = SmoothGroundedPosition(currentPosition, groundedNextPosition);
             _lockedHeight = nextPosition.y;
         }
         else if (_lockToStartingHeight)
@@ -672,7 +702,7 @@ public class NextbotFollowPlayer : MonoBehaviour
         transform.position = nextPosition;
         UpdateBodyRotation(_horizontalVelocity);
         ApplySolidObstaclePush();
-        TryHitTarget(planarDistance);
+        TryHitTarget(dist);
     }
 
     private void PrepareSpawnedNextbot(Vector3 spawnPosition, bool useOfflineLocalAuthority)
