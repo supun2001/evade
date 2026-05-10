@@ -28,4 +28,8 @@ MonoBehaviour:
   - displayName: Boom Boom
     scene: {fileID: 102900000, guid: ee2aa7d84928440d684ac987ece8cd3b, type: 3}
   - displayName: Desert
-    scene: {fileID: 102900000, guid: eadfff08be9374d6c98231c1ebdcee3a, type: 3}
+    scene: {fileID: 102900000, guid: 2446b2d8f79dc43b5b2c4f3a6b0c92c7, type: 3}
+  - displayName: Living Room
+    scene: {fileID: 102900000, guid: 94d0a15c07e1247e39c080f046a54bb5, type: 3}
+  - displayName: Castle
+    scene: {fileID: 102900000, guid: ae10a1813961c4b63bcec6830873d71b, type: 3}
