@@ -88,6 +88,20 @@ public class NetworkManager : MonoBehaviour
     private const string VillageMapSceneName = "Village";
     private const string BoomBoomMapId = "boomBoom";
     private const string BoomBoomMapSceneName = "Boom Boom";
+    private const string DesertMapId = "desert";
+    private const string DesertMapSceneName = "Desert";
+    private const string LivingRoomMapId = "livingRoom";
+    private const string LivingRoomMapSceneName = "Living Room";
+    private const string CastleMapId = "castle";
+    private const string CastleMapSceneName = "Castle";
+    private const string Desert2MapId = "desert2";
+    private const string Desert2MapSceneName = "Desert 2";
+    private const string BlocksMapId = "blocks";
+    private const string BlocksMapSceneName = "Blocks";
+    private const string SciFiMapId = "sciFi";
+    private const string SciFiMapSceneName = "Sci-Fi";
+    private const string AnotherCityMapId = "anotherCity";
+    private const string AnotherCityMapSceneName = "Another City";
     private const float MinServerObstacleThickness = 0.25f;
     private const float MinServerObstacleMajorSpan = 1.25f;
     private const float MinServerObstacleFootprintArea = 1.0f;
@@ -293,7 +307,14 @@ public class NetworkManager : MonoBehaviour
             || string.Equals(mapId, ParkourMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, VitaminBMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, VillageMapId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mapId, BoomBoomMapId, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(mapId, BoomBoomMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, DesertMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, LivingRoomMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, CastleMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, Desert2MapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, BlocksMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, SciFiMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, AnotherCityMapId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSceneNameForMapId(string mapId)
@@ -326,6 +347,41 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, BoomBoomMapId, StringComparison.OrdinalIgnoreCase))
         {
             return BoomBoomMapSceneName;
+        }
+
+        if (string.Equals(mapId, DesertMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return DesertMapSceneName;
+        }
+
+        if (string.Equals(mapId, LivingRoomMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return LivingRoomMapSceneName;
+        }
+
+        if (string.Equals(mapId, CastleMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return CastleMapSceneName;
+        }
+
+        if (string.Equals(mapId, Desert2MapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return Desert2MapSceneName;
+        }
+
+        if (string.Equals(mapId, BlocksMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return BlocksMapSceneName;
+        }
+
+        if (string.Equals(mapId, SciFiMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return SciFiMapSceneName;
+        }
+
+        if (string.Equals(mapId, AnotherCityMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return AnotherCityMapSceneName;
         }
 
         return ClassicMapSceneName;
@@ -361,6 +417,41 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, BoomBoomMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return BoomBoomMapId;
+        }
+
+        if (string.Equals(sceneName, DesertMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return DesertMapId;
+        }
+
+        if (string.Equals(sceneName, LivingRoomMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return LivingRoomMapId;
+        }
+
+        if (string.Equals(sceneName, CastleMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return CastleMapId;
+        }
+
+        if (string.Equals(sceneName, Desert2MapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Desert2MapId;
+        }
+
+        if (string.Equals(sceneName, BlocksMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return BlocksMapId;
+        }
+
+        if (string.Equals(sceneName, SciFiMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return SciFiMapId;
+        }
+
+        if (string.Equals(sceneName, AnotherCityMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return AnotherCityMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;

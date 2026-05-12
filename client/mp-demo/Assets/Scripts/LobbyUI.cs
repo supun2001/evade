@@ -81,6 +81,13 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _mapVitaminBButton;
     private UIToolkitButton _mapVillageButton;
     private UIToolkitButton _mapBoomBoomButton;
+    private UIToolkitButton _mapDesertButton;
+    private UIToolkitButton _mapLivingRoomButton;
+    private UIToolkitButton _mapCastleButton;
+    private UIToolkitButton _mapDesert2Button;
+    private UIToolkitButton _mapBlocksButton;
+    private UIToolkitButton _mapSciFiButton;
+    private UIToolkitButton _mapAnotherCityButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
@@ -152,6 +159,20 @@ public class LobbyUI : MonoBehaviour
     private const string VillageMapId = "vilage";
     private const string BoomBoomMapSceneName = "Boom Boom";
     private const string BoomBoomMapId = "boomBoom";
+    private const string DesertMapSceneName = "Desert";
+    private const string DesertMapId = "desert";
+    private const string LivingRoomMapSceneName = "Living Room";
+    private const string LivingRoomMapId = "livingRoom";
+    private const string CastleMapSceneName = "Castle";
+    private const string CastleMapId = "castle";
+    private const string Desert2MapSceneName = "Desert 2";
+    private const string Desert2MapId = "desert2";
+    private const string BlocksMapSceneName = "Blocks";
+    private const string BlocksMapId = "blocks";
+    private const string SciFiMapSceneName = "Sci-Fi";
+    private const string SciFiMapId = "sciFi";
+    private const string AnotherCityMapSceneName = "Another City";
+    private const string AnotherCityMapId = "anotherCity";
     private const float JoinTransitionFadeDuration = 0.24f;
     private const float JoinTransitionLeadTime = 0.12f;
     private const float JoinTransitionWatchdogSeconds = 70f;
@@ -777,6 +798,13 @@ public class LobbyUI : MonoBehaviour
         _mapVitaminBButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-vitaminb-button");
         _mapVillageButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-village-button");
         _mapBoomBoomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-boomboom-button");
+        _mapDesertButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-desert-button");
+        _mapLivingRoomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-livingroom-button");
+        _mapCastleButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-castle-button");
+        _mapDesert2Button = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-desert2-button");
+        _mapBlocksButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-blocks-button");
+        _mapSciFiButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-scifi-button");
+        _mapAnotherCityButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-anothercity-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
@@ -974,6 +1002,34 @@ public class LobbyUI : MonoBehaviour
         {
             _mapBoomBoomButton.clicked += HandleBoomBoomMapButtonClicked;
         }
+        if (_mapDesertButton != null)
+        {
+            _mapDesertButton.clicked += HandleDesertMapButtonClicked;
+        }
+        if (_mapLivingRoomButton != null)
+        {
+            _mapLivingRoomButton.clicked += HandleLivingRoomMapButtonClicked;
+        }
+        if (_mapCastleButton != null)
+        {
+            _mapCastleButton.clicked += HandleCastleMapButtonClicked;
+        }
+        if (_mapDesert2Button != null)
+        {
+            _mapDesert2Button.clicked += HandleDesert2MapButtonClicked;
+        }
+        if (_mapBlocksButton != null)
+        {
+            _mapBlocksButton.clicked += HandleBlocksMapButtonClicked;
+        }
+        if (_mapSciFiButton != null)
+        {
+            _mapSciFiButton.clicked += HandleSciFiMapButtonClicked;
+        }
+        if (_mapAnotherCityButton != null)
+        {
+            _mapAnotherCityButton.clicked += HandleAnotherCityMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked += HandleMapSelectionCloseButtonClicked;
@@ -1115,6 +1171,34 @@ public class LobbyUI : MonoBehaviour
         {
             _mapBoomBoomButton.clicked -= HandleBoomBoomMapButtonClicked;
         }
+        if (_mapDesertButton != null)
+        {
+            _mapDesertButton.clicked -= HandleDesertMapButtonClicked;
+        }
+        if (_mapLivingRoomButton != null)
+        {
+            _mapLivingRoomButton.clicked -= HandleLivingRoomMapButtonClicked;
+        }
+        if (_mapCastleButton != null)
+        {
+            _mapCastleButton.clicked -= HandleCastleMapButtonClicked;
+        }
+        if (_mapDesert2Button != null)
+        {
+            _mapDesert2Button.clicked -= HandleDesert2MapButtonClicked;
+        }
+        if (_mapBlocksButton != null)
+        {
+            _mapBlocksButton.clicked -= HandleBlocksMapButtonClicked;
+        }
+        if (_mapSciFiButton != null)
+        {
+            _mapSciFiButton.clicked -= HandleSciFiMapButtonClicked;
+        }
+        if (_mapAnotherCityButton != null)
+        {
+            _mapAnotherCityButton.clicked -= HandleAnotherCityMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked -= HandleMapSelectionCloseButtonClicked;
@@ -1182,6 +1266,41 @@ public class LobbyUI : MonoBehaviour
     private void HandleBoomBoomMapButtonClicked()
     {
         BeginJoinForMap(BoomBoomMapSceneName, BoomBoomMapId);
+    }
+
+    private void HandleDesertMapButtonClicked()
+    {
+        BeginJoinForMap(DesertMapSceneName, DesertMapId);
+    }
+
+    private void HandleLivingRoomMapButtonClicked()
+    {
+        BeginJoinForMap(LivingRoomMapSceneName, LivingRoomMapId);
+    }
+
+    private void HandleCastleMapButtonClicked()
+    {
+        BeginJoinForMap(CastleMapSceneName, CastleMapId);
+    }
+
+    private void HandleDesert2MapButtonClicked()
+    {
+        BeginJoinForMap(Desert2MapSceneName, Desert2MapId);
+    }
+
+    private void HandleBlocksMapButtonClicked()
+    {
+        BeginJoinForMap(BlocksMapSceneName, BlocksMapId);
+    }
+
+    private void HandleSciFiMapButtonClicked()
+    {
+        BeginJoinForMap(SciFiMapSceneName, SciFiMapId);
+    }
+
+    private void HandleAnotherCityMapButtonClicked()
+    {
+        BeginJoinForMap(AnotherCityMapSceneName, AnotherCityMapId);
     }
 
     private void HandleBrutilistVoidMapButtonClicked()
@@ -1440,6 +1559,56 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.Ordinal))
         {
             return ParkourMapId;
+        }
+
+        if (string.Equals(sceneName, VitaminBMapSceneName, StringComparison.Ordinal))
+        {
+            return VitaminBMapId;
+        }
+
+        if (string.Equals(sceneName, VillageMapSceneName, StringComparison.Ordinal))
+        {
+            return VillageMapId;
+        }
+
+        if (string.Equals(sceneName, BoomBoomMapSceneName, StringComparison.Ordinal))
+        {
+            return BoomBoomMapId;
+        }
+
+        if (string.Equals(sceneName, DesertMapSceneName, StringComparison.Ordinal))
+        {
+            return DesertMapId;
+        }
+
+        if (string.Equals(sceneName, LivingRoomMapSceneName, StringComparison.Ordinal))
+        {
+            return LivingRoomMapId;
+        }
+
+        if (string.Equals(sceneName, CastleMapSceneName, StringComparison.Ordinal))
+        {
+            return CastleMapId;
+        }
+
+        if (string.Equals(sceneName, Desert2MapSceneName, StringComparison.Ordinal))
+        {
+            return Desert2MapId;
+        }
+
+        if (string.Equals(sceneName, BlocksMapSceneName, StringComparison.Ordinal))
+        {
+            return BlocksMapId;
+        }
+
+        if (string.Equals(sceneName, SciFiMapSceneName, StringComparison.Ordinal))
+        {
+            return SciFiMapId;
+        }
+
+        if (string.Equals(sceneName, AnotherCityMapSceneName, StringComparison.Ordinal))
+        {
+            return AnotherCityMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;

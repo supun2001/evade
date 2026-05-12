@@ -114,6 +114,13 @@ const AVAILABLE_MAPS = [
   { mapId: "Vitamin_B", sceneName: "Vitamin_B", displayName: "Vitamin B", difficulty: "NORMAL" },
   { mapId: "vilage", sceneName: "Village", displayName: "Village", difficulty: "NORMAL" },
   { mapId: "boomBoom", sceneName: "Boom Boom", displayName: "Boom Boom", difficulty: "HARD" },
+  { mapId: "desert", sceneName: "Desert", displayName: "Desert", difficulty: "NORMAL" },
+  { mapId: "livingRoom", sceneName: "Living Room", displayName: "Living Room", difficulty: "NORMAL" },
+  { mapId: "castle", sceneName: "Castle", displayName: "Castle", difficulty: "HARD" },
+  { mapId: "desert2", sceneName: "Desert 2", displayName: "Desert 2", difficulty: "HARD" },
+  { mapId: "blocks", sceneName: "Blocks", displayName: "Blocks", difficulty: "NORMAL" },
+  { mapId: "sciFi", sceneName: "Sci-Fi", displayName: "Sci-Fi", difficulty: "HARD" },
+  { mapId: "anotherCity", sceneName: "Another City", displayName: "Another City", difficulty: "NORMAL" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;

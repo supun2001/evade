@@ -1445,7 +1445,7 @@ public class OfflineModeManager : MonoBehaviour
         ResetOfflineNextbots(active: false);
 
         // Generate candidates
-        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B", "vilage", "boomBoom" };
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "castle", "desert2", "blocks", "sciFi", "anotherCity" };
         List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
 
         // Shuffle and pick 3
@@ -1561,6 +1561,13 @@ public class OfflineModeManager : MonoBehaviour
             case "Vitamin_B": return "Vitamin B";
             case "vilage": return "Village";
             case "boomBoom": return "Boom Boom";
+            case "desert": return "Desert";
+            case "livingRoom": return "Living Room";
+            case "castle": return "Castle";
+            case "desert2": return "Desert 2";
+            case "blocks": return "Blocks";
+            case "sciFi": return "Sci-Fi";
+            case "anotherCity": return "Another City";
             default: return mapId;
         }
     }
@@ -1576,6 +1583,13 @@ public class OfflineModeManager : MonoBehaviour
             case "Vitamin_B": return "NORMAL";
             case "vilage": return "NORMAL";
             case "boomBoom": return "HARD";
+            case "desert": return "NORMAL";
+            case "livingRoom": return "NORMAL";
+            case "castle": return "HARD";
+            case "desert2": return "HARD";
+            case "blocks": return "NORMAL";
+            case "sciFi": return "HARD";
+            case "anotherCity": return "NORMAL";
             default: return "NORMAL";
         }
     }
@@ -1591,6 +1605,13 @@ public class OfflineModeManager : MonoBehaviour
             case "Vitamin_B": return "Vitamin_B";
             case "vilage": return "Village";
             case "boomBoom": return "Boom Boom";
+            case "desert": return "Desert";
+            case "livingRoom": return "Living Room";
+            case "castle": return "Castle";
+            case "desert2": return "Desert 2";
+            case "blocks": return "Blocks";
+            case "sciFi": return "Sci-Fi";
+            case "anotherCity": return "Another City";
             default: return mapId;
         }
     }
