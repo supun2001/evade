@@ -37,3 +37,7 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 0b75196d0177345908dac2af3ea8eef4, type: 3}
   - displayName: Blocks
     scene: {fileID: 102900000, guid: c501392efdc2c4c3fb8c0401fcea6e9c, type: 3}
+  - displayName: Sci-Fi
+    scene: {fileID: 102900000, guid: 1379443e4e5f14d3fb282c32ccf03b47, type: 3}
+  - displayName: 'Another City '
+    scene: {fileID: 102900000, guid: 21de3de4efb734d42822c1b7d44b5400, type: 3}
