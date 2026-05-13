@@ -1445,7 +1445,7 @@ public class OfflineModeManager : MonoBehaviour
         ResetOfflineNextbots(active: false);
 
         // Generate candidates
-        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "castle", "desert2", "blocks", "sciFi", "anotherCity" };
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "desert2", "blocks", "sciFi", "anotherCity" };
         List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
 
         // Shuffle and pick 3
