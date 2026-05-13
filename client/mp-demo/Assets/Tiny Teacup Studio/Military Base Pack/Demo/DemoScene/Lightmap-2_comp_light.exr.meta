@@ -1,5 +1,12 @@
 fileFormatVersion: 2
 guid: 1208ff822c7df5c439e2f25501c13e66
+AssetOrigin:
+  serializedVersion: 1
+  productId: 326310
+  packageName: Military Base Pack
+  packageVersion: 1.0
+  assetPath: Assets/Tiny Teacup Studio/Military Base Pack/Demo/DemoScene/Lightmap-2_comp_light.exr
+  uploadId: 800146
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}
@@ -121,14 +128,14 @@ TextureImporter:
     forceMaximumCompressionQuality_BC6H_BC7: 0
   - serializedVersion: 4
     buildTarget: WebGL
-    maxTextureSize: 2048
+    maxTextureSize: 32
     resizeAlgorithm: 0
-    textureFormat: -1
+    textureFormat: 12
     textureCompression: 1
     compressionQuality: 50
     crunchedCompression: 0
     allowsAlphaSplitting: 0
-    overridden: 0
+    overridden: 1
     ignorePlatformSupport: 0
     androidETC2FallbackOverride: 0
     forceMaximumCompressionQuality_BC6H_BC7: 0
@@ -167,10 +174,3 @@ TextureImporter:
   userData: 
   assetBundleName: 
   assetBundleVariant: 
-AssetOrigin:
-  serializedVersion: 1
-  productId: 326310
-  packageName: Military Base Pack
-  packageVersion: 1.0
-  assetPath: Assets/Tiny Teacup Studio/Military Base Pack/Demo/DemoScene/Lightmap-2_comp_light.exr
-  uploadId: 800146
