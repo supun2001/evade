@@ -122,6 +122,7 @@ const AVAILABLE_MAPS = [
   { mapId: "anotherCity", sceneName: "Another City", displayName: "Another City", difficulty: "NORMAL" },
   { mapId: "yard", sceneName: "Yard", displayName: "Yard", difficulty: "NORMAL" },
   { mapId: "maze", sceneName: "Maze", displayName: "Maze", difficulty: "HARD" },
+  { mapId: "arabic", sceneName: "Arabic", displayName: "Arabic", difficulty: "NORMAL" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;

@@ -106,6 +106,8 @@ public class NetworkManager : MonoBehaviour
     private const string YardMapSceneName = "Yard";
     private const string MazeMapId = "maze";
     private const string MazeMapSceneName = "Maze";
+    private const string ArabicMapId = "arabic";
+    private const string ArabicMapSceneName = "Arabic";
     private const float MinServerObstacleThickness = 0.25f;
     private const float MinServerObstacleMajorSpan = 1.25f;
     private const float MinServerObstacleFootprintArea = 1.0f;
@@ -320,7 +322,8 @@ public class NetworkManager : MonoBehaviour
             || string.Equals(mapId, SciFiMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, AnotherCityMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, YardMapId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mapId, MazeMapId, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(mapId, MazeMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, ArabicMapId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSceneNameForMapId(string mapId)
@@ -398,6 +401,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, MazeMapId, StringComparison.OrdinalIgnoreCase))
         {
             return MazeMapSceneName;
+        }
+
+        if (string.Equals(mapId, ArabicMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return ArabicMapSceneName;
         }
 
         return ClassicMapSceneName;
@@ -478,6 +486,11 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, MazeMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return MazeMapId;
+        }
+
+        if (string.Equals(sceneName, ArabicMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return ArabicMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;

@@ -45,3 +45,5 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 92c9b15d287cc428785e89c85aa1c6db, type: 3}
   - displayName: Maze
     scene: {fileID: 102900000, guid: 6a26032a2e8b44c449da6d48d3979664, type: 3}
+  - displayName: Arabic
+    scene: {fileID: 102900000, guid: 64e0b46fd252e41798656d6efb92e38b, type: 3}
