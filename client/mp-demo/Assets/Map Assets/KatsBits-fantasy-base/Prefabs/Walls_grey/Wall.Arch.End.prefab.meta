@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: cd004557687c81b47a489967d5d59eee
+timeCreated: 1540605919
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Walls_grey/Wall.Arch.End.prefab
+  uploadId: 276048

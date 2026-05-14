@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: f41fccb2aa19c9b47bca84977e11e779
+timeCreated: 1540604415
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Walls_orange/Wall.End.prefab
+  uploadId: 276048

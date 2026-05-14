@@ -88,6 +88,8 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _mapBlocksButton;
     private UIToolkitButton _mapSciFiButton;
     private UIToolkitButton _mapAnotherCityButton;
+    private UIToolkitButton _mapYardButton;
+    private UIToolkitButton _mapMazeButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
@@ -173,6 +175,10 @@ public class LobbyUI : MonoBehaviour
     private const string SciFiMapId = "sciFi";
     private const string AnotherCityMapSceneName = "Another City";
     private const string AnotherCityMapId = "anotherCity";
+    private const string YardMapSceneName = "Yard";
+    private const string YardMapId = "yard";
+    private const string MazeMapSceneName = "Maze";
+    private const string MazeMapId = "maze";
     private const float JoinTransitionFadeDuration = 0.24f;
     private const float JoinTransitionLeadTime = 0.12f;
     private const float JoinTransitionWatchdogSeconds = 70f;
@@ -805,6 +811,8 @@ public class LobbyUI : MonoBehaviour
         _mapBlocksButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-blocks-button");
         _mapSciFiButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-scifi-button");
         _mapAnotherCityButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-anothercity-button");
+        _mapYardButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-yard-button");
+        _mapMazeButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-maze-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
@@ -1030,6 +1038,14 @@ public class LobbyUI : MonoBehaviour
         {
             _mapAnotherCityButton.clicked += HandleAnotherCityMapButtonClicked;
         }
+        if (_mapYardButton != null)
+        {
+            _mapYardButton.clicked += HandleYardMapButtonClicked;
+        }
+        if (_mapMazeButton != null)
+        {
+            _mapMazeButton.clicked += HandleMazeMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked += HandleMapSelectionCloseButtonClicked;
@@ -1199,6 +1215,14 @@ public class LobbyUI : MonoBehaviour
         {
             _mapAnotherCityButton.clicked -= HandleAnotherCityMapButtonClicked;
         }
+        if (_mapYardButton != null)
+        {
+            _mapYardButton.clicked -= HandleYardMapButtonClicked;
+        }
+        if (_mapMazeButton != null)
+        {
+            _mapMazeButton.clicked -= HandleMazeMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked -= HandleMapSelectionCloseButtonClicked;
@@ -1301,6 +1325,16 @@ public class LobbyUI : MonoBehaviour
     private void HandleAnotherCityMapButtonClicked()
     {
         BeginJoinForMap(AnotherCityMapSceneName, AnotherCityMapId);
+    }
+
+    private void HandleYardMapButtonClicked()
+    {
+        BeginJoinForMap(YardMapSceneName, YardMapId);
+    }
+
+    private void HandleMazeMapButtonClicked()
+    {
+        BeginJoinForMap(MazeMapSceneName, MazeMapId);
     }
 
     private void HandleBrutilistVoidMapButtonClicked()
@@ -1609,6 +1643,16 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(sceneName, AnotherCityMapSceneName, StringComparison.Ordinal))
         {
             return AnotherCityMapId;
+        }
+
+        if (string.Equals(sceneName, YardMapSceneName, StringComparison.Ordinal))
+        {
+            return YardMapId;
+        }
+
+        if (string.Equals(sceneName, MazeMapSceneName, StringComparison.Ordinal))
+        {
+            return MazeMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
@@ -2040,6 +2084,15 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_mapVitaminBButton, "Join the Vitamin B map");
         SetMenuButtonDescription(_mapVillageButton, "Join the Village map");
         SetMenuButtonDescription(_mapBoomBoomButton, "Join the Boom Boom map");
+        SetMenuButtonDescription(_mapDesertButton, "Join the Desert map");
+        SetMenuButtonDescription(_mapLivingRoomButton, "Join the Living Room map");
+        SetMenuButtonDescription(_mapCastleButton, "Join the Castle map");
+        SetMenuButtonDescription(_mapDesert2Button, "Join the Desert 2 map");
+        SetMenuButtonDescription(_mapBlocksButton, "Join the Blocks map");
+        SetMenuButtonDescription(_mapSciFiButton, "Join the Sci-Fi map");
+        SetMenuButtonDescription(_mapAnotherCityButton, "Join the Another City map");
+        SetMenuButtonDescription(_mapYardButton, "Join the Yard map");
+        SetMenuButtonDescription(_mapMazeButton, "Join the Maze map");
 
         _pendingHoverLabelText = DefaultMenuHoverText;
     }
@@ -2080,6 +2133,15 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_mapVitaminBButton);
         RegisterHoverButton(_mapVillageButton);
         RegisterHoverButton(_mapBoomBoomButton);
+        RegisterHoverButton(_mapDesertButton);
+        RegisterHoverButton(_mapLivingRoomButton);
+        RegisterHoverButton(_mapCastleButton);
+        RegisterHoverButton(_mapDesert2Button);
+        RegisterHoverButton(_mapBlocksButton);
+        RegisterHoverButton(_mapSciFiButton);
+        RegisterHoverButton(_mapAnotherCityButton);
+        RegisterHoverButton(_mapYardButton);
+        RegisterHoverButton(_mapMazeButton);
     }
 
     private void UnbindHoverEffects()

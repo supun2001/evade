@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 082473cc607626545a1a2506d40b12ff
+timeCreated: 1539794238
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Walls/Wall.Arch.Iron.prefab
+  uploadId: 276048

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 3b5cfd9416db1e84db45bd15f7aa7ce5
+timeCreated: 1540597060
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Walls_plain/Wall.Arch.Sqr.Beams.prefab
+  uploadId: 276048

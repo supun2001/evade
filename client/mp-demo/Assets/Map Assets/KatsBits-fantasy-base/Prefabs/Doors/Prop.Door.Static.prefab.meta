@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: eaca603f334515340a36622c1130bfa6
+timeCreated: 1539795755
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Doors/Prop.Door.Static.prefab
+  uploadId: 276048

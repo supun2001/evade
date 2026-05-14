@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 83bd3a437b836b0439ad6805afa75b9a
+timeCreated: 1539795736
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Walls/Wall.Arch.Door.Sgl.Frame.prefab
+  uploadId: 276048

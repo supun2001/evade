@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: fd6f590fc32c88d4d8a20fbef4e334e3
+timeCreated: 1540597030
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 130407
+  packageName: Fantasy Asset Pack
+  packageVersion: 1.0
+  assetPath: Assets/KatsBits-fantasy-base/Prefabs/Walls_plain/Wall.Blk.prefab
+  uploadId: 276048

@@ -47,6 +47,12 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Another City.unity
     guid: 21de3de4efb734d42822c1b7d44b5400
+  - enabled: 1
+    path: Assets/Scenes/Yard.unity
+    guid: 92c9b15d287cc428785e89c85aa1c6db
+  - enabled: 1
+    path: Assets/Scenes/Maze.unity
+    guid: 6a26032a2e8b44c449da6d48d3979664
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

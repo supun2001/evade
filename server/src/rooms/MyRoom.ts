@@ -120,6 +120,8 @@ const AVAILABLE_MAPS = [
   { mapId: "blocks", sceneName: "Blocks", displayName: "Blocks", difficulty: "NORMAL" },
   { mapId: "sciFi", sceneName: "Sci-Fi", displayName: "Sci-Fi", difficulty: "HARD" },
   { mapId: "anotherCity", sceneName: "Another City", displayName: "Another City", difficulty: "NORMAL" },
+  { mapId: "yard", sceneName: "Yard", displayName: "Yard", difficulty: "NORMAL" },
+  { mapId: "maze", sceneName: "Maze", displayName: "Maze", difficulty: "HARD" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;
