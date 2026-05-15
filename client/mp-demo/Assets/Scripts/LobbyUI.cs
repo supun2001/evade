@@ -78,19 +78,18 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _mapBackroomButton;
     private UIToolkitButton _mapBrutilistVoidButton;
     private UIToolkitButton _mapParkourButton;
+    private UIToolkitButton _mapPlaygroundButton;
     private UIToolkitButton _mapVitaminBButton;
     private UIToolkitButton _mapVillageButton;
     private UIToolkitButton _mapBoomBoomButton;
     private UIToolkitButton _mapDesertButton;
     private UIToolkitButton _mapLivingRoomButton;
-    private UIToolkitButton _mapCastleButton;
     private UIToolkitButton _mapDesert2Button;
     private UIToolkitButton _mapBlocksButton;
     private UIToolkitButton _mapSciFiButton;
     private UIToolkitButton _mapAnotherCityButton;
     private UIToolkitButton _mapYardButton;
     private UIToolkitButton _mapMazeButton;
-    private UIToolkitButton _mapArabicButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
@@ -156,6 +155,8 @@ public class LobbyUI : MonoBehaviour
     private const string BrutilistVoidMapId = "brutilistVoid";
     private const string ParkourMapSceneName = "parkour";
     private const string ParkourMapId = "parkour";
+    private const string PlaygroundMapSceneName = "PlayGround";
+    private const string PlaygroundMapId = "playground";
     private const string VitaminBMapSceneName = "Vitamin_B";
     private const string VitaminBMapId = "Vitamin_B";
     private const string VillageMapSceneName = "Village";
@@ -166,8 +167,6 @@ public class LobbyUI : MonoBehaviour
     private const string DesertMapId = "desert";
     private const string LivingRoomMapSceneName = "Living Room";
     private const string LivingRoomMapId = "livingRoom";
-    private const string CastleMapSceneName = "Castle";
-    private const string CastleMapId = "castle";
     private const string Desert2MapSceneName = "Desert 2";
     private const string Desert2MapId = "desert2";
     private const string BlocksMapSceneName = "Blocks";
@@ -180,11 +179,10 @@ public class LobbyUI : MonoBehaviour
     private const string YardMapId = "yard";
     private const string MazeMapSceneName = "Maze";
     private const string MazeMapId = "maze";
-    private const string ArabicMapSceneName = "Arabic";
-    private const string ArabicMapId = "arabic";
     private const float JoinTransitionFadeDuration = 0.24f;
     private const float JoinTransitionLeadTime = 0.12f;
     private const float JoinTransitionWatchdogSeconds = 70f;
+    private const bool BypassMainMenu = false;
     private static readonly Scale LargeHoverButtonScale = new Scale(new Vector3(1.03f, 1.03f, 1f));
     private static readonly Scale FeaturedSideHoverButtonScale = new Scale(new Vector3(1.18f, 1.18f, 1f));
     private static readonly Scale HoverButtonScale = new Scale(new Vector3(1.02f, 1.02f, 1f));
@@ -227,10 +225,11 @@ public class LobbyUI : MonoBehaviour
         bool shouldShowMenu = !isOfflineModeActive
             && (NetworkManager.Instance == null
                 || string.IsNullOrEmpty(NetworkManager.Instance.currentRoomId));
+        bool shouldAutoStartDefaultExperience = BypassMainMenu && shouldShowMenu;
 
         if (menuPanel != null)
         {
-            menuPanel.SetActive(shouldShowMenu);
+            menuPanel.SetActive(shouldShowMenu && !shouldAutoStartDefaultExperience);
         }
         else
         {
@@ -239,7 +238,7 @@ public class LobbyUI : MonoBehaviour
 
         RefreshMenuUiBindings();
 
-        if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(shouldShowMenu);
+        if (lobbyCamera != null) lobbyCamera.gameObject.SetActive(shouldShowMenu && !shouldAutoStartDefaultExperience);
         if (NetworkManager.Instance != null)
         {
             NetworkManager.Instance.RoomLeftEvent += HandleRoomLeft;
@@ -255,6 +254,12 @@ public class LobbyUI : MonoBehaviour
         if (notificationText != null) notificationText.text = "";
 
         ContinuePendingMapJoinIfNeeded();
+
+        if (shouldAutoStartDefaultExperience)
+        {
+            StartDefaultExperience();
+            return;
+        }
 
         if (isOfflineModeActive)
         {
@@ -423,6 +428,12 @@ public class LobbyUI : MonoBehaviour
 
     private void SwitchToMenu()
     {
+        if (BypassMainMenu)
+        {
+            StartDefaultExperience();
+            return;
+        }
+
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = false;
         SetJoinTransitionVisible(false, immediate: true);
@@ -631,6 +642,20 @@ public class LobbyUI : MonoBehaviour
             "Offline mode started. Press O in the menu to launch it again later.");
     }
 
+    private void StartDefaultExperience()
+    {
+        if (OfflineModeManager.TryGetExisting(out OfflineModeManager existingOfflineModeManager)
+            && existingOfflineModeManager.IsOfflineModeActive)
+        {
+            OnGameStarted();
+            return;
+        }
+
+        StartOfflineMode(
+            OfflineModeManager.OfflinePresentationMode.Shooting,
+            string.Empty);
+    }
+
     private void StartShootingMode()
     {
         StartOfflineMode(
@@ -652,7 +677,10 @@ public class LobbyUI : MonoBehaviour
 
         hasAutoReadiedCurrentRoom = true;
         OnGameStarted();
-        ShowNotification(startedMessage);
+        if (!string.IsNullOrWhiteSpace(startedMessage))
+        {
+            ShowNotification(startedMessage);
+        }
     }
 
     private string GetOfflineDisplayName()
@@ -804,19 +832,18 @@ public class LobbyUI : MonoBehaviour
         _mapBackroomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-backroom-button");
         _mapBrutilistVoidButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-brutilistvoid-button");
         _mapParkourButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-parkour-button");
+        _mapPlaygroundButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-playground-button");
         _mapVitaminBButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-vitaminb-button");
         _mapVillageButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-village-button");
         _mapBoomBoomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-boomboom-button");
         _mapDesertButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-desert-button");
         _mapLivingRoomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-livingroom-button");
-        _mapCastleButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-castle-button");
         _mapDesert2Button = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-desert2-button");
         _mapBlocksButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-blocks-button");
         _mapSciFiButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-scifi-button");
         _mapAnotherCityButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-anothercity-button");
         _mapYardButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-yard-button");
         _mapMazeButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-maze-button");
-        _mapArabicButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-arabic-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
@@ -1002,6 +1029,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapParkourButton.clicked += HandleParkourMapButtonClicked;
         }
+        if (_mapPlaygroundButton != null)
+        {
+            _mapPlaygroundButton.clicked += HandlePlaygroundMapButtonClicked;
+        }
         if (_mapVitaminBButton != null)
         {
             _mapVitaminBButton.clicked += HandleVitaminBMapButtonClicked;
@@ -1021,10 +1052,6 @@ public class LobbyUI : MonoBehaviour
         if (_mapLivingRoomButton != null)
         {
             _mapLivingRoomButton.clicked += HandleLivingRoomMapButtonClicked;
-        }
-        if (_mapCastleButton != null)
-        {
-            _mapCastleButton.clicked += HandleCastleMapButtonClicked;
         }
         if (_mapDesert2Button != null)
         {
@@ -1049,10 +1076,6 @@ public class LobbyUI : MonoBehaviour
         if (_mapMazeButton != null)
         {
             _mapMazeButton.clicked += HandleMazeMapButtonClicked;
-        }
-        if (_mapArabicButton != null)
-        {
-            _mapArabicButton.clicked += HandleArabicMapButtonClicked;
         }
         if (_mapSelectionCloseButton != null)
         {
@@ -1183,6 +1206,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapParkourButton.clicked -= HandleParkourMapButtonClicked;
         }
+        if (_mapPlaygroundButton != null)
+        {
+            _mapPlaygroundButton.clicked -= HandlePlaygroundMapButtonClicked;
+        }
         if (_mapVitaminBButton != null)
         {
             _mapVitaminBButton.clicked -= HandleVitaminBMapButtonClicked;
@@ -1202,10 +1229,6 @@ public class LobbyUI : MonoBehaviour
         if (_mapLivingRoomButton != null)
         {
             _mapLivingRoomButton.clicked -= HandleLivingRoomMapButtonClicked;
-        }
-        if (_mapCastleButton != null)
-        {
-            _mapCastleButton.clicked -= HandleCastleMapButtonClicked;
         }
         if (_mapDesert2Button != null)
         {
@@ -1230,10 +1253,6 @@ public class LobbyUI : MonoBehaviour
         if (_mapMazeButton != null)
         {
             _mapMazeButton.clicked -= HandleMazeMapButtonClicked;
-        }
-        if (_mapArabicButton != null)
-        {
-            _mapArabicButton.clicked -= HandleArabicMapButtonClicked;
         }
         if (_mapSelectionCloseButton != null)
         {
@@ -1289,6 +1308,11 @@ public class LobbyUI : MonoBehaviour
         BeginJoinForMap(ParkourMapSceneName, ParkourMapId);
     }
 
+    private void HandlePlaygroundMapButtonClicked()
+    {
+        BeginJoinForMap(PlaygroundMapSceneName, PlaygroundMapId);
+    }
+
     private void HandleVitaminBMapButtonClicked()
     {
         BeginJoinForMap(VitaminBMapSceneName, VitaminBMapId);
@@ -1312,11 +1336,6 @@ public class LobbyUI : MonoBehaviour
     private void HandleLivingRoomMapButtonClicked()
     {
         BeginJoinForMap(LivingRoomMapSceneName, LivingRoomMapId);
-    }
-
-    private void HandleCastleMapButtonClicked()
-    {
-        BeginJoinForMap(CastleMapSceneName, CastleMapId);
     }
 
     private void HandleDesert2MapButtonClicked()
@@ -1347,11 +1366,6 @@ public class LobbyUI : MonoBehaviour
     private void HandleMazeMapButtonClicked()
     {
         BeginJoinForMap(MazeMapSceneName, MazeMapId);
-    }
-
-    private void HandleArabicMapButtonClicked()
-    {
-        BeginJoinForMap(ArabicMapSceneName, ArabicMapId);
     }
 
     private void HandleBrutilistVoidMapButtonClicked()
@@ -1612,6 +1626,11 @@ public class LobbyUI : MonoBehaviour
             return ParkourMapId;
         }
 
+        if (string.Equals(sceneName, PlaygroundMapSceneName, StringComparison.Ordinal))
+        {
+            return PlaygroundMapId;
+        }
+
         if (string.Equals(sceneName, VitaminBMapSceneName, StringComparison.Ordinal))
         {
             return VitaminBMapId;
@@ -1635,11 +1654,6 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(sceneName, LivingRoomMapSceneName, StringComparison.Ordinal))
         {
             return LivingRoomMapId;
-        }
-
-        if (string.Equals(sceneName, CastleMapSceneName, StringComparison.Ordinal))
-        {
-            return CastleMapId;
         }
 
         if (string.Equals(sceneName, Desert2MapSceneName, StringComparison.Ordinal))
@@ -1670,11 +1684,6 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(sceneName, MazeMapSceneName, StringComparison.Ordinal))
         {
             return MazeMapId;
-        }
-
-        if (string.Equals(sceneName, ArabicMapSceneName, StringComparison.Ordinal))
-        {
-            return ArabicMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
@@ -2103,20 +2112,18 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_mapBackroomButton, "Join the Backroom map");
         SetMenuButtonDescription(_mapBrutilistVoidButton, "Join the Brutilist Void map");
         SetMenuButtonDescription(_mapParkourButton, "Join the Parkour map");
+        SetMenuButtonDescription(_mapPlaygroundButton, "Join the Playground map");
         SetMenuButtonDescription(_mapVitaminBButton, "Join the Vitamin B map");
         SetMenuButtonDescription(_mapVillageButton, "Join the Village map");
         SetMenuButtonDescription(_mapBoomBoomButton, "Join the Boom Boom map");
         SetMenuButtonDescription(_mapDesertButton, "Join the Desert map");
         SetMenuButtonDescription(_mapLivingRoomButton, "Join the Living Room map");
-        SetMenuButtonDescription(_mapCastleButton, "Join the Castle map");
         SetMenuButtonDescription(_mapDesert2Button, "Join the Desert 2 map");
         SetMenuButtonDescription(_mapBlocksButton, "Join the Blocks map");
         SetMenuButtonDescription(_mapSciFiButton, "Join the Sci-Fi map");
         SetMenuButtonDescription(_mapAnotherCityButton, "Join the Another City map");
         SetMenuButtonDescription(_mapYardButton, "Join the Yard map");
         SetMenuButtonDescription(_mapMazeButton, "Join the Maze map");
-        SetMenuButtonDescription(_mapArabicButton, "Join the Arabic map");
-
         _pendingHoverLabelText = DefaultMenuHoverText;
     }
 
@@ -2153,19 +2160,18 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_mapBackroomButton);
         RegisterHoverButton(_mapBrutilistVoidButton);
         RegisterHoverButton(_mapParkourButton);
+        RegisterHoverButton(_mapPlaygroundButton);
         RegisterHoverButton(_mapVitaminBButton);
         RegisterHoverButton(_mapVillageButton);
         RegisterHoverButton(_mapBoomBoomButton);
         RegisterHoverButton(_mapDesertButton);
         RegisterHoverButton(_mapLivingRoomButton);
-        RegisterHoverButton(_mapCastleButton);
         RegisterHoverButton(_mapDesert2Button);
         RegisterHoverButton(_mapBlocksButton);
         RegisterHoverButton(_mapSciFiButton);
         RegisterHoverButton(_mapAnotherCityButton);
         RegisterHoverButton(_mapYardButton);
         RegisterHoverButton(_mapMazeButton);
-        RegisterHoverButton(_mapArabicButton);
     }
 
     private void UnbindHoverEffects()

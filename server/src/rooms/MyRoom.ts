@@ -111,6 +111,7 @@ const AVAILABLE_MAPS = [
   { mapId: "backroom", sceneName: "backroom", displayName: "Backroom", difficulty: "HARD" },
   { mapId: "brutilistVoid", sceneName: "BrutalistVoid", displayName: "Brutilist Void", difficulty: "HARD" },
   { mapId: "parkour", sceneName: "parkour", displayName: "Parkour", difficulty: "HARD" },
+  { mapId: "playground", sceneName: "PlayGround", displayName: "Playground", difficulty: "NORMAL" },
   { mapId: "Vitamin_B", sceneName: "Vitamin_B", displayName: "Vitamin B", difficulty: "NORMAL" },
   { mapId: "vilage", sceneName: "Village", displayName: "Village", difficulty: "NORMAL" },
   { mapId: "boomBoom", sceneName: "Boom Boom", displayName: "Boom Boom", difficulty: "HARD" },
@@ -122,7 +123,6 @@ const AVAILABLE_MAPS = [
   { mapId: "anotherCity", sceneName: "Another City", displayName: "Another City", difficulty: "NORMAL" },
   { mapId: "yard", sceneName: "Yard", displayName: "Yard", difficulty: "NORMAL" },
   { mapId: "maze", sceneName: "Maze", displayName: "Maze", difficulty: "HARD" },
-  { mapId: "arabic", sceneName: "Arabic", displayName: "Arabic", difficulty: "NORMAL" },
 ] as const;
 const PLAYER_UPDATE_X = 0;
 const PLAYER_UPDATE_Y = 1;

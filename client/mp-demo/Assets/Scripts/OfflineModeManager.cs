@@ -1445,7 +1445,7 @@ public class OfflineModeManager : MonoBehaviour
         ResetOfflineNextbots(active: false);
 
         // Generate candidates
-        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "desert2", "blocks", "sciFi", "anotherCity" };
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "playground", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "desert2", "blocks", "sciFi", "anotherCity" };
         List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
 
         // Shuffle and pick 3
@@ -1558,12 +1558,12 @@ public class OfflineModeManager : MonoBehaviour
             case "backroom": return "Backroom";
             case "brutilistVoid": return "Brutilist Void";
             case "parkour": return "Parkour";
+            case "playground": return "Playground";
             case "Vitamin_B": return "Vitamin B";
             case "vilage": return "Village";
             case "boomBoom": return "Boom Boom";
             case "desert": return "Desert";
             case "livingRoom": return "Living Room";
-            case "castle": return "Castle";
             case "desert2": return "Desert 2";
             case "blocks": return "Blocks";
             case "sciFi": return "Sci-Fi";
@@ -1580,12 +1580,12 @@ public class OfflineModeManager : MonoBehaviour
             case "backroom": return "HARD";
             case "brutilistVoid": return "HARD";
             case "parkour": return "HARD";
+            case "playground": return "NORMAL";
             case "Vitamin_B": return "NORMAL";
             case "vilage": return "NORMAL";
             case "boomBoom": return "HARD";
             case "desert": return "NORMAL";
             case "livingRoom": return "NORMAL";
-            case "castle": return "HARD";
             case "desert2": return "HARD";
             case "blocks": return "NORMAL";
             case "sciFi": return "HARD";
@@ -1602,12 +1602,12 @@ public class OfflineModeManager : MonoBehaviour
             case "backroom": return "backroom";
             case "brutilistVoid": return "BrutalistVoid";
             case "parkour": return "parkour";
+            case "playground": return "PlayGround";
             case "Vitamin_B": return "Vitamin_B";
             case "vilage": return "Village";
             case "boomBoom": return "Boom Boom";
             case "desert": return "Desert";
             case "livingRoom": return "Living Room";
-            case "castle": return "Castle";
             case "desert2": return "Desert 2";
             case "blocks": return "Blocks";
             case "sciFi": return "Sci-Fi";
