@@ -80,6 +80,14 @@ public class NextbotFollowPlayer : MonoBehaviour
             maxChaseRange = 1000f,
             navMeshRejoinWarpDistance = 0.3f,
         },
+        new MapNextbotSettings
+        {
+            mapId = "playground",
+            useLocalRoomStateNavMesh = false,
+            targetHoldSeconds = 1f,
+            maxChaseRange = 1000f,
+            navMeshRejoinWarpDistance = 0.3f,
+        },
     };
 
     [Header("Target Score")]

@@ -42,6 +42,7 @@ const NEXTBOT_PREDICTION_TIME = 0.28;
 const NEXTBOT_MAX_CHASE_RANGE = 70;
 const NEXTBOT_PARKOUR_ACQUIRE_RANGE = 1000;
 const NEXTBOT_MAX_VERTICAL_DELTA = 3.0;
+const NEXTBOT_PLAYGROUND_MAX_VERTICAL_DELTA = 12.0;
 const NEXTBOT_STALE_TARGET_TIMEOUT_MS = 1500;
 const NEXTBOT_DISTANCE_SCORE_BASE = 120;
 const NEXTBOT_VISIBLE_PROXY_RANGE = 18;
@@ -80,6 +81,7 @@ const NEXTBOT_MAX_ALLOWED_ASCENT = 3;
 const NEXTBOT_MIN_SPAWN_POINT_SEPARATION = 3.5;
 const NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT = 4;
 const NEXTBOT_FLOOR_BLEND_RADIUS = 3.5;
+const NEXTBOT_FLOOR_VERTICAL_BIAS = 0.75;
 const NEXTBOT_DROP_START_HEIGHT = 0.1;
 const NEXTBOT_DROP_GRAVITY = 22;
 const NEXTBOT_DROP_LAND_BLEND_HEIGHT = 0.75;
@@ -259,6 +261,7 @@ type MapSelectedMessage = {
 type MapNextbotConfig = {
   acquireRange: number;
   speedMultiplier: number;
+  maxVerticalDelta: number;
   useSharedSpawnPoint: boolean;
   useClientReportedHits: boolean;
   useServerReachabilityCheck: boolean;
@@ -268,6 +271,7 @@ type MapNextbotConfig = {
 const DEFAULT_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
   acquireRange: NEXTBOT_PARKOUR_ACQUIRE_RANGE,
   speedMultiplier: 1,
+  maxVerticalDelta: NEXTBOT_MAX_VERTICAL_DELTA,
   useSharedSpawnPoint: false,
   useClientReportedHits: true,
   useServerReachabilityCheck: false,
@@ -277,10 +281,21 @@ const DEFAULT_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
 const PARKOUR_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
   acquireRange: NEXTBOT_PARKOUR_ACQUIRE_RANGE,
   speedMultiplier: 1.5,
+  maxVerticalDelta: NEXTBOT_MAX_VERTICAL_DELTA,
   useSharedSpawnPoint: true,
   useClientReportedHits: true,
   useServerReachabilityCheck: false,
   preferredSingleNextbotId: "obunga",
+};
+
+const PLAYGROUND_MAP_NEXTBOT_CONFIG: MapNextbotConfig = {
+  acquireRange: NEXTBOT_PARKOUR_ACQUIRE_RANGE,
+  speedMultiplier: 1,
+  maxVerticalDelta: NEXTBOT_PLAYGROUND_MAX_VERTICAL_DELTA,
+  useSharedSpawnPoint: true,
+  useClientReportedHits: true,
+  useServerReachabilityCheck: false,
+  preferredSingleNextbotId: "",
 };
 
 function readPlayerUpdateNumber(message: PlayerUpdateMessage, index: number, key: string): number {
@@ -417,6 +432,10 @@ export class MyRoom extends Room<MyRoomState> {
   private getMapNextbotConfig(): MapNextbotConfig {
     if (this.mapId === "parkour") {
       return PARKOUR_MAP_NEXTBOT_CONFIG;
+    }
+
+    if (this.mapId === "playground") {
+      return PLAYGROUND_MAP_NEXTBOT_CONFIG;
     }
 
     return DEFAULT_MAP_NEXTBOT_CONFIG;
@@ -1707,6 +1726,7 @@ export class MyRoom extends Room<MyRoomState> {
     const dz = target.z - sourceZ;
     const distance = Math.hypot(dx, dz);
     const safeUntil = this.playerSafeUntil.get(target.sessionId) ?? 0;
+    const maxVerticalDelta = this.getMapNextbotConfig().maxVerticalDelta;
 
     // If client reporting is enabled, we trust the client's hit detection for maximum responsiveness
     if (this.getMapNextbotConfig().useClientReportedHits) {
@@ -1714,7 +1734,7 @@ export class MyRoom extends Room<MyRoomState> {
         || now < controller.nextInjuryAt
         || safeUntil > now
         || target.isEliminated
-        || Math.abs(target.y - sourceY) > NEXTBOT_MAX_VERTICAL_DELTA) {
+        || Math.abs(target.y - sourceY) > maxVerticalDelta) {
         return;
       }
 
@@ -1746,7 +1766,7 @@ export class MyRoom extends Room<MyRoomState> {
       || now < controller.nextInjuryAt
       || safeUntil > now
       || target.isEliminated
-      || Math.abs(target.y - sourceY) > NEXTBOT_MAX_VERTICAL_DELTA) {
+      || Math.abs(target.y - sourceY) > maxVerticalDelta) {
       return;
     }
 
@@ -1986,6 +2006,8 @@ export class MyRoom extends Room<MyRoomState> {
   }
 
   private isScoreEligibleTarget(player: Player, now: number, nextbot: NextbotState) {
+    const maxVerticalDelta = this.getMapNextbotConfig().maxVerticalDelta;
+
     if (player.isSpectator) {
       return false;
     }
@@ -2007,7 +2029,7 @@ export class MyRoom extends Room<MyRoomState> {
       return false;
     }
 
-    if (Math.abs(player.y - nextbot.y) > NEXTBOT_MAX_VERTICAL_DELTA) {
+    if (Math.abs(player.y - nextbot.y) > maxVerticalDelta) {
       return false;
     }
 
@@ -2643,25 +2665,33 @@ export class MyRoom extends Room<MyRoomState> {
       return fallbackY;
     }
 
-    const nearestSamples: Array<{ sample: FloorSample; distanceSq: number }> = [];
+    const nearestSamples: Array<{
+      sample: FloorSample;
+      distanceSq: number;
+      verticalDeltaSq: number;
+      score: number;
+    }> = [];
 
     for (const sample of this.nextbotFloorSamples) {
       const dx = sample.x - x;
       const dz = sample.z - z;
       const distanceSq = (dx * dx) + (dz * dz);
+      const verticalDelta = Number.isFinite(fallbackY) ? sample.y - fallbackY : 0;
+      const verticalDeltaSq = verticalDelta * verticalDelta;
+      const score = distanceSq + (verticalDeltaSq * NEXTBOT_FLOOR_VERTICAL_BIAS);
 
       if (!Number.isFinite(distanceSq)) {
         continue;
       }
 
-      nearestSamples.push({ sample, distanceSq });
+      nearestSamples.push({ sample, distanceSq, verticalDeltaSq, score });
     }
 
     if (nearestSamples.length === 0) {
       return fallbackY;
     }
 
-    nearestSamples.sort((left, right) => left.distanceSq - right.distanceSq);
+    nearestSamples.sort((left, right) => left.score - right.score);
 
     const closest = nearestSamples[0];
     if (closest.distanceSq <= 0.0001) {
@@ -2669,6 +2699,10 @@ export class MyRoom extends Room<MyRoomState> {
     }
 
     const maxBlendDistanceSq = NEXTBOT_FLOOR_BLEND_RADIUS * NEXTBOT_FLOOR_BLEND_RADIUS;
+    const maxBlendVerticalDeltaSq = Math.max(
+      closest.verticalDeltaSq,
+      this.getMapNextbotConfig().maxVerticalDelta * this.getMapNextbotConfig().maxVerticalDelta,
+    );
     let blendedY = 0;
     let totalWeight = 0;
     let usedSampleCount = 0;
@@ -2676,6 +2710,10 @@ export class MyRoom extends Room<MyRoomState> {
     for (let index = 0; index < nearestSamples.length && usedSampleCount < NEXTBOT_FLOOR_BLEND_SAMPLE_COUNT; index++) {
       const candidate = nearestSamples[index];
       if (candidate.distanceSq > maxBlendDistanceSq) {
+        continue;
+      }
+
+      if (candidate.verticalDeltaSq > maxBlendVerticalDeltaSq) {
         continue;
       }
 

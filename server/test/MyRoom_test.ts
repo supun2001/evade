@@ -300,6 +300,32 @@ describe("testing your Colyseus app", () => {
     assert.ok(Math.abs(nextbot!.y - 2) < 0.1);
   });
 
+  it("prefers the current floor when multiple floors share similar x and z", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("my_room", {
+      mapId: "playground",
+      nextbotFloorSamples: [
+        { x: 2, y: 0, z: 0 },
+        { x: 2, y: 6, z: 0 },
+        { x: 4, y: 6, z: 0 },
+      ],
+    });
+
+    const roomAny = room as any;
+    const nextbot = room.state.nextbots.get("nextbot_0");
+    assert.ok(nextbot);
+    const controller = roomAny.nextbotControllers[0];
+    assert.ok(controller);
+
+    nextbot!.x = 0;
+    nextbot!.y = 6;
+    nextbot!.z = 0;
+    controller.groundedY = 6;
+
+    roomAny.moveNextbotTowardsPosition(controller, nextbot, { x: 4, z: 0, distance: 4 }, 0.5, 4, 6);
+
+    assert.ok(Math.abs(nextbot!.y - 6) < 0.1);
+  });
+
   it("does not injure players through walls", async () => {
     const room = await colyseus.createRoom<MyRoomState>("my_room", {
       nextbotObstacles: [

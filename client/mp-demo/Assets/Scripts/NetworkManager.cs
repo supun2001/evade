@@ -1263,8 +1263,10 @@ public class NetworkManager : MonoBehaviour
 
         float majorSpan = Mathf.Max(bounds.size.x, bounds.size.z);
         float footprintArea = bounds.size.x * bounds.size.z;
+        bool isLikelyVerticalBlocker = bounds.size.y >= 1.75f
+            && (bounds.size.x >= 0.08f || bounds.size.z >= 0.08f);
         bool isSmallClutter = majorSpan < MinServerObstacleMajorSpan && footprintArea < MinServerObstacleFootprintArea;
-        if (isSmallClutter)
+        if (isSmallClutter && !isLikelyVerticalBlocker)
         {
             return false;
         }
@@ -1370,7 +1372,7 @@ public class NetworkManager : MonoBehaviour
                 }
 
                 Vector3 grounded = ResolveGroundedSpawnPosition(new Vector3(x, referenceY, z));
-                string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
+                string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.y * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
                 if (!dedup.Add(key))
                 {
                     continue;
@@ -1398,7 +1400,7 @@ public class NetworkManager : MonoBehaviour
             }
 
             Vector3 grounded = ResolveGroundedSpawnPosition(areaPoints[i]);
-            string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
+            string key = $"{Mathf.RoundToInt(grounded.x * 100f)}:{Mathf.RoundToInt(grounded.y * 100f)}:{Mathf.RoundToInt(grounded.z * 100f)}";
             if (!dedup.Add(key))
             {
                 continue;
