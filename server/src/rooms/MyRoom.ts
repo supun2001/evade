@@ -441,6 +441,7 @@ export class MyRoom extends Room<MyRoomState> {
     this.nextbotIds = this.resolveNextbotIds(initialMapOptions);
     this.nextbotMoveSpeeds = this.resolveNextbotMoveSpeeds(initialMapOptions, this.nextbotIds);
     this.playerSpawnPoints = this.resolvePlayerSpawnPoints(initialMapOptions);
+    this.nextbotObstacles = this.augmentNextbotObstaclesWithMapFallbacks(this.nextbotObstacles);
     // Use a short initial intermission for the first round (no map vote needed).
     // Subsequent rounds use the full MAP_VOTE_DURATION_MS for voting.
     const INITIAL_INTERMISSION_MS = 5_000;
@@ -2506,6 +2507,117 @@ export class MyRoom extends Room<MyRoomState> {
       .filter((obstacle): obstacle is ObstacleRect => obstacle !== undefined);
   }
 
+  private augmentNextbotObstaclesWithMapFallbacks(obstacles: ObstacleRect[]): ObstacleRect[] {
+    if (this.mapId !== "playground") {
+      return obstacles;
+    }
+
+    const fallbackWalls = this.buildPlaygroundContainmentObstacles();
+    if (fallbackWalls.length === 0) {
+      return obstacles;
+    }
+
+    const baseObstacles = obstacles.filter((obstacle) => !fallbackWalls.some((fallback) => this.areObstacleRectsEqual(obstacle, fallback)));
+    return baseObstacles.concat(fallbackWalls);
+  }
+
+  private areObstacleRectsEqual(left: ObstacleRect, right: ObstacleRect) {
+    return left.minX === right.minX
+      && left.maxX === right.maxX
+      && left.minY === right.minY
+      && left.maxY === right.maxY
+      && left.minZ === right.minZ
+      && left.maxZ === right.maxZ;
+  }
+
+  private buildPlaygroundContainmentObstacles(): ObstacleRect[] {
+    const boundaryPoints: SpawnPoint[] = [];
+    boundaryPoints.push(...this.nextbotSpawnPoints);
+    boundaryPoints.push(...this.playerSpawnPoints);
+    boundaryPoints.push(...this.nextbotPatrolPoints);
+    boundaryPoints.push(...this.nextbotFloorSamples);
+
+    if (boundaryPoints.length < 3) {
+      return [];
+    }
+
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+
+    for (const point of boundaryPoints) {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+        continue;
+      }
+
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+      minZ = Math.min(minZ, point.z);
+      maxZ = Math.max(maxZ, point.z);
+    }
+
+    if (!Number.isFinite(minX)
+      || !Number.isFinite(maxX)
+      || !Number.isFinite(minY)
+      || !Number.isFinite(maxY)
+      || !Number.isFinite(minZ)
+      || !Number.isFinite(maxZ)) {
+      return [];
+    }
+
+    const boundaryPadding = 1.5;
+    const wallThickness = 3.5;
+    const wallHeightPaddingBottom = 2;
+    const wallHeightPaddingTop = 8;
+
+    const paddedMinX = minX - boundaryPadding;
+    const paddedMaxX = maxX + boundaryPadding;
+    const paddedMinZ = minZ - boundaryPadding;
+    const paddedMaxZ = maxZ + boundaryPadding;
+    const wallMinY = minY - wallHeightPaddingBottom;
+    const wallMaxY = maxY + wallHeightPaddingTop;
+
+    return [
+      {
+        minX: paddedMinX - wallThickness,
+        maxX: paddedMinX,
+        minY: wallMinY,
+        maxY: wallMaxY,
+        minZ: paddedMinZ - wallThickness,
+        maxZ: paddedMaxZ + wallThickness,
+      },
+      {
+        minX: paddedMaxX,
+        maxX: paddedMaxX + wallThickness,
+        minY: wallMinY,
+        maxY: wallMaxY,
+        minZ: paddedMinZ - wallThickness,
+        maxZ: paddedMaxZ + wallThickness,
+      },
+      {
+        minX: paddedMinX,
+        maxX: paddedMaxX,
+        minY: wallMinY,
+        maxY: wallMaxY,
+        minZ: paddedMinZ - wallThickness,
+        maxZ: paddedMinZ,
+      },
+      {
+        minX: paddedMinX,
+        maxX: paddedMaxX,
+        minY: wallMinY,
+        maxY: wallMaxY,
+        minZ: paddedMaxZ,
+        maxZ: paddedMaxZ + wallThickness,
+      },
+    ];
+  }
+
   private resolveNextbotFloorSamples(options: any): FloorSample[] {
     const candidateSamples = options?.nextbotFloorSamples;
     if (!Array.isArray(candidateSamples) || candidateSamples.length === 0) {
@@ -3299,6 +3411,7 @@ export class MyRoom extends Room<MyRoomState> {
     if (refreshedFloorSamples.length > 0) {
       this.nextbotFloorSamples = refreshedFloorSamples;
     }
+    this.nextbotObstacles = this.augmentNextbotObstaclesWithMapFallbacks(this.nextbotObstacles);
 
     for (let index = 0; index < this.nextbotControllers.length; index++) {
       const controller = this.nextbotControllers[index];
