@@ -45,3 +45,5 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 6a26032a2e8b44c449da6d48d3979664, type: 3}
   - displayName: Playground
     scene: {fileID: 102900000, guid: 2ebcd958afff64e69b7ef3c8167caf5f, type: 3}
+  - displayName: Icebreaker
+    scene: {fileID: 102900000, guid: fc7471291dd0441cca05e1b92cf58276, type: 3}
