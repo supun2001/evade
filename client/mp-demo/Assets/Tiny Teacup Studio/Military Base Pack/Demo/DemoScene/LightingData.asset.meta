@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 844cc0943d2d7e64bb6537c692ae7122
+guid: 3234d2cd97bf21f4dbf02f66d2efa571
 NativeFormatImporter:
   externalObjects: {}
   mainObjectFileID: 112000000
@@ -8,8 +8,8 @@ NativeFormatImporter:
   assetBundleVariant: 
 AssetOrigin:
   serializedVersion: 1
-  productId: 326310
-  packageName: Military Base Pack
+  productId: 333554
+  packageName: Low-Poly Desert Environment Pack
   packageVersion: 1.0
   assetPath: Assets/Tiny Teacup Studio/Military Base Pack/Demo/DemoScene/LightingData.asset
-  uploadId: 800146
+  uploadId: 800150

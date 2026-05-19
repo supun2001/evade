@@ -51,3 +51,5 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 90074e7db06e844d4b16fb317c891f9f, type: 3}
   - displayName: Maze2
     scene: {fileID: 102900000, guid: 8ea4ed1a1c1cb4229bd297ce44cb518f, type: 3}
+  - displayName: Desert Bus
+    scene: {fileID: 102900000, guid: 71cab485619a447e4a8ceac91e6200bd, type: 3}
