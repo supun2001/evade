@@ -47,3 +47,7 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 2ebcd958afff64e69b7ef3c8167caf5f, type: 3}
   - displayName: Icebreaker
     scene: {fileID: 102900000, guid: fc7471291dd0441cca05e1b92cf58276, type: 3}
+  - displayName: Construction site
+    scene: {fileID: 102900000, guid: 90074e7db06e844d4b16fb317c891f9f, type: 3}
+  - displayName: Maze2
+    scene: {fileID: 102900000, guid: 8ea4ed1a1c1cb4229bd297ce44cb518f, type: 3}

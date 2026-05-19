@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: de952b2c8081bbf448cb6bf1c466ba7a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 68125
+  packageName: Big Water Tower
+  packageVersion: 2.0
+  assetPath: Assets/Big Water Tower/Big Water Tower/Models/Materials/sky.mat
+  uploadId: 634020

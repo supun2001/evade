@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b51abaed5deaebb40b66c190cf7ef1af
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 4890085278179872738
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 68125
+  packageName: Big Water Tower
+  packageVersion: 2.0
+  assetPath: Assets/Big Water Tower/Big Water Tower/Scenes/Water_towerSettings.lighting
+  uploadId: 634020
