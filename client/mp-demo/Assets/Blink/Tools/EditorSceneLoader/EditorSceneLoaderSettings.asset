@@ -53,3 +53,5 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 8ea4ed1a1c1cb4229bd297ce44cb518f, type: 3}
   - displayName: Desert Bus
     scene: {fileID: 102900000, guid: 71cab485619a447e4a8ceac91e6200bd, type: 3}
+  - displayName: Bedroom
+    scene: {fileID: 102900000, guid: 36f7d040da0fb4e1cab326dfff4ce68d, type: 3}
