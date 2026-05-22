@@ -55,3 +55,7 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 71cab485619a447e4a8ceac91e6200bd, type: 3}
   - displayName: Bedroom
     scene: {fileID: 102900000, guid: 36f7d040da0fb4e1cab326dfff4ce68d, type: 3}
+  - displayName: Facade
+    scene: {fileID: 102900000, guid: 92560e852b4044da8ac3296b693c8a0c, type: 3}
+  - displayName: Mayday
+    scene: {fileID: 102900000, guid: 587038644cdbe42a18bef7290a6c1270, type: 3}
