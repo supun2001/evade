@@ -73,25 +73,6 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _inventoryButton;
     private UIToolkitButton _spectateButton;
     private UIToolkitButton _comingSoonCloseButton;
-    private UIToolkitButton _mapRandomButton;
-    private UIToolkitButton _mapClassicButton;
-    private UIToolkitButton _mapBackroomButton;
-    private UIToolkitButton _mapBrutilistVoidButton;
-    private UIToolkitButton _mapParkourButton;
-    private UIToolkitButton _mapPlaygroundButton;
-    private UIToolkitButton _mapVitaminBButton;
-    private UIToolkitButton _mapVillageButton;
-    private UIToolkitButton _mapBoomBoomButton;
-    private UIToolkitButton _mapDesertButton;
-    private UIToolkitButton _mapLivingRoomButton;
-    private UIToolkitButton _mapDesert2Button;
-    private UIToolkitButton _mapBlocksButton;
-    private UIToolkitButton _mapSciFiButton;
-    private UIToolkitButton _mapAnotherCityButton;
-    private UIToolkitButton _mapYardButton;
-    private UIToolkitButton _mapMazeButton;
-    private UIToolkitButton _mapArtGalleryButton;
-    private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
     private Label _comingSoonMessageLabel;
@@ -112,8 +93,6 @@ public class LobbyUI : MonoBehaviour
     private VisualElement _loginCard;
     private VisualElement _comingSoonOverlay;
     private VisualElement _shopOverlay;
-    private VisualElement _mapSelectionOverlay;
-    private VisualElement _mapSelectionCard;
     private VisualElement _shopHomeView;
     private VisualElement _shopSkinsView;
     private VisualElement _shopPreviewPanel;
@@ -124,13 +103,11 @@ public class LobbyUI : MonoBehaviour
     private bool _settingsPopupVisible;
     private bool _loginPopupVisible;
     private bool _shopVisible;
-    private bool _mapSelectionVisible;
     private ShopPage _shopPage = ShopPage.Home;
     private bool _menuEventsBound;
     private bool _pendingSpectateJoin;
     private bool _isSpectatingFromMenu;
     private bool _hasLoggedWaitingForLocalPlayer;
-    private Coroutine _mapLoadCoroutine;
     private readonly List<UIToolkitButton> _hoverButtons = new();
     private readonly List<UIToolkitButton> _shopSkinButtons = new();
     private readonly List<Label> _shopSkinNameLabels = new();
@@ -148,40 +125,6 @@ public class LobbyUI : MonoBehaviour
     private const string InventoryCardResourcePath = "UI/InventoryCard";
     private const string DefaultShopPreviewPrefabAssetPath = "Assets/Models/NewPlayer/player.fbx";
     private const string DefaultShopPreviewAnimatorControllerAssetPath = "Assets/Models/NewPlayer/Animations/AC_NewPlayer.controller";
-    private const string ClassicMapSceneName = "Classic";
-    private const string ClassicMapId = "SampleScene";
-    private const string BackroomMapSceneName = "backroom";
-    private const string BackroomMapId = "backroom";
-    private const string BrutilistVoidMapSceneName = "BrutalistVoid";
-    private const string BrutilistVoidMapId = "brutilistVoid";
-    private const string ParkourMapSceneName = "parkour";
-    private const string ParkourMapId = "parkour";
-    private const string PlaygroundMapSceneName = "PlayGround";
-    private const string PlaygroundMapId = "playground";
-    private const string VitaminBMapSceneName = "Vitamin_B";
-    private const string VitaminBMapId = "Vitamin_B";
-    private const string VillageMapSceneName = "Village";
-    private const string VillageMapId = "vilage";
-    private const string BoomBoomMapSceneName = "Boom Boom";
-    private const string BoomBoomMapId = "boomBoom";
-    private const string DesertMapSceneName = "Desert";
-    private const string DesertMapId = "desert";
-    private const string LivingRoomMapSceneName = "Living Room";
-    private const string LivingRoomMapId = "livingRoom";
-    private const string Desert2MapSceneName = "Desert 2";
-    private const string Desert2MapId = "desert2";
-    private const string BlocksMapSceneName = "Blocks";
-    private const string BlocksMapId = "blocks";
-    private const string SciFiMapSceneName = "Sci-Fi";
-    private const string SciFiMapId = "sciFi";
-    private const string AnotherCityMapSceneName = "Another City";
-    private const string AnotherCityMapId = "anotherCity";
-    private const string YardMapSceneName = "Yard";
-    private const string YardMapId = "yard";
-    private const string MazeMapSceneName = "Maze";
-    private const string MazeMapId = "maze";
-    private const string ArtGalleryMapSceneName = "Art Gallery";
-    private const string ArtGalleryMapId = "artGallery";
     private const float JoinTransitionFadeDuration = 0.24f;
     private const float JoinTransitionLeadTime = 0.12f;
     private const float JoinTransitionWatchdogSeconds = 70f;
@@ -197,10 +140,6 @@ public class LobbyUI : MonoBehaviour
     private string _pendingHoverLabelText = DefaultMenuHoverText;
     private float _currentHoverLabelOpacity;
     private float _targetHoverLabelOpacity;
-    private static bool s_pendingJoinAfterMapLoad;
-    private static string s_pendingJoinSceneName = string.Empty;
-    private static string s_pendingJoinMapId = string.Empty;
-    private static int s_pendingJoinSkinIndex;
     private const int DefaultOwnedSkinIndex = 0;
     private const string AuthTokenPlayerPrefsKey = "AuthToken";
     private RenderTexture _shopPreviewRenderTexture;
@@ -255,8 +194,6 @@ public class LobbyUI : MonoBehaviour
         _ = TryRestoreAccountSessionAsync();
 
         if (notificationText != null) notificationText.text = "";
-
-        ContinuePendingMapJoinIfNeeded();
 
         if (shouldAutoStartDefaultExperience)
         {
@@ -449,7 +386,6 @@ public class LobbyUI : MonoBehaviour
         menuPanel.SetActive(true);
         RefreshMenuUiBindings();
         hasAutoReadiedCurrentRoom = false;
-        SetMapSelectionVisible(false);
         SetLocalPlayerInput(false);
         SetLocalPlayerSpectating(false);
         SetStartButtonEnabled(true);
@@ -590,7 +526,12 @@ public class LobbyUI : MonoBehaviour
 
     public void OnStartClicked()
     {
-        SetMapSelectionVisible(true);
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.UseServerRandomMap();
+        }
+
+        StartSelectedMapJoin();
     }
 
     private async void StartSelectedMapJoin()
@@ -759,7 +700,6 @@ public class LobbyUI : MonoBehaviour
     {
         _pendingSpectateJoin = false;
         _isSpectatingFromMenu = false;
-        SetMapSelectionVisible(false);
         SetShopVisible(false);
         if (menuPanel != null) menuPanel.SetActive(false);
         SetJoinTransitionVisible(false);
@@ -830,25 +770,6 @@ public class LobbyUI : MonoBehaviour
         _inventoryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("inventory-button");
         _spectateButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("spectate-button");
         _comingSoonCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("coming-soon-close-button");
-        _mapRandomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-random-button");
-        _mapClassicButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-classic-button");
-        _mapBackroomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-backroom-button");
-        _mapBrutilistVoidButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-brutilistvoid-button");
-        _mapParkourButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-parkour-button");
-        _mapPlaygroundButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-playground-button");
-        _mapVitaminBButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-vitaminb-button");
-        _mapVillageButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-village-button");
-        _mapBoomBoomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-boomboom-button");
-        _mapDesertButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-desert-button");
-        _mapLivingRoomButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-livingroom-button");
-        _mapDesert2Button = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-desert2-button");
-        _mapBlocksButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-blocks-button");
-        _mapSciFiButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-scifi-button");
-        _mapAnotherCityButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-anothercity-button");
-        _mapYardButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-yard-button");
-        _mapMazeButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-maze-button");
-        _mapArtGalleryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-artgallery-button");
-        _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
         _menuHoverLabel = _menuDocument.rootVisualElement?.Q<Label>("menu-hover-label");
@@ -870,8 +791,6 @@ public class LobbyUI : MonoBehaviour
         _loginCard = _menuDocument.rootVisualElement?.Q<VisualElement>("login-card");
         _comingSoonOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("coming-soon-overlay");
         _shopOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-overlay");
-        _mapSelectionOverlay = _menuDocument.rootVisualElement?.Q<VisualElement>("map-selection-overlay");
-        _mapSelectionCard = _menuDocument.rootVisualElement?.Q<VisualElement>("map-selection-card");
         _shopHomeView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-home-view");
         _shopSkinsView = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-skins-view");
         _shopPreviewPanel = _menuDocument.rootVisualElement?.Q<VisualElement>("shop-preview-panel");
@@ -887,12 +806,10 @@ public class LobbyUI : MonoBehaviour
         _settingsPopupVisible = false;
         _loginPopupVisible = false;
         _shopVisible = false;
-        _mapSelectionVisible = false;
         _shopPage = ShopPage.Home;
         SetSettingsPopupVisible(false);
         SetLoginPopupVisible(false);
         SetShopVisible(false);
-        SetMapSelectionVisible(false);
         BindShopPreviewEvents();
 
         if (_loginPasswordField != null)
@@ -1013,90 +930,6 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked += HandleComingSoonCloseButtonClicked;
         }
-        if (_mapRandomButton != null)
-        {
-            _mapRandomButton.clicked += HandleRandomMapButtonClicked;
-        }
-        if (_mapClassicButton != null)
-        {
-            _mapClassicButton.clicked += HandleClassicMapButtonClicked;
-        }
-        if (_mapBackroomButton != null)
-        {
-            _mapBackroomButton.clicked += HandleBackroomMapButtonClicked;
-        }
-        if (_mapBrutilistVoidButton != null)
-        {
-            _mapBrutilistVoidButton.clicked += HandleBrutilistVoidMapButtonClicked;
-        }
-        if (_mapParkourButton != null)
-        {
-            _mapParkourButton.clicked += HandleParkourMapButtonClicked;
-        }
-        if (_mapPlaygroundButton != null)
-        {
-            _mapPlaygroundButton.clicked += HandlePlaygroundMapButtonClicked;
-        }
-        if (_mapVitaminBButton != null)
-        {
-            _mapVitaminBButton.clicked += HandleVitaminBMapButtonClicked;
-        }
-        if (_mapVillageButton != null)
-        {
-            _mapVillageButton.clicked += HandleVillageMapButtonClicked;
-        }
-        if (_mapBoomBoomButton != null)
-        {
-            _mapBoomBoomButton.clicked += HandleBoomBoomMapButtonClicked;
-        }
-        if (_mapDesertButton != null)
-        {
-            _mapDesertButton.clicked += HandleDesertMapButtonClicked;
-        }
-        if (_mapLivingRoomButton != null)
-        {
-            _mapLivingRoomButton.clicked += HandleLivingRoomMapButtonClicked;
-        }
-        if (_mapDesert2Button != null)
-        {
-            _mapDesert2Button.clicked += HandleDesert2MapButtonClicked;
-        }
-        if (_mapBlocksButton != null)
-        {
-            _mapBlocksButton.clicked += HandleBlocksMapButtonClicked;
-        }
-        if (_mapSciFiButton != null)
-        {
-            _mapSciFiButton.clicked += HandleSciFiMapButtonClicked;
-        }
-        if (_mapAnotherCityButton != null)
-        {
-            _mapAnotherCityButton.clicked += HandleAnotherCityMapButtonClicked;
-        }
-        if (_mapYardButton != null)
-        {
-            _mapYardButton.clicked += HandleYardMapButtonClicked;
-        }
-        if (_mapMazeButton != null)
-        {
-            _mapMazeButton.clicked += HandleMazeMapButtonClicked;
-        }
-        if (_mapArtGalleryButton != null)
-        {
-            _mapArtGalleryButton.clicked += HandleArtGalleryMapButtonClicked;
-        }
-        if (_mapSelectionCloseButton != null)
-        {
-            _mapSelectionCloseButton.clicked += HandleMapSelectionCloseButtonClicked;
-        }
-        if (_mapSelectionOverlay != null)
-        {
-            _mapSelectionOverlay.RegisterCallback<ClickEvent>(HandleMapSelectionOverlayClicked);
-        }
-        if (_mapSelectionCard != null)
-        {
-            _mapSelectionCard.RegisterCallback<ClickEvent>(HandleMapSelectionCardClicked);
-        }
         BindHoverEffects();
         BindPlaceholderActions();
         _menuEventsBound = true;
@@ -1194,90 +1027,6 @@ public class LobbyUI : MonoBehaviour
         {
             _comingSoonCloseButton.clicked -= HandleComingSoonCloseButtonClicked;
         }
-        if (_mapRandomButton != null)
-        {
-            _mapRandomButton.clicked -= HandleRandomMapButtonClicked;
-        }
-        if (_mapClassicButton != null)
-        {
-            _mapClassicButton.clicked -= HandleClassicMapButtonClicked;
-        }
-        if (_mapBackroomButton != null)
-        {
-            _mapBackroomButton.clicked -= HandleBackroomMapButtonClicked;
-        }
-        if (_mapBrutilistVoidButton != null)
-        {
-            _mapBrutilistVoidButton.clicked -= HandleBrutilistVoidMapButtonClicked;
-        }
-        if (_mapParkourButton != null)
-        {
-            _mapParkourButton.clicked -= HandleParkourMapButtonClicked;
-        }
-        if (_mapPlaygroundButton != null)
-        {
-            _mapPlaygroundButton.clicked -= HandlePlaygroundMapButtonClicked;
-        }
-        if (_mapVitaminBButton != null)
-        {
-            _mapVitaminBButton.clicked -= HandleVitaminBMapButtonClicked;
-        }
-        if (_mapVillageButton != null)
-        {
-            _mapVillageButton.clicked -= HandleVillageMapButtonClicked;
-        }
-        if (_mapBoomBoomButton != null)
-        {
-            _mapBoomBoomButton.clicked -= HandleBoomBoomMapButtonClicked;
-        }
-        if (_mapDesertButton != null)
-        {
-            _mapDesertButton.clicked -= HandleDesertMapButtonClicked;
-        }
-        if (_mapLivingRoomButton != null)
-        {
-            _mapLivingRoomButton.clicked -= HandleLivingRoomMapButtonClicked;
-        }
-        if (_mapDesert2Button != null)
-        {
-            _mapDesert2Button.clicked -= HandleDesert2MapButtonClicked;
-        }
-        if (_mapBlocksButton != null)
-        {
-            _mapBlocksButton.clicked -= HandleBlocksMapButtonClicked;
-        }
-        if (_mapSciFiButton != null)
-        {
-            _mapSciFiButton.clicked -= HandleSciFiMapButtonClicked;
-        }
-        if (_mapAnotherCityButton != null)
-        {
-            _mapAnotherCityButton.clicked -= HandleAnotherCityMapButtonClicked;
-        }
-        if (_mapYardButton != null)
-        {
-            _mapYardButton.clicked -= HandleYardMapButtonClicked;
-        }
-        if (_mapMazeButton != null)
-        {
-            _mapMazeButton.clicked -= HandleMazeMapButtonClicked;
-        }
-        if (_mapArtGalleryButton != null)
-        {
-            _mapArtGalleryButton.clicked -= HandleArtGalleryMapButtonClicked;
-        }
-        if (_mapSelectionCloseButton != null)
-        {
-            _mapSelectionCloseButton.clicked -= HandleMapSelectionCloseButtonClicked;
-        }
-        if (_mapSelectionOverlay != null)
-        {
-            _mapSelectionOverlay.UnregisterCallback<ClickEvent>(HandleMapSelectionOverlayClicked);
-        }
-        if (_mapSelectionCard != null)
-        {
-            _mapSelectionCard.UnregisterCallback<ClickEvent>(HandleMapSelectionCardClicked);
-        }
         UnbindShopPreviewEvents();
         UnbindPlaceholderActions();
         UnbindHoverEffects();
@@ -1292,202 +1041,12 @@ public class LobbyUI : MonoBehaviour
             return;
         }
 
-        SetMapSelectionVisible(true);
-    }
-
-    private void HandleRandomMapButtonClicked()
-    {
-        SetMapSelectionVisible(false);
         if (NetworkManager.Instance != null)
         {
             NetworkManager.Instance.UseServerRandomMap();
         }
+
         StartSelectedMapJoin();
-    }
-
-    private void HandleClassicMapButtonClicked()
-    {
-        BeginJoinForMap(ClassicMapSceneName, ClassicMapId);
-    }
-
-    private void HandleBackroomMapButtonClicked()
-    {
-        BeginJoinForMap(BackroomMapSceneName, BackroomMapId);
-    }
-
-    private void HandleParkourMapButtonClicked()
-    {
-        BeginJoinForMap(ParkourMapSceneName, ParkourMapId);
-    }
-
-    private void HandlePlaygroundMapButtonClicked()
-    {
-        BeginJoinForMap(PlaygroundMapSceneName, PlaygroundMapId);
-    }
-
-    private void HandleVitaminBMapButtonClicked()
-    {
-        BeginJoinForMap(VitaminBMapSceneName, VitaminBMapId);
-    }
-
-    private void HandleVillageMapButtonClicked()
-    {
-        BeginJoinForMap(VillageMapSceneName, VillageMapId);
-    }
-
-    private void HandleBoomBoomMapButtonClicked()
-    {
-        BeginJoinForMap(BoomBoomMapSceneName, BoomBoomMapId);
-    }
-
-    private void HandleDesertMapButtonClicked()
-    {
-        BeginJoinForMap(DesertMapSceneName, DesertMapId);
-    }
-
-    private void HandleLivingRoomMapButtonClicked()
-    {
-        BeginJoinForMap(LivingRoomMapSceneName, LivingRoomMapId);
-    }
-
-    private void HandleDesert2MapButtonClicked()
-    {
-        BeginJoinForMap(Desert2MapSceneName, Desert2MapId);
-    }
-
-    private void HandleBlocksMapButtonClicked()
-    {
-        BeginJoinForMap(BlocksMapSceneName, BlocksMapId);
-    }
-
-    private void HandleSciFiMapButtonClicked()
-    {
-        BeginJoinForMap(SciFiMapSceneName, SciFiMapId);
-    }
-
-    private void HandleAnotherCityMapButtonClicked()
-    {
-        BeginJoinForMap(AnotherCityMapSceneName, AnotherCityMapId);
-    }
-
-    private void HandleYardMapButtonClicked()
-    {
-        BeginJoinForMap(YardMapSceneName, YardMapId);
-    }
-
-    private void HandleMazeMapButtonClicked()
-    {
-        BeginJoinForMap(MazeMapSceneName, MazeMapId);
-    }
-
-    private void HandleArtGalleryMapButtonClicked()
-    {
-        BeginJoinForMap(ArtGalleryMapSceneName, ArtGalleryMapId);
-    }
-
-    private void HandleBrutilistVoidMapButtonClicked()
-    {
-        BeginJoinForMap(BrutilistVoidMapSceneName, BrutilistVoidMapId);
-    }
-
-    private void HandleMapSelectionCloseButtonClicked()
-    {
-        SetMapSelectionVisible(false);
-    }
-
-    private void HandleMapSelectionOverlayClicked(ClickEvent evt)
-    {
-        if (evt.target == _mapSelectionOverlay)
-        {
-            SetMapSelectionVisible(false);
-        }
-    }
-
-    private void HandleMapSelectionCardClicked(ClickEvent evt)
-    {
-        evt.StopPropagation();
-    }
-
-    private void BeginJoinForMap(string sceneName, string mapId)
-    {
-        if (string.IsNullOrWhiteSpace(sceneName))
-        {
-            ShowNotification("Map scene is missing.");
-            return;
-        }
-
-        if (!CanLoadMapScene(sceneName))
-        {
-            ShowNotification($"Map scene '{sceneName}' is not available in this build.");
-            return;
-        }
-
-        if (NetworkManager.Instance != null && NetworkManager.Instance.Room != null)
-        {
-            OnGameStarted();
-            return;
-        }
-
-        SetMapSelectionVisible(false);
-        currentSkinIndex = GetValidOwnedSkinIndex(currentSkinIndex);
-        s_pendingJoinSceneName = sceneName;
-        s_pendingJoinMapId = string.IsNullOrWhiteSpace(mapId) ? sceneName : mapId.Trim();
-        s_pendingJoinSkinIndex = currentSkinIndex;
-
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.SetSelectedMapId(s_pendingJoinMapId);
-        }
-
-        if (string.Equals(SceneManager.GetActiveScene().name, sceneName, StringComparison.Ordinal))
-        {
-            s_pendingJoinAfterMapLoad = false;
-            StartSelectedMapJoin();
-            return;
-        }
-
-        s_pendingJoinAfterMapLoad = true;
-        SetStartButtonEnabled(false);
-        if (_mapLoadCoroutine != null)
-        {
-            StopCoroutine(_mapLoadCoroutine);
-        }
-
-        _mapLoadCoroutine = StartCoroutine(LoadSelectedMapScene(sceneName));
-    }
-
-    private IEnumerator LoadSelectedMapScene(string sceneName)
-    {
-        SetJoinTransitionVisible(true);
-        yield return new WaitForSecondsRealtime(JoinTransitionLeadTime);
-
-        AsyncOperation loadOperation = null;
-        Exception loadException = null;
-
-        try
-        {
-            loadOperation = SceneManager.LoadSceneAsync(sceneName);
-        }
-        catch (Exception exception)
-        {
-            loadException = exception;
-        }
-
-        if (loadException != null || loadOperation == null)
-        {
-            s_pendingJoinAfterMapLoad = false;
-            SetJoinTransitionVisible(false);
-            SetStartButtonEnabled(true);
-            ShowNotification(loadException != null
-                ? $"Map load failed: {loadException.Message}"
-                : $"Map scene '{sceneName}' is not in Build Settings.");
-            yield break;
-        }
-
-        while (!loadOperation.isDone)
-        {
-            yield return null;
-        }
     }
 
     private static void EnsureJoinTransitionOverlay()
@@ -1593,122 +1152,6 @@ public class LobbyUI : MonoBehaviour
     internal static void UpdateJoinTransitionOverlay()
     {
         TickJoinTransitionOverlay();
-    }
-
-    private void ContinuePendingMapJoinIfNeeded()
-    {
-        if (!s_pendingJoinAfterMapLoad)
-        {
-            return;
-        }
-
-        if (!string.Equals(SceneManager.GetActiveScene().name, s_pendingJoinSceneName, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        s_pendingJoinAfterMapLoad = false;
-        currentSkinIndex = GetValidOwnedSkinIndex(s_pendingJoinSkinIndex);
-        _shopSelectedSkinIndex = currentSkinIndex;
-
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.SetSelectedMapId(s_pendingJoinMapId);
-        }
-
-        StartSelectedMapJoin();
-    }
-
-    private static bool CanLoadMapScene(string sceneName)
-    {
-        return !string.IsNullOrWhiteSpace(sceneName)
-            && Application.CanStreamedLevelBeLoaded(sceneName);
-    }
-
-    private static string GetActiveSceneMapId()
-    {
-        string sceneName = SceneManager.GetActiveScene().name;
-        if (string.Equals(sceneName, BackroomMapSceneName, StringComparison.Ordinal))
-        {
-            return BackroomMapId;
-        }
-
-        if (string.Equals(sceneName, BrutilistVoidMapSceneName, StringComparison.Ordinal))
-        {
-            return BrutilistVoidMapId;
-        }
-        
-        if (string.Equals(sceneName, ParkourMapSceneName, StringComparison.Ordinal))
-        {
-            return ParkourMapId;
-        }
-
-        if (string.Equals(sceneName, PlaygroundMapSceneName, StringComparison.Ordinal))
-        {
-            return PlaygroundMapId;
-        }
-
-        if (string.Equals(sceneName, VitaminBMapSceneName, StringComparison.Ordinal))
-        {
-            return VitaminBMapId;
-        }
-
-        if (string.Equals(sceneName, VillageMapSceneName, StringComparison.Ordinal))
-        {
-            return VillageMapId;
-        }
-
-        if (string.Equals(sceneName, BoomBoomMapSceneName, StringComparison.Ordinal))
-        {
-            return BoomBoomMapId;
-        }
-
-        if (string.Equals(sceneName, DesertMapSceneName, StringComparison.Ordinal))
-        {
-            return DesertMapId;
-        }
-
-        if (string.Equals(sceneName, LivingRoomMapSceneName, StringComparison.Ordinal))
-        {
-            return LivingRoomMapId;
-        }
-
-        if (string.Equals(sceneName, Desert2MapSceneName, StringComparison.Ordinal))
-        {
-            return Desert2MapId;
-        }
-
-        if (string.Equals(sceneName, BlocksMapSceneName, StringComparison.Ordinal))
-        {
-            return BlocksMapId;
-        }
-
-        if (string.Equals(sceneName, SciFiMapSceneName, StringComparison.Ordinal))
-        {
-            return SciFiMapId;
-        }
-
-        if (string.Equals(sceneName, AnotherCityMapSceneName, StringComparison.Ordinal))
-        {
-            return AnotherCityMapId;
-        }
-
-        if (string.Equals(sceneName, YardMapSceneName, StringComparison.Ordinal))
-        {
-            return YardMapId;
-        }
-
-        if (string.Equals(sceneName, MazeMapSceneName, StringComparison.Ordinal))
-        {
-            return MazeMapId;
-        }
-
-        if (string.Equals(sceneName, ArtGalleryMapSceneName, StringComparison.Ordinal))
-        {
-            return ArtGalleryMapId;
-        }
-
-        return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
     }
 
     private void HandleOfflineButtonClicked()
@@ -2116,7 +1559,7 @@ public class LobbyUI : MonoBehaviour
 
     private void ConfigureMenuButtonDescriptions()
     {
-        SetMenuButtonDescription(_startButton, "Pick a map and join a game");
+        SetMenuButtonDescription(_startButton, "Join a game");
         SetMenuButtonDescription(_shopButton, "Browse the shop");
         SetMenuButtonDescription(_offlineButton, "Start a local offline match with bots");
         SetMenuButtonDescription(_shootingButton, "Start the same local mode with AK47 movement animations");
@@ -2129,23 +1572,6 @@ public class LobbyUI : MonoBehaviour
         SetMenuButtonDescription(_inventoryButton, "Open your inventory");
         SetMenuButtonDescription(_spectateButton, "Watch the current match");
         SetMenuButtonDescription(_settingsButton, "Adjust graphics and menu settings");
-        SetMenuButtonDescription(_mapRandomButton, "Join a random map selected by the server");
-        SetMenuButtonDescription(_mapClassicButton, "Join the classic map");
-        SetMenuButtonDescription(_mapBackroomButton, "Join the Backroom map");
-        SetMenuButtonDescription(_mapBrutilistVoidButton, "Join the Brutilist Void map");
-        SetMenuButtonDescription(_mapParkourButton, "Join the Parkour map");
-        SetMenuButtonDescription(_mapPlaygroundButton, "Join the Playground map");
-        SetMenuButtonDescription(_mapVitaminBButton, "Join the Vitamin B map");
-        SetMenuButtonDescription(_mapVillageButton, "Join the Village map");
-        SetMenuButtonDescription(_mapBoomBoomButton, "Join the Boom Boom map");
-        SetMenuButtonDescription(_mapDesertButton, "Join the Desert map");
-        SetMenuButtonDescription(_mapLivingRoomButton, "Join the Living Room map");
-        SetMenuButtonDescription(_mapDesert2Button, "Join the Desert 2 map");
-        SetMenuButtonDescription(_mapBlocksButton, "Join the Blocks map");
-        SetMenuButtonDescription(_mapSciFiButton, "Join the Sci-Fi map");
-        SetMenuButtonDescription(_mapAnotherCityButton, "Join the Another City map");
-        SetMenuButtonDescription(_mapYardButton, "Join the Yard map");
-        SetMenuButtonDescription(_mapMazeButton, "Join the Maze map");
         _pendingHoverLabelText = DefaultMenuHoverText;
     }
 
@@ -2177,23 +1603,6 @@ public class LobbyUI : MonoBehaviour
         RegisterHoverButton(_shopRobuxButton);
         RegisterHoverButton(_inventoryButton);
         RegisterHoverButton(_spectateButton);
-        RegisterHoverButton(_mapRandomButton);
-        RegisterHoverButton(_mapClassicButton);
-        RegisterHoverButton(_mapBackroomButton);
-        RegisterHoverButton(_mapBrutilistVoidButton);
-        RegisterHoverButton(_mapParkourButton);
-        RegisterHoverButton(_mapPlaygroundButton);
-        RegisterHoverButton(_mapVitaminBButton);
-        RegisterHoverButton(_mapVillageButton);
-        RegisterHoverButton(_mapBoomBoomButton);
-        RegisterHoverButton(_mapDesertButton);
-        RegisterHoverButton(_mapLivingRoomButton);
-        RegisterHoverButton(_mapDesert2Button);
-        RegisterHoverButton(_mapBlocksButton);
-        RegisterHoverButton(_mapSciFiButton);
-        RegisterHoverButton(_mapAnotherCityButton);
-        RegisterHoverButton(_mapYardButton);
-        RegisterHoverButton(_mapMazeButton);
     }
 
     private void UnbindHoverEffects()
@@ -2586,29 +1995,6 @@ public class LobbyUI : MonoBehaviour
         if (visible)
         {
             RefreshGraphicsSettingsUi();
-        }
-    }
-
-    private void SetMapSelectionVisible(bool visible)
-    {
-        _mapSelectionVisible = visible;
-
-        if (visible)
-        {
-            SetShopVisible(false);
-            SetSettingsPopupVisible(false);
-            SetLoginPopupVisible(false);
-            HideComingSoonPopup();
-        }
-
-        if (_mapSelectionOverlay != null)
-        {
-            _mapSelectionOverlay.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
-            _mapSelectionOverlay.pickingMode = visible ? PickingMode.Position : PickingMode.Ignore;
-            if (visible)
-            {
-                _mapSelectionOverlay.BringToFront();
-            }
         }
     }
 
