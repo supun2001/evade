@@ -59,3 +59,5 @@ MonoBehaviour:
     scene: {fileID: 102900000, guid: 92560e852b4044da8ac3296b693c8a0c, type: 3}
   - displayName: Mayday
     scene: {fileID: 102900000, guid: 587038644cdbe42a18bef7290a6c1270, type: 3}
+  - displayName: Art Gallery
+    scene: {fileID: 102900000, guid: 45f5e6846e2744153879f0c36e337902, type: 3}

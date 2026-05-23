@@ -1445,7 +1445,7 @@ public class OfflineModeManager : MonoBehaviour
         ResetOfflineNextbots(active: false);
 
         // Generate candidates
-        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "playground", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "desert2", "blocks", "sciFi", "anotherCity" };
+        List<string> allMaps = new List<string> { "SampleScene", "backroom", "brutilistVoid", "parkour", "playground", "Vitamin_B", "vilage", "boomBoom", "desert", "livingRoom", "desert2", "blocks", "sciFi", "anotherCity", "yard", "maze", "artGallery" };
         List<MapVoteCandidateMessageData> candidates = new List<MapVoteCandidateMessageData>();
 
         // Shuffle and pick 3
@@ -1568,6 +1568,9 @@ public class OfflineModeManager : MonoBehaviour
             case "blocks": return "Blocks";
             case "sciFi": return "Sci-Fi";
             case "anotherCity": return "Another City";
+            case "yard": return "Yard";
+            case "maze": return "Maze";
+            case "artGallery": return "Art Gallery";
             default: return mapId;
         }
     }
@@ -1590,6 +1593,9 @@ public class OfflineModeManager : MonoBehaviour
             case "blocks": return "NORMAL";
             case "sciFi": return "HARD";
             case "anotherCity": return "NORMAL";
+            case "yard": return "NORMAL";
+            case "maze": return "HARD";
+            case "artGallery": return "NORMAL";
             default: return "NORMAL";
         }
     }
@@ -1612,6 +1618,9 @@ public class OfflineModeManager : MonoBehaviour
             case "blocks": return "Blocks";
             case "sciFi": return "Sci-Fi";
             case "anotherCity": return "Another City";
+            case "yard": return "Yard";
+            case "maze": return "Maze";
+            case "artGallery": return "Art Gallery";
             default: return mapId;
         }
     }

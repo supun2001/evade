@@ -90,6 +90,7 @@ public class LobbyUI : MonoBehaviour
     private UIToolkitButton _mapAnotherCityButton;
     private UIToolkitButton _mapYardButton;
     private UIToolkitButton _mapMazeButton;
+    private UIToolkitButton _mapArtGalleryButton;
     private UIToolkitButton _mapSelectionCloseButton;
     private Label _graphicsCurrentLabel;
     private Label _menuHoverLabel;
@@ -179,6 +180,8 @@ public class LobbyUI : MonoBehaviour
     private const string YardMapId = "yard";
     private const string MazeMapSceneName = "Maze";
     private const string MazeMapId = "maze";
+    private const string ArtGalleryMapSceneName = "Art Gallery";
+    private const string ArtGalleryMapId = "artGallery";
     private const float JoinTransitionFadeDuration = 0.24f;
     private const float JoinTransitionLeadTime = 0.12f;
     private const float JoinTransitionWatchdogSeconds = 70f;
@@ -844,6 +847,7 @@ public class LobbyUI : MonoBehaviour
         _mapAnotherCityButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-anothercity-button");
         _mapYardButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-yard-button");
         _mapMazeButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-maze-button");
+        _mapArtGalleryButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-artgallery-button");
         _mapSelectionCloseButton = _menuDocument.rootVisualElement?.Q<UIToolkitButton>("map-selection-close-button");
         _graphicsCurrentLabel = _menuDocument.rootVisualElement?.Q<Label>("graphics-current-label");
         _graphicsVolumeSlider = _menuDocument.rootVisualElement?.Q<SliderInt>("graphics-volume-slider");
@@ -1077,6 +1081,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapMazeButton.clicked += HandleMazeMapButtonClicked;
         }
+        if (_mapArtGalleryButton != null)
+        {
+            _mapArtGalleryButton.clicked += HandleArtGalleryMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked += HandleMapSelectionCloseButtonClicked;
@@ -1254,6 +1262,10 @@ public class LobbyUI : MonoBehaviour
         {
             _mapMazeButton.clicked -= HandleMazeMapButtonClicked;
         }
+        if (_mapArtGalleryButton != null)
+        {
+            _mapArtGalleryButton.clicked -= HandleArtGalleryMapButtonClicked;
+        }
         if (_mapSelectionCloseButton != null)
         {
             _mapSelectionCloseButton.clicked -= HandleMapSelectionCloseButtonClicked;
@@ -1366,6 +1378,11 @@ public class LobbyUI : MonoBehaviour
     private void HandleMazeMapButtonClicked()
     {
         BeginJoinForMap(MazeMapSceneName, MazeMapId);
+    }
+
+    private void HandleArtGalleryMapButtonClicked()
+    {
+        BeginJoinForMap(ArtGalleryMapSceneName, ArtGalleryMapId);
     }
 
     private void HandleBrutilistVoidMapButtonClicked()
@@ -1684,6 +1701,11 @@ public class LobbyUI : MonoBehaviour
         if (string.Equals(sceneName, MazeMapSceneName, StringComparison.Ordinal))
         {
             return MazeMapId;
+        }
+
+        if (string.Equals(sceneName, ArtGalleryMapSceneName, StringComparison.Ordinal))
+        {
+            return ArtGalleryMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;

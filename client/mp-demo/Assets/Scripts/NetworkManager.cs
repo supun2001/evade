@@ -106,6 +106,10 @@ public class NetworkManager : MonoBehaviour
     private const string YardMapSceneName = "Yard";
     private const string MazeMapId = "maze";
     private const string MazeMapSceneName = "Maze";
+    private const string FacadeMapId = "facade";
+    private const string FacadeMapSceneName = "Facade";
+    private const string ArtGalleryMapId = "artGallery";
+    private const string ArtGalleryMapSceneName = "Art Gallery";
     private const float MinServerObstacleThickness = 0.25f;
     private const float MinServerObstacleMajorSpan = 1.25f;
     private const float MinServerObstacleFootprintArea = 1.0f;
@@ -320,7 +324,9 @@ public class NetworkManager : MonoBehaviour
             || string.Equals(mapId, SciFiMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, AnotherCityMapId, StringComparison.OrdinalIgnoreCase)
             || string.Equals(mapId, YardMapId, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mapId, MazeMapId, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(mapId, MazeMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, FacadeMapId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mapId, ArtGalleryMapId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetSceneNameForMapId(string mapId)
@@ -398,6 +404,16 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(mapId, MazeMapId, StringComparison.OrdinalIgnoreCase))
         {
             return MazeMapSceneName;
+        }
+
+        if (string.Equals(mapId, FacadeMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return FacadeMapSceneName;
+        }
+
+        if (string.Equals(mapId, ArtGalleryMapId, StringComparison.OrdinalIgnoreCase))
+        {
+            return ArtGalleryMapSceneName;
         }
 
         return ClassicMapSceneName;
@@ -478,6 +494,16 @@ public class NetworkManager : MonoBehaviour
         if (string.Equals(sceneName, MazeMapSceneName, StringComparison.OrdinalIgnoreCase))
         {
             return MazeMapId;
+        }
+
+        if (string.Equals(sceneName, FacadeMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return FacadeMapId;
+        }
+
+        if (string.Equals(sceneName, ArtGalleryMapSceneName, StringComparison.OrdinalIgnoreCase))
+        {
+            return ArtGalleryMapId;
         }
 
         return string.IsNullOrWhiteSpace(sceneName) ? ClassicMapId : sceneName;
