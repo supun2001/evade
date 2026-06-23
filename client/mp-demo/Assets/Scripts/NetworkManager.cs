@@ -65,7 +65,7 @@ public struct FloorHeightSampleConfig
 public class NetworkManager : MonoBehaviour
 {
     private const string DefaultLocalServerUrl = "ws://localhost:2567";
-    private const string HostedServerUrl = "wss://didactic-fishstick-q9gp7wg5wr43956q-2567.app.github.dev";
+    private const string HostedServerUrl = "wss://evade-6o6d.onrender.com";
     private const string ServerUrlOverridePlayerPrefsKey = "NetworkManager.ServerUrlOverride";
     private const string ServerUrlOverrideQueryParameterName = "server";
     private const string ServerUrlOverrideCommandLineArgumentName = "-serverUrl";

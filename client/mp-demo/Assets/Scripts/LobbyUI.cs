@@ -2926,7 +2926,7 @@ public class LobbyUI : MonoBehaviour
     {
         if (NetworkManager.Instance == null || string.IsNullOrWhiteSpace(NetworkManager.Instance.serverUrl))
         {
-            return "http://localhost:2567";
+            return "https://evade-6o6d.onrender.com";
         }
 
         string url = NetworkManager.Instance.serverUrl.Trim().TrimEnd('/');
